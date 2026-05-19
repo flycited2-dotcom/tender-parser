@@ -46,7 +46,6 @@ def _exclude(tender: TenderRecord, reason: str) -> TenderRecord:
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
-    region_searchable = normalize_text(" ".join([tender.region or "", tender.customer or "", tender.raw_text]))
 
     stop_term = _first_matching_term(searchable, STOP_TERMS)
     if stop_term:
@@ -58,7 +57,7 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if tender.deadline is None or tender.deadline <= current:
         return _exclude(tender, "срок подачи истек или не указан")
 
-    region = _first_matching_term(region_searchable, REGION_TERMS)
+    region = _first_matching_term(searchable, REGION_TERMS)
     if not region:
         return _exclude(tender, "регион не найден")
 

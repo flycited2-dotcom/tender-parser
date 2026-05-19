@@ -55,10 +55,23 @@ def test_evaluate_tender_excludes_expired_deadline() -> None:
 
 
 def test_evaluate_tender_excludes_missing_region() -> None:
-    result = evaluate_tender(make_tender(region="Москва", raw_text="Поставка МФУ"), now=NOW)
+    result = evaluate_tender(
+        make_tender(title="Поставка МФУ", region="Москва", raw_text="Поставка МФУ"),
+        now=NOW,
+    )
 
     assert result.filter_status == "excluded"
     assert "регион не найден" in result.exclude_reason
+
+
+def test_evaluate_tender_matches_region_from_title() -> None:
+    result = evaluate_tender(
+        make_tender(title="Поставка МФУ в Севастополь", region=None, raw_text="Поставка МФУ"),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert "регион: севастополь" in result.include_reason.lower()
 
 
 def test_evaluate_tender_clears_matched_metadata_when_excluded() -> None:
