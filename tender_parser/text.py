@@ -16,12 +16,16 @@ def parse_price_rub(value: str | None) -> float | None:
         return None
     if "₽" not in text and "руб" not in text:
         return None
-    cleaned = re.sub(r"[^\d,\.]", "", text)
-    if not cleaned:
+    match = re.search(r"\d[\d\s]*(?:[,.]\d+)?", text)
+    if not match:
         return None
+    cleaned = match.group(0).replace(" ", "")
     if "," in cleaned:
         cleaned = cleaned.replace(".", "").replace(",", ".")
-    return float(cleaned)
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
 
 
 def parse_deadline(value: str | None) -> datetime | None:
