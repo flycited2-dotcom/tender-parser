@@ -59,3 +59,19 @@ def test_evaluate_tender_excludes_missing_region() -> None:
 
     assert result.filter_status == "excluded"
     assert "регион не найден" in result.exclude_reason
+
+
+def test_evaluate_tender_clears_matched_metadata_when_excluded() -> None:
+    enriched = make_tender(
+        price=29_999.0,
+        category="Компьютерная техника и периферия",
+        include_reason="old include",
+        matched_terms=["мфу"],
+    )
+
+    result = evaluate_tender(enriched, now=NOW)
+
+    assert result.filter_status == "excluded"
+    assert result.category is None
+    assert result.include_reason == ""
+    assert result.matched_terms == []

@@ -32,6 +32,17 @@ def _matching_category(text: str) -> tuple[str | None, list[str]]:
     return None, []
 
 
+def _exclude(tender: TenderRecord, reason: str) -> TenderRecord:
+    return replace(
+        tender,
+        filter_status="excluded",
+        category=None,
+        include_reason="",
+        exclude_reason=reason,
+        matched_terms=[],
+    )
+
+
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
@@ -39,33 +50,21 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
 
     stop_term = _first_matching_term(searchable, STOP_TERMS)
     if stop_term:
-        return replace(
-            tender,
-            filter_status="excluded",
-            exclude_reason=f"стоп-тема: {stop_term}",
-        )
+        return _exclude(tender, f"стоп-тема: {stop_term}")
 
     if tender.price is None or tender.price < MIN_PRICE_RUB:
-        return replace(
-            tender,
-            filter_status="excluded",
-            exclude_reason=f"сумма меньше {MIN_PRICE_RUB} или не указана",
-        )
+        return _exclude(tender, f"сумма меньше {MIN_PRICE_RUB} или не указана")
 
     if tender.deadline is None or tender.deadline <= current:
-        return replace(
-            tender,
-            filter_status="excluded",
-            exclude_reason="срок подачи истек или не указан",
-        )
+        return _exclude(tender, "срок подачи истек или не указан")
 
     region = _first_matching_term(region_searchable, REGION_TERMS)
     if not region:
-        return replace(tender, filter_status="excluded", exclude_reason="регион не найден")
+        return _exclude(tender, "регион не найден")
 
     category, terms = _matching_category(searchable)
     if not category:
-        return replace(tender, filter_status="excluded", exclude_reason="категория интереса не найдена")
+        return _exclude(tender, "категория интереса не найдена")
 
     include_reason = (
         f"регион: {region}; категория: {category}; "
