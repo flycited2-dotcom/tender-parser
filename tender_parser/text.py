@@ -16,7 +16,7 @@ def parse_price_rub(value: str | None) -> float | None:
         return None
     if "₽" not in text and "руб" not in text:
         return None
-    match = re.search(r"\d[\d\s]*(?:[,.]\d+)?", text)
+    match = re.search(r"\d[\d\s.,]*\d", text)
     if not match:
         return None
     cleaned = match.group(0).replace(" ", "")

@@ -15,6 +15,10 @@ def test_parse_price_rub_accepts_rub_with_trailing_dot() -> None:
     assert parse_price_rub("1 234.56 руб.") == 1234.56
 
 
+def test_parse_price_rub_accepts_dot_thousands_and_comma_decimal() -> None:
+    assert parse_price_rub("1.234,56 руб.") == 1234.56
+
+
 def test_parse_price_rub_returns_none_for_missing_price() -> None:
     assert parse_price_rub("Без указания цены") is None
 
