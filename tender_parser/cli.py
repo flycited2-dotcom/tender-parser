@@ -63,8 +63,8 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     storage = TenderStorage(data_dir / "tenders.db")
     storage.upsert_many(evaluated)
 
-    matched = storage.fetch_by_status("matched")
-    excluded = storage.fetch_by_status("excluded")
+    matched = [tender for tender in evaluated if tender.filter_status == "matched"]
+    excluded = [tender for tender in evaluated if tender.filter_status == "excluded"]
 
     date_stamp = current_time.strftime("%Y-%m-%d")
     excel_path = export_excel(matched, excluded, exports_dir / f"tenders_{date_stamp}.xlsx")
