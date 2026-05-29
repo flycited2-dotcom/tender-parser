@@ -58,13 +58,18 @@ def _append_rows(sheet: Worksheet, tenders: list[TenderRecord]) -> None:
 
 
 def export_excel(
-    matched: list[TenderRecord], excluded: list[TenderRecord], output_path: Path
+    matched: list[TenderRecord],
+    review: list[TenderRecord],
+    excluded: list[TenderRecord],
+    output_path: Path,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
     matched_sheet = workbook.active
     matched_sheet.title = "Подходящие"
     _append_rows(matched_sheet, matched)
+    review_sheet = workbook.create_sheet("На проверку")
+    _append_rows(review_sheet, review)
     excluded_sheet = workbook.create_sheet("Отсеянные")
     _append_rows(excluded_sheet, excluded)
     workbook.save(output_path)

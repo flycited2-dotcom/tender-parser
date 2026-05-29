@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 
-FilterStatus = Literal["matched", "excluded"]
+FilterStatus = Literal["matched", "review", "excluded"]
 
 
 @dataclass(frozen=True)

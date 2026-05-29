@@ -54,14 +54,76 @@ def test_evaluate_tender_excludes_expired_deadline() -> None:
     assert "срок подачи истек" in result.exclude_reason
 
 
-def test_evaluate_tender_excludes_missing_region() -> None:
+def test_evaluate_tender_reviews_missing_region_for_interesting_category() -> None:
     result = evaluate_tender(
         make_tender(title="Поставка МФУ", region="Москва", raw_text="Поставка МФУ"),
         now=NOW,
     )
 
-    assert result.filter_status == "excluded"
+    assert result.filter_status == "review"
+    assert result.category == "Компьютерная техника и периферия"
     assert "регион не найден" in result.exclude_reason
+
+
+def test_evaluate_tender_reviews_missing_price_for_interesting_category_and_region() -> None:
+    result = evaluate_tender(make_tender(price=None), now=NOW)
+
+    assert result.filter_status == "review"
+    assert result.category == "Компьютерная техника и периферия"
+    assert "сумма не указана" in result.exclude_reason
+
+
+def test_evaluate_tender_does_not_treat_monitoring_as_monitor() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Мониторинг рынка цен в Республике Крым",
+            raw_text="Мониторинг рынка цен в Республике Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
+
+
+def test_evaluate_tender_does_not_treat_pipeline_as_wire() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка трубопроводов из стали в Республику Крым",
+            raw_text="Поставка трубопроводов из стали в Республику Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
+
+
+def test_evaluate_tender_excludes_filter_cartridges() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка фильтровальных картриджей в Республику Крым",
+            raw_text="Поставка фильтровальных картриджей в Республику Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_matches_actual_monitor_word() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка мониторов в Республику Крым",
+            raw_text="Поставка мониторов в Республику Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Компьютерная техника и периферия"
+    assert "монитор" in result.include_reason.lower()
 
 
 def test_evaluate_tender_matches_region_from_title() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import datetime
 
@@ -26,10 +27,21 @@ def _first_matching_term(text: str, terms: list[str]) -> str | None:
 
 def _matching_category(text: str) -> tuple[str | None, list[str]]:
     for category, terms in CATEGORY_KEYWORDS.items():
-        matches = [normalize_text(term) for term in terms if normalize_text(term) in text]
+        matches = [normalize_text(term) for term in terms if _category_term_matches(text, term)]
         if matches:
             return category, matches
     return None, []
+
+
+def _category_term_matches(text: str, term: str) -> bool:
+    normalized = normalize_text(term)
+    if not normalized:
+        return False
+    if " " not in normalized:
+        if normalized == "монитор":
+            return re.search(r"(?<![\w])монитор(?!инг)[\w-]*(?![\w])", text) is not None
+        return re.search(rf"(?<![\w]){re.escape(normalized)}[\w-]*(?![\w])", text) is not None
+    return normalized in text
 
 
 def _exclude(tender: TenderRecord, reason: str) -> TenderRecord:
@@ -43,6 +55,40 @@ def _exclude(tender: TenderRecord, reason: str) -> TenderRecord:
     )
 
 
+def _review(
+    tender: TenderRecord,
+    *,
+    category: str,
+    terms: list[str],
+    reason: str,
+    region: str | None,
+) -> TenderRecord:
+    return replace(
+        tender,
+        filter_status="review",
+        category=category,
+        include_reason=_include_reason(category, terms, region, tender.price),
+        exclude_reason=f"требуется проверка: {reason}",
+        matched_terms=terms,
+    )
+
+
+def _include_reason(
+    category: str,
+    terms: list[str],
+    region: str | None,
+    price: float | None,
+) -> str:
+    parts = []
+    if region:
+        parts.append(f"регион: {region}")
+    parts.append(f"категория: {category}")
+    parts.append(f"ключевые слова: {', '.join(terms)}")
+    parts.append(f"сумма: {price:.2f}" if price is not None else "сумма: не указана")
+    parts.append("срок подачи активен")
+    return "; ".join(parts)
+
+
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
@@ -51,24 +97,24 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if stop_term:
         return _exclude(tender, f"стоп-тема: {stop_term}")
 
-    if tender.price is None or tender.price < MIN_PRICE_RUB:
-        return _exclude(tender, f"сумма меньше {MIN_PRICE_RUB} или не указана")
-
     if tender.deadline is None or tender.deadline <= current:
         return _exclude(tender, "срок подачи истек или не указан")
-
-    region = _first_matching_term(searchable, REGION_TERMS)
-    if not region:
-        return _exclude(tender, "регион не найден")
 
     category, terms = _matching_category(searchable)
     if not category:
         return _exclude(tender, "категория интереса не найдена")
 
-    include_reason = (
-        f"регион: {region}; категория: {category}; "
-        f"ключевые слова: {', '.join(terms)}; сумма: {tender.price:.2f}; срок подачи активен"
-    )
+    region = _first_matching_term(searchable, REGION_TERMS)
+    if not region:
+        return _review(tender, category=category, terms=terms, reason="регион не найден", region=None)
+
+    if tender.price is None:
+        return _review(tender, category=category, terms=terms, reason="сумма не указана", region=region)
+
+    if tender.price < MIN_PRICE_RUB:
+        return _exclude(tender, f"сумма меньше {MIN_PRICE_RUB}")
+
+    include_reason = _include_reason(category, terms, region, tender.price)
     return replace(
         tender,
         filter_status="matched",
