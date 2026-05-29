@@ -137,6 +137,8 @@ RTS_MARKET_ENDPOINTS = [
 ]
 RTS_MAX_PAGES_PER_KEYWORD = 2
 HTTP_TIMEOUT_SECONDS = 25
+ETP_GPB_TIMEOUT_SECONDS = 8
+ETP_GPB_MAX_ERRORS = 2
 
 ROSTENDER_SEARCH_QUERIES = [
     "мфу крым",
@@ -160,3 +162,25 @@ ROSTENDER_SEARCH_QUERIES = [
     "мфу запорожская область",
     "принтер запорожская область",
 ]
+
+ETP_GPB_SEARCH_QUERIES = [
+    "мфу крым",
+    "принтер крым",
+    "оргтехника крым",
+    "картридж крым",
+    "компьютерная техника крым",
+    "ноутбук крым",
+    "кондиционер крым",
+    "климатическое оборудование крым",
+    "канцелярские товары крым",
+    "сейф крым",
+    "стеллаж крым",
+    "мфу севастополь",
+    "принтер севастополь",
+    "оргтехника севастополь",
+    "кондиционер севастополь",
+]
+
+TENDER_PRO_API_KEY = "1732ede4de680a0c93d81f01d7bac7d1"
+TENDER_PRO_SET_ID = "7964"
+TENDER_PRO_MAX_ROWS = 200

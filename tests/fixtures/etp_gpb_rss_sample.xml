@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ЭТП ГПБ - актуальные процедуры</title>
+    <item>
+      <title>Поставка многофункциональных устройств для Республики Крым</title>
+      <link>https://etpgpb.ru/procedure/tender/etp/123456-postavka-mfu/</link>
+      <guid>https://etpgpb.ru/procedure/tender/etp/123456-postavka-mfu/</guid>
+      <pubDate>Fri, 29 May 2026 09:30:00 +0300</pubDate>
+      <description><![CDATA[
+        <p>Номер процедуры: 123456</p>
+        <p>Организатор: ООО "Крымский заказчик"</p>
+        <p>Регион: Республика Крым</p>
+        <p>Начальная цена: 420 000,00 руб.</p>
+        <p>Окончание подачи заявок: 04.06.2026 10:00</p>
+      ]]></description>
+    </item>
+    <item>
+      <title>Техническое обслуживание кондиционеров</title>
+      <link>https://etpgpb.ru/procedure/tender/etp/789012-service-ac/</link>
+      <description><![CDATA[
+        <p>Номер процедуры: 789012</p>
+        <p>Заказчик: ГБУ "Севастопольский центр"</p>
+        <p>Регион поставки: Севастополь</p>
+        <p>Начальная максимальная цена договора: не указана</p>
+        <p>Дата окончания приема заявок: 05.06.2026 18:00</p>
+      ]]></description>
+    </item>
+  </channel>
+</rss>

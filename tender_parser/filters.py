@@ -106,6 +106,8 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
 
     region = _first_matching_term(searchable, REGION_TERMS)
     if not region:
+        if tender.region:
+            return _exclude(tender, "регион не целевой")
         return _review(tender, category=category, terms=terms, reason="регион не найден", region=None)
 
     if tender.price is None:

@@ -2,9 +2,12 @@ from datetime import datetime
 from pathlib import Path
 
 from tender_parser.cli import _all_keywords, build_default_source, run
-from tender_parser.sources.composite import CompositeSource
 from tender_parser.models import TenderRecord
+from tender_parser.sources.composite import CompositeSource
+from tender_parser.sources.etp_gpb import EtpGpbRssSource
+from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import SourceFetchError
+from tender_parser.sources.tender_pro import TenderProSource
 
 
 class FakeSource:
@@ -79,7 +82,14 @@ def test_all_keywords_includes_broad_aliases_and_regions() -> None:
 
 
 def test_build_default_source_uses_composite_source() -> None:
-    assert isinstance(build_default_source(), CompositeSource)
+    source = build_default_source()
+
+    assert isinstance(source, CompositeSource)
+    first_layer = source.sources[0]
+    assert isinstance(first_layer, CompositeSource)
+    assert isinstance(first_layer.sources[0], EtpGpbRssSource)
+    assert isinstance(first_layer.sources[1], TenderProSource)
+    assert isinstance(first_layer.sources[2], RostenderSource)
 
 
 def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> None:

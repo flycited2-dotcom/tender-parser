@@ -56,13 +56,23 @@ def test_evaluate_tender_excludes_expired_deadline() -> None:
 
 def test_evaluate_tender_reviews_missing_region_for_interesting_category() -> None:
     result = evaluate_tender(
-        make_tender(title="Поставка МФУ", region="Москва", raw_text="Поставка МФУ"),
+        make_tender(title="Поставка МФУ", region=None, raw_text="Поставка МФУ"),
         now=NOW,
     )
 
     assert result.filter_status == "review"
     assert result.category == "Компьютерная техника и периферия"
     assert "регион не найден" in result.exclude_reason
+
+
+def test_evaluate_tender_excludes_known_non_target_region() -> None:
+    result = evaluate_tender(
+        make_tender(title="Поставка сейфов", region="Москва", raw_text="Поставка сейфов"),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert result.exclude_reason == "регион не целевой"
 
 
 def test_evaluate_tender_reviews_missing_price_for_interesting_category_and_region() -> None:
