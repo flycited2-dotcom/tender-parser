@@ -5,6 +5,7 @@ from tender_parser.cli import _all_keywords, build_default_source, run
 from tender_parser.models import TenderRecord
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
+from tender_parser.sources.eis import EisZakupkiSource
 from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import SourceFetchError
@@ -93,7 +94,8 @@ def test_build_default_source_uses_composite_source() -> None:
     assert isinstance(first_layer.sources[1], TenderProSource)
     assert isinstance(first_layer.sources[2], Torgi82Source)
     assert isinstance(first_layer.sources[3], EatIntegrationSource)
-    assert isinstance(first_layer.sources[4], RostenderSource)
+    assert isinstance(first_layer.sources[4], EisZakupkiSource)
+    assert isinstance(first_layer.sources[5], RostenderSource)
 
 
 def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> None:

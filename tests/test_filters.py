@@ -122,6 +122,21 @@ def test_evaluate_tender_excludes_filter_cartridges() -> None:
     assert "стоп-тема" in result.exclude_reason
 
 
+def test_evaluate_tender_excludes_medical_bicarbonate_cartridges() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Картриджи бикарбонатные и концентраты кислотные",
+            raw_text="Картриджи бикарбонатные и концентраты кислотные в Республику Крым",
+            region="Крым",
+            price=1_500_000.0,
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
 def test_evaluate_tender_matches_actual_monitor_word() -> None:
     result = evaluate_tender(
         make_tender(

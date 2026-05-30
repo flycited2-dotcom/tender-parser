@@ -12,6 +12,7 @@ from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
+from tender_parser.sources.eis import EisZakupkiSource
 from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
@@ -59,7 +60,14 @@ def build_default_source() -> TenderSource:
     return CompositeSource(
         [
             CompositeSource(
-                [EtpGpbRssSource(), TenderProSource(), Torgi82Source(), EatIntegrationSource(), RostenderSource()]
+                [
+                    EtpGpbRssSource(),
+                    TenderProSource(),
+                    Torgi82Source(),
+                    EatIntegrationSource(),
+                    EisZakupkiSource(),
+                    RostenderSource(),
+                ]
             ),
             RtsPublicSource(),
         ],
