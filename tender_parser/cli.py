@@ -11,6 +11,7 @@ from tender_parser.exporters.json_exporter import export_json
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
 from tender_parser.sources.composite import CompositeSource
+from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
@@ -57,7 +58,9 @@ def _all_keywords() -> list[str]:
 def build_default_source() -> TenderSource:
     return CompositeSource(
         [
-            CompositeSource([EtpGpbRssSource(), TenderProSource(), Torgi82Source(), RostenderSource()]),
+            CompositeSource(
+                [EtpGpbRssSource(), TenderProSource(), Torgi82Source(), EatIntegrationSource(), RostenderSource()]
+            ),
             RtsPublicSource(),
         ],
         stop_after_first_success=True,
