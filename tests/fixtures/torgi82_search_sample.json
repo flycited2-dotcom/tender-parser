@@ -1,0 +1,47 @@
+{
+  "count": 2,
+  "totalCount": 20067,
+  "list": [
+    {
+      "identifier": "32616066162",
+      "title": "Поставка МФУ и принтеров для школы",
+      "gdEndDate": "10.06.2026 08:00&nbsp;МСК",
+      "placementDate": "29.05.2026",
+      "lotLink": "https://etp.torgi82.ru/app/LotCard/page?LotCard.lotEntity=LT%3Acorebob5m4i5o0000pst80lnbu9knshg",
+      "offerLink": "https://etp.torgi82.ru/app/OfferCard/page?OfferCard.offerUUID=Scorebob5m4i5o0000pst80liokhvu3hk",
+      "price": "<div class='aright'>524&nbsp;529.00&nbsp;руб.</div>",
+      "placementType": "Запрос предложений в электронной форме",
+      "state": {
+        "code": "PurchaseLot_St_Dmnds_Started",
+        "title": "Идет прием заявок"
+      },
+      "organizer": {
+        "inn": "7450011887",
+        "title": "МБОУ \"Крымская школа\""
+      },
+      "customer": [
+        {
+          "inn": "7450011887",
+          "title": "МБОУ \"Крымская школа\""
+        }
+      ],
+      "okdp2": ["26.20.16.120"]
+    },
+    {
+      "identifier": "32616066156",
+      "title": "Поставка продуктов питания",
+      "gdEndDate": "08.06.2026 08:00&nbsp;МСК",
+      "placementDate": "29.05.2026",
+      "lotLink": "https://etp.torgi82.ru/app/LotCard/page?LotCard.lotEntity=LT%3Acorebob5m4i5o0000pst7pkd61759cns",
+      "price": "<div class='aright'>207&nbsp;888.00&nbsp;руб.</div>",
+      "placementType": "Запрос котировок в электронной форме",
+      "state": {
+        "title": "Идет прием заявок"
+      },
+      "organizer": {
+        "title": "ООО \"Поставщик\""
+      },
+      "customer": []
+    }
+  ]
+}

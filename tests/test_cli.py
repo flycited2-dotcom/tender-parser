@@ -8,6 +8,7 @@ from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import SourceFetchError
 from tender_parser.sources.tender_pro import TenderProSource
+from tender_parser.sources.torgi82 import Torgi82Source
 
 
 class FakeSource:
@@ -89,7 +90,8 @@ def test_build_default_source_uses_composite_source() -> None:
     assert isinstance(first_layer, CompositeSource)
     assert isinstance(first_layer.sources[0], EtpGpbRssSource)
     assert isinstance(first_layer.sources[1], TenderProSource)
-    assert isinstance(first_layer.sources[2], RostenderSource)
+    assert isinstance(first_layer.sources[2], Torgi82Source)
+    assert isinstance(first_layer.sources[3], RostenderSource)
 
 
 def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> None:
