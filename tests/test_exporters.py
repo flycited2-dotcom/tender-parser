@@ -5,8 +5,9 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from tender_parser.exporters.excel import export_excel
-from tender_parser.exporters.json_exporter import export_json
+from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.models import TenderRecord
+from tender_parser.run_report import SourceFetchResult, SourceHealth
 
 
 def make_tender(status: str) -> TenderRecord:
@@ -42,6 +43,22 @@ def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
     assert workbook["На проверку"]["C2"].value == "Поставка МФУ"
 
 
+def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+
+    export_excel(
+        [make_tender("matched")],
+        [],
+        [],
+        output,
+        new_tenders=[make_tender("matched")],
+    )
+
+    workbook = load_workbook(output)
+    assert workbook.sheetnames[0] == "Новые"
+    assert workbook["Новые"]["C2"].value == "Поставка МФУ"
+
+
 def test_export_json_writes_matched_tenders(tmp_path: Path) -> None:
     output = tmp_path / "latest.json"
     export_json([make_tender("matched")], output)
@@ -50,3 +67,24 @@ def test_export_json_writes_matched_tenders(tmp_path: Path) -> None:
     assert data["count"] == 1
     assert data["items"][0]["title"] == "Поставка МФУ"
     assert data["items"][0]["filter_status"] == "matched"
+
+
+def test_export_run_report_writes_source_health(tmp_path: Path) -> None:
+    output = tmp_path / "run_report.json"
+    report = SourceFetchResult(
+        health=[
+            SourceHealth(
+                source="EisZakupkiSource",
+                status="ok",
+                found=12,
+                elapsed_seconds=1.25,
+            )
+        ]
+    )
+
+    export_run_report(report, output, raw_count=12, unique_count=10, new_count=3)
+
+    data = json.loads(output.read_text(encoding="utf-8"))
+    assert data["summary"] == {"raw_count": 12, "unique_count": 10, "new_count": 3}
+    assert data["sources"][0]["status"] == "ok"
+    assert data["sources"][0]["found"] == 12

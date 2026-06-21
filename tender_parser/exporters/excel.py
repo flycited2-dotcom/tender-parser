@@ -62,6 +62,8 @@ def export_excel(
     review: list[TenderRecord],
     excluded: list[TenderRecord],
     output_path: Path,
+    *,
+    new_tenders: list[TenderRecord] | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
@@ -72,5 +74,8 @@ def export_excel(
     _append_rows(review_sheet, review)
     excluded_sheet = workbook.create_sheet("Отсеянные")
     _append_rows(excluded_sheet, excluded)
+    if new_tenders is not None:
+        new_sheet = workbook.create_sheet("Новые", 0)
+        _append_rows(new_sheet, new_tenders)
     workbook.save(output_path)
     return output_path

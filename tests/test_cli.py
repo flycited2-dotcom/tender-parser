@@ -67,6 +67,33 @@ class ReviewSource:
         ]
 
 
+class DuplicateSource:
+    def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+        return [
+            TenderRecord(
+                title="Поставка МФУ в Республику Крым",
+                url="https://rostender.info/tender-1/",
+                source="rostender",
+                tender_number="rostender-1",
+                customer="Заказчик",
+                region="Крым республика",
+                price=45_000.0,
+                deadline=datetime(2026, 5, 25, 10, 0),
+                raw_text="Поставка МФУ в Республику Крым",
+            ),
+            TenderRecord(
+                title="Поставка МФУ в Республику Крым",
+                url="https://zakupki.gov.ru/tender-1/",
+                source="eis-zakupki",
+                tender_number="eis-1",
+                region="Республика Крым",
+                price=45_000.0,
+                deadline=datetime(2026, 5, 25, 23, 59),
+                raw_text="Поставка МФУ в Республику Крым",
+            ),
+        ]
+
+
 def test_run_dry_mode_creates_export_dirs(tmp_path: Path) -> None:
     result = run(["--dry-run", "--base-dir", str(tmp_path)])
 
@@ -107,6 +134,8 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert result == 0
     assert (tmp_path / "data" / "tenders.db").exists()
     assert (tmp_path / "exports" / "latest.json").exists()
+    assert (tmp_path / "exports" / "new_tenders.json").exists()
+    assert (tmp_path / "exports" / "run_report.json").exists()
     assert list((tmp_path / "exports").glob("tenders_*.xlsx"))
 
 
@@ -123,6 +152,25 @@ def test_run_exports_only_current_run_matches(tmp_path: Path) -> None:
     assert first_result == 0
     assert second_result == 0
     assert '"count": 0' in (tmp_path / "exports" / "latest.json").read_text(encoding="utf-8")
+
+
+def test_run_exports_only_first_seen_actionable_tenders(tmp_path: Path) -> None:
+    first_result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=FakeSource(),
+    )
+    first_new = (tmp_path / "exports" / "new_tenders.json").read_text(encoding="utf-8")
+
+    second_result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-20T12:00:00"],
+        source=FakeSource(),
+    )
+    second_new = (tmp_path / "exports" / "new_tenders.json").read_text(encoding="utf-8")
+
+    assert first_result == 0
+    assert second_result == 0
+    assert '"count": 1' in first_new
+    assert '"count": 0' in second_new
 
 
 def test_run_keeps_existing_exports_when_source_is_blocked(tmp_path: Path) -> None:
@@ -152,3 +200,16 @@ def test_run_exports_review_items_for_manual_check(tmp_path: Path) -> None:
     assert '"count": 2' in latest
     assert '"filter_status": "matched"' in latest
     assert '"filter_status": "review"' in latest
+
+
+def test_run_merges_cross_source_duplicates(tmp_path: Path) -> None:
+    result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=DuplicateSource(),
+    )
+
+    latest = (tmp_path / "exports" / "latest.json").read_text(encoding="utf-8")
+
+    assert result == 0
+    assert '"count": 1' in latest
+    assert '"source": "eis-zakupki"' in latest

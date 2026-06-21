@@ -53,11 +53,18 @@ class TenderStorage:
                 """
             )
 
-    def upsert_many(self, tenders: list[TenderRecord]) -> None:
+    def upsert_many(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
         now = datetime.now().isoformat(timespec="seconds")
+        first_seen: list[TenderRecord] = []
         with self._connect() as conn:
             for tender in tenders:
                 discovered = _dt_to_str(tender.discovered_at) or now
+                exists = conn.execute(
+                    "SELECT 1 FROM tenders WHERE unique_key = ?",
+                    (tender.unique_key,),
+                ).fetchone()
+                if exists is None:
+                    first_seen.append(tender)
                 conn.execute(
                     """
                     INSERT INTO tenders (
@@ -103,6 +110,7 @@ class TenderStorage:
                         tender.filter_status,
                     ),
                 )
+        return first_seen
 
     def fetch_by_status(self, status: str) -> list[TenderRecord]:
         with self._connect() as conn:

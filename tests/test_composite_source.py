@@ -46,6 +46,19 @@ def test_composite_source_returns_results_from_working_source() -> None:
     assert tenders[0].source == "good"
 
 
+def test_composite_source_reports_success_and_failure_health() -> None:
+    source = CompositeSource([FailingSource(), GoodSource()])
+
+    result = source.fetch_with_report(["мфу"])
+
+    assert len(result.tenders) == 1
+    assert [(item.source, item.status, item.found) for item in result.health] == [
+        ("FailingSource", "error", 0),
+        ("GoodSource", "ok", 1),
+    ]
+    assert "blocked" in result.health[0].detail
+
+
 def test_composite_source_can_stop_after_first_success() -> None:
     first = CountingSource()
     second = CountingSource()

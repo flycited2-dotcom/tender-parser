@@ -19,9 +19,11 @@ def test_storage_upserts_without_duplicates(tmp_path: Path) -> None:
         discovered_at=datetime(2026, 5, 19, 12, 0),
     )
 
-    storage.upsert_many([tender])
-    storage.upsert_many([tender])
+    first_seen = storage.upsert_many([tender])
+    second_seen = storage.upsert_many([tender])
 
     rows = storage.fetch_by_status("matched")
     assert len(rows) == 1
     assert rows[0].title == "Поставка МФУ"
+    assert first_seen == [tender]
+    assert second_seen == []

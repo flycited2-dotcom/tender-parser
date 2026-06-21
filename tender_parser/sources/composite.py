@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from time import monotonic
 from typing import Protocol
 
 from tender_parser.models import TenderRecord
+from tender_parser.run_report import SourceFetchResult, SourceHealth
 from tender_parser.sources.rts import SourceFetchError
 
 
@@ -17,14 +19,46 @@ class CompositeSource:
         self.stop_after_first_success = stop_after_first_success
 
     def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+        result = self.fetch_with_report(keywords)
+        if not result.tenders and result.errors:
+            raise SourceFetchError(f"все источники недоступны: {'; '.join(result.errors)}")
+        return result.tenders
+
+    def fetch_with_report(self, keywords: list[str]) -> SourceFetchResult:
         collected: list[TenderRecord] = []
         errors: list[str] = []
+        health: list[SourceHealth] = []
         seen: set[str] = set()
         for source in self.sources:
+            started_at = monotonic()
             try:
-                tenders = source.fetch_keywords(keywords)
+                if isinstance(source, CompositeSource):
+                    nested_result = source.fetch_with_report(keywords)
+                    tenders = nested_result.tenders
+                    health.extend(nested_result.health)
+                    errors.extend(nested_result.errors)
+                else:
+                    tenders = source.fetch_keywords(keywords)
+                    health.append(
+                        SourceHealth(
+                            source=source.__class__.__name__,
+                            status="ok" if tenders else "empty",
+                            found=len(tenders),
+                            elapsed_seconds=round(monotonic() - started_at, 3),
+                        )
+                    )
             except SourceFetchError as exc:
-                errors.append(str(exc))
+                detail = str(exc)
+                errors.append(detail)
+                health.append(
+                    SourceHealth(
+                        source=source.__class__.__name__,
+                        status="skipped" if "не настроен" in detail.lower() else "error",
+                        found=0,
+                        elapsed_seconds=round(monotonic() - started_at, 3),
+                        detail=detail,
+                    )
+                )
                 continue
 
             for tender in tenders:
@@ -36,6 +70,4 @@ class CompositeSource:
             if tenders and self.stop_after_first_success:
                 break
 
-        if not collected and errors:
-            raise SourceFetchError(f"все источники недоступны: {'; '.join(errors)}")
-        return collected
+        return SourceFetchResult(tenders=collected, health=health, errors=errors)

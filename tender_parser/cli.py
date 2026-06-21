@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Protocol, Sequence
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
+from tender_parser.dedup import deduplicate_tenders
 from tender_parser.exporters.excel import export_excel
-from tender_parser.exporters.json_exporter import export_json
+from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
+from tender_parser.run_report import SourceFetchResult, SourceHealth
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
@@ -75,6 +78,28 @@ def build_default_source() -> TenderSource:
     )
 
 
+def _fetch_with_report(source: TenderSource, keywords: list[str]) -> SourceFetchResult:
+    if isinstance(source, CompositeSource):
+        result = source.fetch_with_report(keywords)
+        if not result.tenders and result.errors:
+            raise SourceFetchError(f"все источники недоступны: {'; '.join(result.errors)}")
+        return result
+
+    started_at = monotonic()
+    tenders = source.fetch_keywords(keywords)
+    return SourceFetchResult(
+        tenders=tenders,
+        health=[
+            SourceHealth(
+                source=source.__class__.__name__,
+                status="ok" if tenders else "empty",
+                found=len(tenders),
+                elapsed_seconds=round(monotonic() - started_at, 3),
+            )
+        ],
+    )
+
+
 def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -> int:
     args = build_parser().parse_args(argv)
     base_dir = Path(args.base_dir).resolve()
@@ -85,32 +110,61 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
     active_source = source or build_default_source()
     try:
-        raw_tenders = active_source.fetch_keywords(_all_keywords())
+        source_result = _fetch_with_report(active_source, _all_keywords())
     except SourceFetchError as exc:
         print(f"Ошибка источника: {exc}")
         print("Excel и JSON не перезаписаны, предыдущий отчет сохранен.")
         return 2
 
-    evaluated = [evaluate_tender(tender, now=current_time) for tender in raw_tenders]
+    raw_tenders = source_result.tenders
+    deduplication = deduplicate_tenders(raw_tenders)
+    evaluated = [evaluate_tender(tender, now=current_time) for tender in deduplication.tenders]
 
     storage = TenderStorage(data_dir / "tenders.db")
-    storage.upsert_many(evaluated)
+    first_seen = storage.upsert_many(evaluated)
 
     matched = [tender for tender in evaluated if tender.filter_status == "matched"]
     review = [tender for tender in evaluated if tender.filter_status == "review"]
     excluded = [tender for tender in evaluated if tender.filter_status == "excluded"]
     actionable = matched + review
+    new_actionable = [
+        tender for tender in first_seen if tender.filter_status in {"matched", "review"}
+    ]
 
     date_stamp = current_time.strftime("%Y-%m-%d")
-    excel_path = export_excel(matched, review, excluded, exports_dir / f"tenders_{date_stamp}.xlsx")
+    excel_path = export_excel(
+        matched,
+        review,
+        excluded,
+        exports_dir / f"tenders_{date_stamp}.xlsx",
+        new_tenders=new_actionable,
+    )
     json_path = export_json(actionable, exports_dir / "latest.json")
+    new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
+    report_path = export_run_report(
+        source_result,
+        exports_dir / "run_report.json",
+        raw_count=len(raw_tenders),
+        unique_count=len(deduplication.tenders),
+        new_count=len(new_actionable),
+    )
 
     print(f"Найдено: {len(raw_tenders)}")
+    print(f"После дедупликации: {len(deduplication.tenders)}")
     print(f"Подходящие: {len(matched)}")
     print(f"На проверку: {len(review)}")
     print(f"Отсеянные: {len(excluded)}")
+    print(f"Новые для CRM: {len(new_actionable)}")
+    for health in source_result.health:
+        detail = f"; {health.detail}" if health.detail else ""
+        print(
+            f"Источник {health.source}: {health.status}, {health.found} шт., "
+            f"{health.elapsed_seconds:.1f} сек.{detail}"
+        )
     print(f"Excel: {excel_path}")
     print(f"JSON: {json_path}")
+    print(f"Новые JSON: {new_json_path}")
+    print(f"Отчет источников: {report_path}")
     return 0
 
 
