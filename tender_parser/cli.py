@@ -13,6 +13,7 @@ from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
+from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
@@ -67,6 +68,7 @@ def build_default_source() -> TenderSource:
                     EtpGpbRssSource(),
                     TenderProSource(),
                     Torgi82Source(),
+                    B2BCenterSource(),
                     EatIntegrationSource(),
                     EisZakupkiSource(),
                     RostenderSource(),

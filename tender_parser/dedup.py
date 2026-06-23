@@ -13,6 +13,7 @@ SOURCE_PRIORITY = {
     "eat-berezka": 90,
     "tender-pro": 80,
     "etp-gpb": 70,
+    "b2b-center": 65,
     "torgi82": 60,
     "rts-market": 50,
     "rostender": 10,
