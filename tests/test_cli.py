@@ -111,6 +111,14 @@ def test_all_keywords_includes_broad_aliases_and_regions() -> None:
     assert "Республика Крым" in keywords
 
 
+def test_all_keywords_includes_expanded_network_and_electrical_terms() -> None:
+    keywords = _all_keywords()
+
+    assert "сетевое оборудование" in keywords
+    assert "точка доступа" in keywords
+    assert "электротехническая продукция" in keywords
+
+
 def test_build_default_source_uses_composite_source() -> None:
     source = build_default_source()
 
