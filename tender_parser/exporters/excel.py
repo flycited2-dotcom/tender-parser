@@ -12,6 +12,7 @@ from tender_parser.models import TenderRecord
 HEADERS = [
     "дата_обнаружения",
     "категория",
+    "уверенность",
     "название",
     "номер",
     "заказчик",
@@ -37,6 +38,7 @@ def _append_rows(sheet: Worksheet, tenders: list[TenderRecord]) -> None:
             [
                 _format_dt(tender.discovered_at),
                 tender.category or "",
+                tender.match_confidence or "",
                 tender.title,
                 tender.tender_number or "",
                 tender.customer or "",

@@ -24,6 +24,7 @@ def make_tender(status: str) -> TenderRecord:
         category="Компьютерная техника и периферия" if status != "excluded" else None,
         include_reason="ok" if status != "excluded" else "",
         exclude_reason="" if status == "matched" else "регион не найден",
+        match_confidence="точное" if status == "matched" else "ручная проверка",
         discovered_at=datetime(2026, 5, 19, 12, 0),
     )
 
@@ -39,8 +40,8 @@ def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
 
     workbook = load_workbook(output)
     assert workbook.sheetnames == ["Подходящие", "На проверку", "Отсеянные"]
-    assert workbook["Подходящие"]["C2"].value == "Поставка МФУ"
-    assert workbook["На проверку"]["C2"].value == "Поставка МФУ"
+    assert workbook["Подходящие"]["D2"].value == "Поставка МФУ"
+    assert workbook["На проверку"]["D2"].value == "Поставка МФУ"
 
 
 def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) -> None:
@@ -56,7 +57,7 @@ def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) 
 
     workbook = load_workbook(output)
     assert workbook.sheetnames[0] == "Новые"
-    assert workbook["Новые"]["C2"].value == "Поставка МФУ"
+    assert workbook["Новые"]["D2"].value == "Поставка МФУ"
 
 
 def test_export_json_writes_matched_tenders(tmp_path: Path) -> None:
@@ -67,6 +68,7 @@ def test_export_json_writes_matched_tenders(tmp_path: Path) -> None:
     assert data["count"] == 1
     assert data["items"][0]["title"] == "Поставка МФУ"
     assert data["items"][0]["filter_status"] == "matched"
+    assert data["items"][0]["match_confidence"] == "точное"
 
 
 def test_export_run_report_writes_source_health(tmp_path: Path) -> None:

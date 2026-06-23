@@ -217,6 +217,9 @@ In 'tender_parser/exporters/excel.py', add '"уверенность"' after '"к
 in 'HEADERS', and add 'tender.match_confidence or ""' after the category value
 in '_append_rows()'.
 
+In 'tests/test_exporters.py', update the title-cell assertions from 'C2' to
+'D2', because the inserted confidence column becomes column C.
+
 - [ ] **Step 4: Add the SQLite migration and storage test**
 
 Add to 'tests/test_storage.py':
@@ -256,6 +259,10 @@ if "match_confidence" not in columns:
 Add 'match_confidence' to the INSERT list, placeholders and 'ON CONFLICT' set.
 Pass 'tender.match_confidence' in the INSERT tuple and
 'match_confidence=row["match_confidence"]' in '_row_to_record()'.
+
+Add a legacy-schema test that creates the previous 'tenders' table without
+'match_confidence', initializes 'TenderStorage', and asserts that
+'PRAGMA table_info(tenders)' contains the new column.
 
 - [ ] **Step 5: Run focused tests green**
 

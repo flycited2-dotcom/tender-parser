@@ -6,6 +6,7 @@ from typing import Literal
 
 
 FilterStatus = Literal["matched", "review", "excluded"]
+MatchConfidence = Literal["точное", "вероятное", "ручная проверка"]
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class TenderRecord:
     include_reason: str = ""
     exclude_reason: str = ""
     filter_status: FilterStatus = "excluded"
+    match_confidence: MatchConfidence | None = None
     matched_terms: list[str] = field(default_factory=list)
 
     @property

@@ -48,10 +48,17 @@ class TenderStorage:
                     category TEXT,
                     include_reason TEXT,
                     exclude_reason TEXT,
-                    filter_status TEXT NOT NULL
+                    filter_status TEXT NOT NULL,
+                    match_confidence TEXT
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(tenders)").fetchall()
+            }
+            if "match_confidence" not in columns:
+                conn.execute("ALTER TABLE tenders ADD COLUMN match_confidence TEXT")
 
     def upsert_many(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
         now = datetime.now().isoformat(timespec="seconds")
@@ -70,9 +77,10 @@ class TenderStorage:
                     INSERT INTO tenders (
                         unique_key, title, url, source, tender_number, customer, region,
                         price, deadline, status, published_at, discovered_at, last_seen_at,
-                        raw_text, category, include_reason, exclude_reason, filter_status
+                        raw_text, category, include_reason, exclude_reason, filter_status,
+                        match_confidence
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(unique_key) DO UPDATE SET
                         title=excluded.title,
                         url=excluded.url,
@@ -87,7 +95,8 @@ class TenderStorage:
                         category=excluded.category,
                         include_reason=excluded.include_reason,
                         exclude_reason=excluded.exclude_reason,
-                        filter_status=excluded.filter_status
+                        filter_status=excluded.filter_status,
+                        match_confidence=excluded.match_confidence
                     """,
                     (
                         tender.unique_key,
@@ -108,6 +117,7 @@ class TenderStorage:
                         tender.include_reason,
                         tender.exclude_reason,
                         tender.filter_status,
+                        tender.match_confidence,
                     ),
                 )
         return first_seen
@@ -138,4 +148,5 @@ class TenderStorage:
             include_reason=row["include_reason"] or "",
             exclude_reason=row["exclude_reason"] or "",
             filter_status=row["filter_status"],
+            match_confidence=row["match_confidence"],
         )

@@ -32,6 +32,13 @@ def test_evaluate_tender_matches_region_category_price_and_deadline() -> None:
     assert "мфу" in result.include_reason.lower()
 
 
+def test_evaluate_tender_marks_verified_card_exact() -> None:
+    result = evaluate_tender(make_tender(), now=NOW)
+
+    assert result.filter_status == "matched"
+    assert result.match_confidence == "точное"
+
+
 def test_evaluate_tender_excludes_stop_terms() -> None:
     result = evaluate_tender(make_tender(title="Поставка лекарственных препаратов МФУ"), now=NOW)
 
@@ -62,7 +69,16 @@ def test_evaluate_tender_reviews_missing_region_for_interesting_category() -> No
 
     assert result.filter_status == "review"
     assert result.category == "Компьютерная техника и периферия"
+    assert result.match_confidence == "ручная проверка"
     assert "регион не найден" in result.exclude_reason
+
+
+def test_evaluate_tender_reviews_unknown_deadline_as_probable() -> None:
+    result = evaluate_tender(make_tender(deadline=None), now=NOW)
+
+    assert result.filter_status == "review"
+    assert result.match_confidence == "вероятное"
+    assert result.exclude_reason == "требуется проверка: срок подачи не указан"
 
 
 def test_evaluate_tender_excludes_known_non_target_region() -> None:
