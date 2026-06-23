@@ -58,7 +58,7 @@ permitted credentials. Each belongs to a later plan, rather than a guessed adapt
 - A verified card is 'точное'; one missing price or deadline is 'вероятное'; absent
   region or several missing fields is 'ручная проверка'.
 
-- [ ] **Step 1: Write failing filter and JSON tests**
+- [x] **Step 1: Write failing filter and JSON tests**
 
 Add to 'tests/test_filters.py':
 
@@ -95,7 +95,7 @@ In 'tests/test_exporters.py', set 'match_confidence="точное"' in
 assert data["items"][0]["match_confidence"] == "точное"
 ~~~
 
-- [ ] **Step 2: Run the focused tests red**
+- [x] **Step 2: Run the focused tests red**
 
 ~~~powershell
 python -m pytest tests/test_filters.py tests/test_exporters.py -q
@@ -104,7 +104,7 @@ python -m pytest tests/test_filters.py tests/test_exporters.py -q
 Expected: failures because the field does not exist and an unknown deadline is
 currently excluded.
 
-- [ ] **Step 3: Implement the model and filter decision**
+- [x] **Step 3: Implement the model and filter decision**
 
 In 'tender_parser/models.py', define and use the field:
 
@@ -220,7 +220,7 @@ in '_append_rows()'.
 In 'tests/test_exporters.py', update the title-cell assertions from 'C2' to
 'D2', because the inserted confidence column becomes column C.
 
-- [ ] **Step 4: Add the SQLite migration and storage test**
+- [x] **Step 4: Add the SQLite migration and storage test**
 
 Add to 'tests/test_storage.py':
 
@@ -264,7 +264,7 @@ Add a legacy-schema test that creates the previous 'tenders' table without
 'match_confidence', initializes 'TenderStorage', and asserts that
 'PRAGMA table_info(tenders)' contains the new column.
 
-- [ ] **Step 5: Run focused tests green**
+- [x] **Step 5: Run focused tests green**
 
 ~~~powershell
 python -m pytest tests/test_filters.py tests/test_storage.py tests/test_exporters.py -q
@@ -272,7 +272,7 @@ python -m pytest tests/test_filters.py tests/test_storage.py tests/test_exporter
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit the confidence feature**
+- [x] **Step 6: Commit the confidence feature**
 
 ~~~powershell
 git add tender_parser/models.py tender_parser/filters.py tender_parser/storage.py tender_parser/exporters/excel.py tender_parser/exporters/json_exporter.py tests/test_filters.py tests/test_storage.py tests/test_exporters.py
@@ -293,7 +293,7 @@ git commit -m "Add tender review confidence"
 - ЕИС, ЭТП ГПБ and Rostender use this same matrix; B2B-Center uses product-only
   queries because its public list may not expose delivery region.
 
-- [ ] **Step 1: Write failing matrix tests**
+- [x] **Step 1: Write failing matrix tests**
 
 Create 'tests/test_config.py':
 
@@ -340,7 +340,7 @@ def test_all_keywords_includes_expanded_network_and_electrical_terms() -> None:
     assert "электротехническая продукция" in keywords
 ~~~
 
-- [ ] **Step 2: Run matrix tests red**
+- [x] **Step 2: Run matrix tests red**
 
 ~~~powershell
 python -m pytest tests/test_config.py tests/test_cli.py -q
@@ -348,7 +348,7 @@ python -m pytest tests/test_config.py tests/test_cli.py -q
 
 Expected: collection fails because the constants do not exist.
 
-- [ ] **Step 3: Implement the single source of truth**
+- [x] **Step 3: Implement the single source of truth**
 
 In 'tender_parser/config.py', insert before source query lists:
 
@@ -416,7 +416,7 @@ Remove the old hand-written lists. Add these terms to existing category lists:
 "металлическая мебель",
 ~~~
 
-- [ ] **Step 4: Run matrix tests green**
+- [x] **Step 4: Run matrix tests green**
 
 ~~~powershell
 python -m pytest tests/test_config.py tests/test_cli.py tests/test_filters.py -q
@@ -424,7 +424,7 @@ python -m pytest tests/test_config.py tests/test_cli.py tests/test_filters.py -q
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit the query matrix**
+- [x] **Step 5: Commit the query matrix**
 
 ~~~powershell
 git add tender_parser/config.py tests/test_config.py tests/test_cli.py
@@ -448,7 +448,7 @@ git commit -m "Expand regional tender search matrix"
 - Produces 'parse_market_page(html, source_url) -> list[TenderRecord]'.
 - Cards without delivery region or price enter manual review.
 
-- [ ] **Step 1: Add fixture and failing parser tests**
+- [x] **Step 1: Add fixture and failing parser tests**
 
 Create 'tests/fixtures/b2b_center_market_sample.html':
 
@@ -552,7 +552,7 @@ def test_fetch_keywords_uses_configured_queries_and_deduplicates() -> None:
     assert "f_keyword=" in session.requested_urls[0]
 ~~~
 
-- [ ] **Step 2: Run B2B tests red**
+- [x] **Step 2: Run B2B tests red**
 
 ~~~powershell
 python -m pytest tests/test_b2b_center_source.py -q
@@ -560,7 +560,7 @@ python -m pytest tests/test_b2b_center_source.py -q
 
 Expected: collection fails because the source module does not exist.
 
-- [ ] **Step 3: Implement the B2B source**
+- [x] **Step 3: Implement the B2B source**
 
 Create 'tender_parser/sources/b2b_center.py':
 
@@ -669,7 +669,7 @@ def _text(element: object | None) -> str:
     return element.get_text(" ", strip=True)  # type: ignore[attr-defined]
 ~~~
 
-- [ ] **Step 4: Activate the source and rank**
+- [x] **Step 4: Activate the source and rank**
 
 In 'tender_parser/cli.py', import 'B2BCenterSource' and insert
 'B2BCenterSource()' immediately after 'Torgi82Source()' in the first inner
@@ -682,7 +682,7 @@ composite. In 'tender_parser/dedup.py', add:
 to 'SOURCE_PRIORITY'. In 'tests/test_cli.py', import 'B2BCenterSource', assert
 it at index 3, and move EAT, ЕИС and Rostender assertions to indexes 4, 5 and 6.
 
-- [ ] **Step 5: Run B2B tests green**
+- [x] **Step 5: Run B2B tests green**
 
 ~~~powershell
 python -m pytest tests/test_b2b_center_source.py tests/test_cli.py tests/test_dedup.py -q
@@ -690,7 +690,7 @@ python -m pytest tests/test_b2b_center_source.py tests/test_cli.py tests/test_de
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit B2B-Center ingestion**
+- [x] **Step 6: Commit B2B-Center ingestion**
 
 ~~~powershell
 git add tender_parser/sources/b2b_center.py tender_parser/cli.py tender_parser/dedup.py tests/fixtures/b2b_center_market_sample.html tests/test_b2b_center_source.py tests/test_cli.py
@@ -708,7 +708,7 @@ git commit -m "Add B2B Center public source"
 - Documents 'точное', 'вероятное' and 'ручная проверка' for CRM users.
 - Documents B2B-Center as a source whose public list can lack price and region.
 
-- [ ] **Step 1: Update operator documentation**
+- [x] **Step 1: Update operator documentation**
 
 Add to 'README.md':
 
@@ -728,7 +728,7 @@ region or price intentionally appear on 'На проверку'. Add to both
 - The 80-query matrix is shared by ЕИС, ЭТП ГПБ and Rostender; each source still stops according to its own error limit.
 ~~~
 
-- [ ] **Step 2: Run the complete automated suite**
+- [x] **Step 2: Run the complete automated suite**
 
 ~~~powershell
 python -m pytest -q
@@ -736,7 +736,7 @@ python -m pytest -q
 
 Expected: all tests pass with no collection errors.
 
-- [ ] **Step 3: Run the permitted B2B live smoke test**
+- [x] **Step 3: Run the permitted B2B live smoke test**
 
 ~~~powershell
 @'
@@ -752,7 +752,7 @@ for tender in tenders[:3]:
 Expected: prints public B2B-Center cards or raises explicit 'SourceFetchError';
 it never logs in or bypasses a CAPTCHA.
 
-- [ ] **Step 4: Run the full parser and inspect deliverables**
+- [x] **Step 4: Run the full parser and inspect deliverables**
 
 ~~~powershell
 python -m tender_parser run

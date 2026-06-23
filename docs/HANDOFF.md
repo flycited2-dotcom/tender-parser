@@ -25,10 +25,14 @@
 - Исследование ЭТП: `docs/etp_source_research_2026-05-29.md`
 - Публичные endpoints настраиваются в `tender_parser/config.py` через `RTS_MARKET_ENDPOINTS`.
 - Региональные endpoints могут задавать `region_hint`, чтобы закупки из региональной витрины не терялись из-за пустого региона в строке таблицы.
-- Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`; RTS идет резервом и не запускается, если первый слой уже вернул карточки.
+- Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`; RTS идет резервом и не запускается, если первый слой уже вернул карточки.
 - `CompositeSource.fetch_with_report` собирает `ok`/`empty`/`skipped`/`error` для каждого источника и длительность запроса. Результат пишется в `exports/run_report.json`.
 - Высокоуверенные дубли ЕИС/Rostender склеиваются до фильтрации; приоритет у ЕИС. Перед хранением `TenderStorage` возвращает впервые увиденные карточки, из которых формируется `exports/new_tenders.json`.
 - Excel теперь начинается с листа `Новые`. Для фонового запуска есть `run_tender_parser_silent.bat`; `Настроить_ежедневный_запуск.ps1 -Time "08:00"` создает задачу Windows Task Scheduler.
+- `TenderRecord.match_confidence` разделяет карточки на `точное`, `вероятное` и `ручная проверка`; поле экспортируется в Excel, `latest.json` и `new_tenders.json`.
+- Карточка без срока подачи больше не теряется автоматически: при подтвержденных товаре, регионе и сумме она попадает в `вероятное`.
+- Добавлен `B2BCenterSource`, который читает публичную таблицу B2B-Center по 16 товарным запросам. В карточке списка обычно нет цены и региона, поэтому она попадает в `ручная проверка` до уточнения по первоисточнику.
+- ЕИС, ЭТП ГПБ и Rostender используют общую матрицу из 80 запросов: 16 товарных групп x Симферополь, Севастополь, Крым, Запорожская и Херсонская области.
 - 2026-06-21 задача `Tender Parser Daily` создана и проверена в Windows Task Scheduler: ежедневно в 08:00, launcher - `run_tender_parser_silent.bat`, состояние `Ready`.
 - `EatIntegrationSource` активируется только при наличии `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. Без них источник отдает `SourceFetchError`, composite идет дальше.
 - ЕИС/`zakupki.gov.ru` добавлен как главный широкий источник для 44-ФЗ/223-ФЗ. Отдельные ЭТП остаются дополнительными каналами для коммерческих, малых и региональных закупок.
