@@ -39,6 +39,13 @@ def test_evaluate_tender_marks_verified_card_exact() -> None:
     assert result.match_confidence == "точное"
 
 
+def test_evaluate_tender_marks_exact_match_hot() -> None:
+    result = evaluate_tender(make_tender(), now=NOW)
+
+    assert result.filter_status == "matched"
+    assert result.review_priority == "hot"
+
+
 def test_evaluate_tender_excludes_stop_terms() -> None:
     result = evaluate_tender(make_tender(title="Поставка лекарственных препаратов МФУ"), now=NOW)
 
@@ -78,7 +85,33 @@ def test_evaluate_tender_reviews_unknown_deadline_as_probable() -> None:
 
     assert result.filter_status == "review"
     assert result.match_confidence == "вероятное"
+    assert result.review_priority == "review"
     assert result.exclude_reason == "требуется проверка: срок подачи не указан"
+
+
+def test_evaluate_tender_marks_missing_deadline_as_review_priority() -> None:
+    result = evaluate_tender(make_tender(deadline=None), now=NOW)
+
+    assert result.filter_status == "review"
+    assert result.match_confidence == "вероятное"
+    assert result.review_priority == "review"
+
+
+def test_evaluate_tender_marks_b2b_missing_region_and_price_as_wide() -> None:
+    result = evaluate_tender(
+        make_tender(
+            source="b2b-center",
+            title="Поставка кондиционеров",
+            region=None,
+            price=None,
+            raw_text="Поставка кондиционеров",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "review"
+    assert result.match_confidence == "ручная проверка"
+    assert result.review_priority == "wide"
 
 
 def test_evaluate_tender_excludes_known_non_target_region() -> None:
@@ -151,6 +184,37 @@ def test_evaluate_tender_excludes_medical_bicarbonate_cartridges() -> None:
 
     assert result.filter_status == "excluded"
     assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_excludes_lab_consumables_even_with_office_word() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка расходных материалов для клинико-диагностической лаборатории",
+            raw_text="Поставка ручек-скарификаторов и расходных материалов для лаборатории в Севастополь",
+            region="Севастополь",
+            price=500_000.0,
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert result.review_priority == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_excludes_generic_consumables_without_target_context() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка расходных материалов",
+            raw_text="Поставка расходных материалов в Республику Крым",
+            region="Республика Крым",
+            price=120_000.0,
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert result.review_priority == "excluded"
 
 
 def test_evaluate_tender_matches_actual_monitor_word() -> None:

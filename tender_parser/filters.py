@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from tender_parser.config import CATEGORY_KEYWORDS, MIN_PRICE_RUB, REGION_TERMS, STOP_TERMS
-from tender_parser.models import MatchConfidence, TenderRecord
+from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
 from tender_parser.text import normalize_text
 
 
@@ -52,6 +52,7 @@ def _exclude(tender: TenderRecord, reason: str) -> TenderRecord:
         include_reason="",
         exclude_reason=reason,
         match_confidence=None,
+        review_priority="excluded",
         matched_terms=[],
     )
 
@@ -64,6 +65,7 @@ def _review(
     reason: str,
     region: str | None,
     confidence: MatchConfidence,
+    priority: ReviewPriority = "review",
 ) -> TenderRecord:
     return replace(
         tender,
@@ -78,6 +80,7 @@ def _review(
             deadline_is_active=tender.deadline is not None,
         ),
         exclude_reason=f"требуется проверка: {reason}",
+        review_priority=priority,
         matched_terms=terms,
     )
 
@@ -134,6 +137,11 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
             if missing in (["срок подачи не указан"], ["сумма не указана"])
             else "ручная проверка"
         )
+        priority: ReviewPriority = "review"
+        if ("регион не найден" in missing and "сумма не указана" in missing) or (
+            tender.source == "b2b-center" and ("регион не найден" in missing or "сумма не указана" in missing)
+        ):
+            priority = "wide"
         return _review(
             tender,
             category=category,
@@ -141,6 +149,7 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
             reason="; ".join(missing),
             region=region,
             confidence=confidence,
+            priority=priority,
         )
 
     include_reason = _include_reason(
@@ -157,5 +166,6 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
         category=category,
         include_reason=include_reason,
         exclude_reason="",
+        review_priority="hot",
         matched_terms=terms,
     )
