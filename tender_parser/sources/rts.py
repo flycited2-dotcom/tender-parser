@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
+from typing import Iterable, cast
 from urllib.parse import urlencode, urljoin
 
 import requests
@@ -18,6 +18,7 @@ from tender_parser.config import (
     RTS_MAX_PAGES_PER_KEYWORD,
 )
 from tender_parser.models import TenderRecord
+from tender_parser.run_report import SourceFetchResult, SourceHealth, SourceStatus
 from tender_parser.text import normalize_text, parse_deadline, parse_price_rub
 
 
@@ -158,22 +159,30 @@ class RtsPublicSource:
         return tenders
 
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
+        result = self.fetch_with_report(keywords)
+        if not result.tenders and result.errors:
+            raise SourceFetchError(f"все источники RTS недоступны: {'; '.join(result.errors)}")
+        return result.tenders
+
+    def fetch_with_report(self, keywords: Iterable[str]) -> SourceFetchResult:
         collected: list[TenderRecord] = []
         errors: list[str] = []
-        completed_endpoints = 0
+        health: list[SourceHealth] = []
         seen: set[str] = set()
         for endpoint in self.endpoints:
-            endpoint_failed = False
+            endpoint_tenders: list[TenderRecord] = []
+            endpoint_error = ""
+            endpoint_status = "empty"
             for keyword in keywords:
                 try:
                     fetched = self.fetch_keyword(keyword, endpoint=endpoint)
                 except SourceFetchError as exc:
-                    errors.append(f"{endpoint.source_name}: {exc}")
-                    endpoint_failed = True
+                    endpoint_error = f"{endpoint.source_name}: {exc}"
+                    endpoint_status = "blocked" if isinstance(exc, SourceBlockedError) else "error"
                     break
                 except requests.RequestException as exc:
-                    errors.append(f"{endpoint.source_name}: {exc}")
-                    endpoint_failed = True
+                    endpoint_error = f"{endpoint.source_name}: {exc}"
+                    endpoint_status = _status_for_request_exception(exc)
                     break
 
                 for tender in fetched:
@@ -182,13 +191,32 @@ class RtsPublicSource:
                         continue
                     seen.add(dedupe_key)
                     collected.append(tender)
+                    endpoint_tenders.append(tender)
 
-            if not endpoint_failed:
-                completed_endpoints += 1
+            if endpoint_error:
+                errors.append(endpoint_error)
+            elif endpoint_tenders:
+                endpoint_status = "ok"
 
-        if completed_endpoints == 0 and errors:
-            raise SourceFetchError(f"все источники RTS недоступны: {'; '.join(errors)}")
-        return collected
+            health.append(
+                SourceHealth(
+                    source=endpoint.source_name,
+                    status=cast(SourceStatus, endpoint_status),
+                    found=len(endpoint_tenders),
+                    elapsed_seconds=0.0,
+                    detail=endpoint_error,
+                )
+            )
+
+        return SourceFetchResult(tenders=collected, health=health, errors=errors)
+
+
+def _status_for_request_exception(exc: requests.RequestException) -> SourceStatus:
+    if isinstance(exc, requests.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "ssl_error"
+    return "error"
 
 
 def _default_endpoints() -> list[RtsMarketEndpoint]:

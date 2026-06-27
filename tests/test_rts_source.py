@@ -94,6 +94,16 @@ class MultiEndpointSession:
         return MarketResponse(url, SAMPLE_HTML)
 
 
+class MixedEndpointSession:
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+
+    def get(self, url: str, timeout: int) -> MarketResponse | CaptchaResponse:
+        if "blocked.rts-tender.ru" in url:
+            return CaptchaResponse()
+        return MarketResponse(url, SAMPLE_HTML)
+
+
 def test_fetch_keyword_raises_when_source_returns_captcha() -> None:
     source = RtsPublicSource(session=CaptchaSession())
 
@@ -118,6 +128,25 @@ def test_fetch_keywords_queries_all_configured_endpoints() -> None:
     assert any(tender.region == "Симферополь" for tender in tenders)
     assert any("one.rts-tender.ru" in url for url in session.requested_urls)
     assert any("two.rts-tender.ru" in url for url in session.requested_urls)
+
+
+def test_fetch_with_report_returns_endpoint_health_when_one_endpoint_is_blocked() -> None:
+    source = RtsPublicSource(
+        session=MixedEndpointSession(),
+        endpoints=[
+            RtsMarketEndpoint("https://blocked.rts-tender.ru/market/", "rts-blocked"),
+            RtsMarketEndpoint("https://open.rts-tender.ru/market/", "rts-open"),
+        ],
+    )
+
+    result = source.fetch_with_report(["РњР¤РЈ"])
+
+    assert len(result.tenders) == 1
+    assert [(item.source, item.status, item.found) for item in result.health] == [
+        ("rts-blocked", "blocked", 0),
+        ("rts-open", "ok", 1),
+    ]
+    assert "rts-blocked" in result.errors[0]
 
 
 def test_fetch_keywords_raises_fetch_error_when_every_endpoint_is_blocked() -> None:
