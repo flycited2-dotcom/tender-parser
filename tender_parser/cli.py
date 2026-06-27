@@ -76,9 +76,9 @@ def build_default_source() -> TenderSource:
                     EatIntegrationSource(),
                     EisZakupkiSource(),
                     RostenderSource(),
+                    RtsPublicSource(),
                 ]
             ),
-            RtsPublicSource(),
         ],
         stop_after_first_success=True,
     )
