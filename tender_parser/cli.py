@@ -8,6 +8,7 @@ from typing import Protocol, Sequence
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
 from tender_parser.dedup import deduplicate_tenders
+from tender_parser.env import get_env_status, load_env_file
 from tender_parser.exporters.excel import export_excel, sort_for_review
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
@@ -30,9 +31,12 @@ class TenderSource(Protocol):
         ...
 
 
+EAT_REQUIRED_ENV_KEYS = ["EAT_API_TOKEN", "EAT_EXT_SYSTEM"]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tender_parser")
-    parser.add_argument("command", nargs="?", default="run", choices=["run"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "check-env"])
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
     parser.add_argument("--dry-run", action="store_true", help="Create directories and exit")
     parser.add_argument("--now", default="", help="Override current datetime for tests, ISO format")
@@ -102,10 +106,22 @@ def _fetch_with_report(source: TenderSource, keywords: list[str]) -> SourceFetch
     )
 
 
+def _check_env_command(base_dir: Path) -> int:
+    status = get_env_status(EAT_REQUIRED_ENV_KEYS)
+    print(f"Config file: {base_dir / '.env'}")
+    for key, configured in status.items():
+        state = "configured" if configured else "missing"
+        print(f"{key}: {state}")
+    return 0 if all(status.values()) else 1
+
+
 def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -> int:
     args = build_parser().parse_args(argv)
     base_dir = Path(args.base_dir).resolve()
     data_dir, exports_dir = ensure_dirs(base_dir)
+    load_env_file(base_dir / ".env")
+    if args.command == "check-env":
+        return _check_env_command(base_dir)
     if args.dry_run:
         return 0
 

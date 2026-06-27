@@ -105,6 +105,38 @@ def test_run_dry_mode_creates_export_dirs(tmp_path: Path) -> None:
     assert (tmp_path / "exports").is_dir()
 
 
+def test_check_env_returns_one_when_eat_config_missing(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.delenv("EAT_API_TOKEN", raising=False)
+    monkeypatch.delenv("EAT_EXT_SYSTEM", raising=False)
+
+    result = run(["check-env", "--base-dir", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert result == 1
+    assert "EAT_API_TOKEN: missing" in output
+    assert "EAT_EXT_SYSTEM: missing" in output
+
+
+def test_check_env_loads_dotenv_and_returns_zero_when_eat_config_present(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.delenv("EAT_API_TOKEN", raising=False)
+    monkeypatch.delenv("EAT_EXT_SYSTEM", raising=False)
+    (tmp_path / ".env").write_text(
+        "EAT_API_TOKEN=secret-token\nEAT_EXT_SYSTEM=EXT-CRM\n",
+        encoding="utf-8",
+    )
+
+    result = run(["check-env", "--base-dir", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "EAT_API_TOKEN: configured" in output
+    assert "secret-token" not in output
+
+
 def test_all_keywords_includes_broad_aliases_and_regions() -> None:
     keywords = _all_keywords()
 
