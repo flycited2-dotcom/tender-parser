@@ -25,7 +25,7 @@
 - Исследование ЭТП: `docs/etp_source_research_2026-05-29.md`
 - Публичные endpoints настраиваются в `tender_parser/config.py` через `RTS_MARKET_ENDPOINTS`.
 - Региональные endpoints могут задавать `region_hint`, чтобы закупки из региональной витрины не терялись из-за пустого региона в строке таблицы.
-- Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`; RTS идет резервом и не запускается, если первый слой уже вернул карточки.
+- Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`; RTS больше не резервный fallback и запускается в общем сборе.
 - `CompositeSource.fetch_with_report` собирает `ok`/`empty`/`skipped`/`error` для каждого источника и длительность запроса. Результат пишется в `exports/run_report.json`.
 - Высокоуверенные дубли ЕИС/Rostender склеиваются до фильтрации; приоритет у ЕИС. Перед хранением `TenderStorage` возвращает впервые увиденные карточки, из которых формируется `exports/new_tenders.json`.
 - Excel теперь начинается с листа `Новые`, затем идут `Горячие`, `На проверку`, `Широкий хвост`, `Отсеянные`. Для фонового запуска есть `run_tender_parser_silent.bat`; `Настроить_ежедневный_запуск.ps1 -Time "08:00"` создает задачу Windows Task Scheduler.
@@ -38,7 +38,7 @@
 - `EatIntegrationSource` активируется только при наличии `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. Без них источник отдает `SourceFetchError`, composite идет дальше.
 - `.env` загружается CLI из `--base-dir` до построения источников; реальные секреты игнорируются Git, шаблон лежит в `.env.example`.
 - `python -m tender_parser check-env` проверяет ЕАТ-настройки и не выводит значения токенов.
-- RTS-Tender foundation: `docs/rts_tender_foundation_2026-06-28.md`. Следующий RTS-инкремент должен быть отдельным: health-report по каждому endpoint публичного RTS и/или `RtsCabinetSource` после проверки ЛК.
+- RTS-Tender foundation: `docs/rts_tender_foundation_2026-06-28.md`. Публичный RTS v2 уже пишет health-report по каждому endpoint; следующий отдельный инкремент - `RtsCabinetSource` после проверки ЛК/API/экспорта.
 - ЕИС/`zakupki.gov.ru` добавлен как главный широкий источник для 44-ФЗ/223-ФЗ. Отдельные ЭТП остаются дополнительными каналами для коммерческих, малых и региональных закупок.
 - `EisZakupkiSource` отключает `session.trust_env`, потому что системный proxy в текущей среде приводил к долгим таймаутам на `zakupki.gov.ru`.
 
@@ -81,11 +81,11 @@ python -m tender_parser run
 
 ## Как продолжать
 
-Следующий практический уровень охвата: **ЕАТ по токену, RTS-Tender v2/кабинет, затем альтернативный официальный канал ЕИС и углубление B2B-Center**.
+Следующий практический уровень охвата: **ЕАТ по токену, RTS-Tender кабинет/API, затем альтернативный официальный канал ЕИС и углубление B2B-Center**.
 
 1. Скопировать `.env.example` в `.env`, заполнить `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`, затем проверить `python -m tender_parser check-env`.
 2. Получить в ЛК ЕАТ токен и код внешней системы, затем проверить `EatIntegrationSource` live-запуском.
-3. Проработать RTS-Tender как отдельный источник: публичный RTS v2 с endpoint health и кабинет/API/экспорт, если ЛК дает официальный доступ.
+3. Проработать RTS-Tender кабинет/API/экспорт, если ЛК дает официальный доступ; публичный RTS v2 с endpoint health уже включен в обычный сбор.
 4. Проверить альтернативный официальный канал ЕИС: XML/open-data или кабинетный экспорт, потому что HTML search может таймаутиться. Аналогично проверить другой endpoint ЭТП ГПБ.
 5. Углубить B2B-Center через личный кабинет/API или подробную карточку, чтобы вытаскивать регион и цену.
 6. Углубить Торги82: найти корректный GWT/searchServlet payload для ключевых слов и пагинации, потому что простой endpoint сейчас дает только последние 20 процедур.
