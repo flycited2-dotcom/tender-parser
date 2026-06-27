@@ -28,11 +28,11 @@
 - Produces: `load_env_file(path: Path) -> list[str]`
 - Produces: `get_env_status(keys: list[str]) -> dict[str, bool]`
 
-- [ ] Write tests for comments, quotes, no override, and status.
-- [ ] Verify tests fail because module is missing.
-- [ ] Implement minimal parser.
-- [ ] Verify tests pass.
-- [ ] Commit as `Add local env loader`.
+- [x] Write tests for comments, quotes, no override, and status.
+- [x] Verify tests fail because module is missing.
+- [x] Implement minimal parser.
+- [x] Verify tests pass.
+- [x] Commit as `Add local env loader`.
 
 ### Task 2: CLI check-env
 
@@ -44,12 +44,12 @@
 - Produces CLI command: `python -m tender_parser check-env`
 - Consumes: `.env` from `--base-dir`
 
-- [ ] Write tests for missing and present EAT config.
-- [ ] Verify tests fail because command is missing.
-- [ ] Load `.env` before default source construction in `run`.
-- [ ] Implement `check-env` with masked, boolean-only output.
-- [ ] Verify CLI tests pass.
-- [ ] Commit as `Add env configuration check`.
+- [x] Write tests for missing and present EAT config.
+- [x] Verify tests fail because command is missing.
+- [x] Load `.env` before default source construction in `run`.
+- [x] Implement `check-env` with masked, boolean-only output.
+- [x] Verify CLI tests pass.
+- [x] Commit as `Add env configuration check`.
 
 ### Task 3: Gitignore, Example, Docs, RTS Foundation
 
@@ -66,10 +66,10 @@
 - Documents local token setup.
 - Documents RTS-Tender next implementation path.
 
-- [ ] Ignore `.env` and `.env.local`.
-- [ ] Add `.env.example` with placeholder EAT keys.
-- [ ] Add RTS foundation document.
-- [ ] Update README/MEMORY/HANDOFF.
+- [x] Ignore `.env` and `.env.local`.
+- [x] Add `.env.example` with placeholder EAT keys.
+- [x] Add RTS foundation document.
+- [x] Update README/MEMORY/HANDOFF.
 - [ ] Run full tests.
 - [ ] Commit as `Document env and RTS foundation`.
 
@@ -82,4 +82,3 @@
 - [ ] Run `pytest -q` in main checkout.
 - [ ] Run `python -m tender_parser check-env` in main checkout.
 - [ ] Push `codex/rts-tender-parser` to `target`.
-

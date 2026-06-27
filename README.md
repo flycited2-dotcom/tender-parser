@@ -75,6 +75,19 @@ python -m tender_parser run
 
 По умолчанию токен отправляется в заголовке `Authorization: Bearer ...`. Если в ЛК/документации указан другой заголовок, можно переопределить `EAT_AUTH_HEADER` и `EAT_AUTH_SCHEME`.
 
+Можно хранить локальные настройки в `.env`:
+
+```powershell
+copy .env.example .env
+python -m tender_parser check-env
+```
+
+`.env` добавлен в `.gitignore`; в Git хранится только `.env.example` с пустыми значениями. Команда `check-env` показывает только `configured`/`missing` и не печатает секреты.
+
+## RTS-Tender
+
+RTS-Tender выделен как отдельный стратегический контур. Текущий публичный RTS-market остается безопасным fallback без обхода captcha, а следующий шаг описан в `docs/rts_tender_foundation_2026-06-28.md`: публичный RTS v2 с диагностикой endpoint-ов и отдельный кабинетный/API-режим после проверки ЛК.
+
 ## Ограничения первой версии
 
 - Работает только с публичными страницами без авторизации.

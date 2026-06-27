@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+.env
+.env.local
+
 data/
 exports/
 logs/
