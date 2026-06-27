@@ -41,12 +41,15 @@ def test_storage_round_trips_match_confidence(tmp_path: Path) -> None:
         deadline=datetime(2026, 5, 25, 10, 0),
         filter_status="matched",
         match_confidence="точное",
+        review_priority="hot",
         discovered_at=datetime(2026, 5, 19, 12, 0),
     )
 
     storage.upsert_many([tender])
 
-    assert storage.fetch_by_status("matched")[0].match_confidence == "точное"
+    loaded = storage.fetch_by_status("matched")
+    assert loaded[0].match_confidence == "точное"
+    assert loaded[0].review_priority == "hot"
 
 
 def test_storage_migrates_legacy_database_for_match_confidence(tmp_path: Path) -> None:
@@ -82,3 +85,4 @@ def test_storage_migrates_legacy_database_for_match_confidence(tmp_path: Path) -
     with sqlite3.connect(db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(tenders)")}
     assert "match_confidence" in columns
+    assert "review_priority" in columns

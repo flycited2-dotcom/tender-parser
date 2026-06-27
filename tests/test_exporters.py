@@ -21,6 +21,7 @@ def make_tender(status: str) -> TenderRecord:
         price=45_000.0,
         deadline=datetime(2026, 5, 25, 10, 0),
         filter_status=status,
+        review_priority="hot" if status == "matched" else "review",
         category="Компьютерная техника и периферия" if status != "excluded" else None,
         include_reason="ok" if status != "excluded" else "",
         exclude_reason="" if status == "matched" else "регион не найден",
@@ -69,6 +70,7 @@ def test_export_json_writes_matched_tenders(tmp_path: Path) -> None:
     assert data["items"][0]["title"] == "Поставка МФУ"
     assert data["items"][0]["filter_status"] == "matched"
     assert data["items"][0]["match_confidence"] == "точное"
+    assert data["items"][0]["review_priority"] == "hot"
 
 
 def test_export_run_report_writes_source_health(tmp_path: Path) -> None:

@@ -49,7 +49,8 @@ class TenderStorage:
                     include_reason TEXT,
                     exclude_reason TEXT,
                     filter_status TEXT NOT NULL,
-                    match_confidence TEXT
+                    match_confidence TEXT,
+                    review_priority TEXT
                 )
                 """
             )
@@ -59,6 +60,8 @@ class TenderStorage:
             }
             if "match_confidence" not in columns:
                 conn.execute("ALTER TABLE tenders ADD COLUMN match_confidence TEXT")
+            if "review_priority" not in columns:
+                conn.execute("ALTER TABLE tenders ADD COLUMN review_priority TEXT")
 
     def upsert_many(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
         now = datetime.now().isoformat(timespec="seconds")
@@ -78,9 +81,9 @@ class TenderStorage:
                         unique_key, title, url, source, tender_number, customer, region,
                         price, deadline, status, published_at, discovered_at, last_seen_at,
                         raw_text, category, include_reason, exclude_reason, filter_status,
-                        match_confidence
+                        match_confidence, review_priority
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(unique_key) DO UPDATE SET
                         title=excluded.title,
                         url=excluded.url,
@@ -96,7 +99,8 @@ class TenderStorage:
                         include_reason=excluded.include_reason,
                         exclude_reason=excluded.exclude_reason,
                         filter_status=excluded.filter_status,
-                        match_confidence=excluded.match_confidence
+                        match_confidence=excluded.match_confidence,
+                        review_priority=excluded.review_priority
                     """,
                     (
                         tender.unique_key,
@@ -118,6 +122,7 @@ class TenderStorage:
                         tender.exclude_reason,
                         tender.filter_status,
                         tender.match_confidence,
+                        tender.review_priority,
                     ),
                 )
         return first_seen
@@ -149,4 +154,5 @@ class TenderStorage:
             exclude_reason=row["exclude_reason"] or "",
             filter_status=row["filter_status"],
             match_confidence=row["match_confidence"],
+            review_priority=row["review_priority"],
         )

@@ -27,6 +27,7 @@ def _to_dict(tender: TenderRecord) -> dict[str, object]:
         "discovered_at": _format_dt(tender.discovered_at),
         "filter_status": tender.filter_status,
         "match_confidence": tender.match_confidence,
+        "review_priority": tender.review_priority,
         "category": tender.category,
         "include_reason": tender.include_reason,
         "exclude_reason": tender.exclude_reason,

@@ -7,6 +7,7 @@ from typing import Literal
 
 FilterStatus = Literal["matched", "review", "excluded"]
 MatchConfidence = Literal["точное", "вероятное", "ручная проверка"]
+ReviewPriority = Literal["hot", "review", "wide", "excluded"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class TenderRecord:
     exclude_reason: str = ""
     filter_status: FilterStatus = "excluded"
     match_confidence: MatchConfidence | None = None
+    review_priority: ReviewPriority | None = None
     matched_terms: list[str] = field(default_factory=list)
 
     @property
