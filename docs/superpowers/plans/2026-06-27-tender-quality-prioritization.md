@@ -17,6 +17,16 @@
 - Do not add new external dependencies.
 - Do not add new tender sources in this task.
 
+## Execution Progress
+
+- [x] Task 1: model, SQLite, and JSON `review_priority`.
+- [x] Task 2: priority assignment in tender evaluation.
+- [x] Task 3: priority-based Excel sheets, sorting, and CLI grouping.
+- [x] Task 4 documentation updates.
+- [x] Task 4 full test suite.
+- [x] Task 4 live parser run and export inspection.
+- [ ] Finish branch: merge to `codex/rts-tender-parser` and push to `target`.
+
 ---
 
 ### Task 1: Add Review Priority To Model, Storage, And JSON
@@ -549,4 +559,3 @@ Use `superpowers:finishing-a-development-branch`:
 3. run tests in the main checkout;
 4. run the live parser in the main checkout;
 5. push `codex/rts-tender-parser` to `target`.
-
