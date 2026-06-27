@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 
 from tender_parser.models import TenderRecord
+from tender_parser.run_report import SourceFetchResult, SourceHealth
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.rts import SourceFetchError
 
@@ -37,6 +38,35 @@ class CountingSource(GoodSource):
         return super().fetch_keywords(keywords)
 
 
+class ReportAwareSource:
+    def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+        return []
+
+    def fetch_with_report(self, keywords: list[str]) -> SourceFetchResult:
+        return SourceFetchResult(
+            tenders=[
+                TenderRecord(
+                    title="РџРѕСЃС‚Р°РІРєР° РїСЂРёРЅС‚РµСЂР° РІ РЎРµРІР°СЃС‚РѕРїРѕР»СЊ",
+                    url="https://example.test/tender-2/",
+                    source="report-aware",
+                    tender_number="2",
+                    region="РЎРµРІР°СЃС‚РѕРїРѕР»СЊ",
+                    price=55_000.0,
+                    deadline=datetime(2026, 6, 5, 10, 0),
+                    raw_text="РџРѕСЃС‚Р°РІРєР° РїСЂРёРЅС‚РµСЂР° РІ РЎРµРІР°СЃС‚РѕРїРѕР»СЊ",
+                )
+            ],
+            health=[
+                SourceHealth(
+                    source="custom-endpoint",
+                    status="ok",
+                    found=1,
+                    elapsed_seconds=0.01,
+                )
+            ],
+        )
+
+
 def test_composite_source_returns_results_from_working_source() -> None:
     source = CompositeSource([FailingSource(), GoodSource()])
 
@@ -69,6 +99,17 @@ def test_composite_source_can_stop_after_first_success() -> None:
     assert len(tenders) == 1
     assert first.calls == 1
     assert second.calls == 0
+
+
+def test_composite_source_uses_source_level_health_report() -> None:
+    source = CompositeSource([ReportAwareSource()])
+
+    result = source.fetch_with_report(["РїСЂРёРЅС‚РµСЂ"])
+
+    assert len(result.tenders) == 1
+    assert [(item.source, item.status, item.found) for item in result.health] == [
+        ("custom-endpoint", "ok", 1)
+    ]
 
 
 def test_composite_source_raises_when_every_source_fails() -> None:

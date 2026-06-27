@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from time import monotonic
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
@@ -10,6 +10,12 @@ from tender_parser.sources.rts import SourceFetchError
 
 class TenderSource(Protocol):
     def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+        ...
+
+
+@runtime_checkable
+class ReportAwareTenderSource(TenderSource, Protocol):
+    def fetch_with_report(self, keywords: list[str]) -> SourceFetchResult:
         ...
 
 
@@ -37,6 +43,11 @@ class CompositeSource:
                     tenders = nested_result.tenders
                     health.extend(nested_result.health)
                     errors.extend(nested_result.errors)
+                elif isinstance(source, ReportAwareTenderSource):
+                    source_result = source.fetch_with_report(keywords)
+                    tenders = source_result.tenders
+                    health.extend(source_result.health)
+                    errors.extend(source_result.errors)
                 else:
                     tenders = source.fetch_keywords(keywords)
                     health.append(
