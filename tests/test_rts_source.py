@@ -3,7 +3,7 @@ from urllib.parse import unquote
 
 import pytest
 
-from tender_parser.config import RTS_TIMEOUT_SECONDS
+from tender_parser.config import RTS_SEARCH_QUERIES, RTS_TIMEOUT_SECONDS
 from tender_parser.sources.rts import (
     RtsMarketEndpoint,
     RtsPublicSource,
@@ -130,6 +130,16 @@ class TimeoutCaptureSession:
         return MarketResponse(url, SAMPLE_HTML)
 
 
+class QueryCaptureSession:
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+        self.requested_urls: list[str] = []
+
+    def get(self, url: str, timeout: int) -> MarketResponse:
+        self.requested_urls.append(url)
+        return MarketResponse(url, EMPTY_HTML)
+
+
 def test_fetch_keyword_raises_when_source_returns_captcha() -> None:
     source = RtsPublicSource(session=CaptchaSession())
 
@@ -144,6 +154,20 @@ def test_fetch_keyword_uses_rts_timeout() -> None:
     source.fetch_keyword("МФУ")
 
     assert session.timeout == RTS_TIMEOUT_SECONDS
+
+
+def test_fetch_with_report_uses_rts_query_list_by_default() -> None:
+    session = QueryCaptureSession()
+    source = RtsPublicSource(
+        session=session,
+        endpoints=[RtsMarketEndpoint("https://one.rts-tender.ru/market/", "rts-one")],
+    )
+
+    source.fetch_with_report(["Симферополь"])
+
+    first_url = unquote(session.requested_urls[0])
+    assert RTS_SEARCH_QUERIES[0] in first_url
+    assert "Симферополь" not in first_url
 
 
 def test_fetch_keywords_queries_all_configured_endpoints() -> None:

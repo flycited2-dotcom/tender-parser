@@ -16,6 +16,7 @@ from tender_parser.config import (
     RTS_MARKET_BASE_URL,
     RTS_MARKET_ENDPOINTS,
     RTS_MAX_PAGES_PER_KEYWORD,
+    RTS_SEARCH_QUERIES,
     RTS_TIMEOUT_SECONDS,
 )
 from tender_parser.models import TenderRecord
@@ -127,11 +128,13 @@ class RtsPublicSource:
         self,
         session: requests.Session | None = None,
         endpoints: list[RtsMarketEndpoint] | None = None,
+        queries: list[str] | None = None,
         timeout_seconds: int = RTS_TIMEOUT_SECONDS,
     ) -> None:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.endpoints = endpoints or _default_endpoints()
+        self.queries = queries or RTS_SEARCH_QUERIES
         self.timeout_seconds = timeout_seconds
 
     def fetch_keyword(
@@ -172,12 +175,13 @@ class RtsPublicSource:
         errors: list[str] = []
         health: list[SourceHealth] = []
         seen: set[str] = set()
+        queries = self.queries or list(keywords)
         for endpoint in self.endpoints:
             started_at = monotonic()
             endpoint_tenders: list[TenderRecord] = []
             endpoint_error = ""
             endpoint_status = "empty"
-            for keyword in keywords:
+            for keyword in queries:
                 try:
                     fetched = self.fetch_keyword(keyword, endpoint=endpoint)
                 except SourceFetchError as exc:
