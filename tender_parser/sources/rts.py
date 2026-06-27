@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import Iterable, cast
 from urllib.parse import urlencode, urljoin
 
@@ -10,12 +11,12 @@ import requests
 from bs4 import BeautifulSoup
 
 from tender_parser.config import (
-    HTTP_TIMEOUT_SECONDS,
     MIN_PRICE_RUB,
     REGION_TERMS,
     RTS_MARKET_BASE_URL,
     RTS_MARKET_ENDPOINTS,
     RTS_MAX_PAGES_PER_KEYWORD,
+    RTS_TIMEOUT_SECONDS,
 )
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth, SourceStatus
@@ -126,10 +127,12 @@ class RtsPublicSource:
         self,
         session: requests.Session | None = None,
         endpoints: list[RtsMarketEndpoint] | None = None,
+        timeout_seconds: int = RTS_TIMEOUT_SECONDS,
     ) -> None:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.endpoints = endpoints or _default_endpoints()
+        self.timeout_seconds = timeout_seconds
 
     def fetch_keyword(
         self,
@@ -141,11 +144,11 @@ class RtsPublicSource:
         tenders: list[TenderRecord] = []
         for page_index in range(max_pages):
             url = build_search_url(keyword, page_index, active_endpoint.base_url)
-            response = self.session.get(url, timeout=HTTP_TIMEOUT_SECONDS)
+            response = self.session.get(url, timeout=self.timeout_seconds)
             response.raise_for_status()
             if is_blocked_response(response.url, response.text):
                 raise SourceBlockedError(
-                    "captcha: RTS-Tender ограничил скорость просмотра, отчет не обновлен"
+                    "captcha: RTS-Tender ограничил скорость просмотра endpoint"
                 )
             page_tenders = parse_market_page(
                 response.text,
@@ -170,6 +173,7 @@ class RtsPublicSource:
         health: list[SourceHealth] = []
         seen: set[str] = set()
         for endpoint in self.endpoints:
+            started_at = monotonic()
             endpoint_tenders: list[TenderRecord] = []
             endpoint_error = ""
             endpoint_status = "empty"
@@ -195,6 +199,8 @@ class RtsPublicSource:
 
             if endpoint_error:
                 errors.append(endpoint_error)
+                if endpoint_tenders:
+                    endpoint_status = "partial"
             elif endpoint_tenders:
                 endpoint_status = "ok"
 
@@ -203,7 +209,7 @@ class RtsPublicSource:
                     source=endpoint.source_name,
                     status=cast(SourceStatus, endpoint_status),
                     found=len(endpoint_tenders),
-                    elapsed_seconds=0.0,
+                    elapsed_seconds=round(monotonic() - started_at, 3),
                     detail=endpoint_error,
                 )
             )

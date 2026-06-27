@@ -3,6 +3,7 @@ from urllib.parse import unquote
 
 import pytest
 
+from tender_parser.config import RTS_TIMEOUT_SECONDS
 from tender_parser.sources.rts import (
     RtsMarketEndpoint,
     RtsPublicSource,
@@ -14,6 +15,7 @@ from tender_parser.sources.rts import (
 
 
 SAMPLE_HTML = Path("tests/fixtures/rts_market_sample.html").read_text(encoding="utf-8")
+EMPTY_HTML = "<html><body><table class='search-results'><tbody></tbody></table></body></html>"
 
 
 def test_parse_market_page_extracts_table_rows() -> None:
@@ -104,11 +106,44 @@ class MixedEndpointSession:
         return MarketResponse(url, SAMPLE_HTML)
 
 
+class PartialEndpointSession:
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+        self.calls = 0
+
+    def get(self, url: str, timeout: int) -> MarketResponse | CaptchaResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return MarketResponse(url, SAMPLE_HTML)
+        if self.calls == 2:
+            return MarketResponse(url, EMPTY_HTML)
+        return CaptchaResponse()
+
+
+class TimeoutCaptureSession:
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+        self.timeout: int | None = None
+
+    def get(self, url: str, timeout: int) -> MarketResponse:
+        self.timeout = timeout
+        return MarketResponse(url, SAMPLE_HTML)
+
+
 def test_fetch_keyword_raises_when_source_returns_captcha() -> None:
     source = RtsPublicSource(session=CaptchaSession())
 
     with pytest.raises(SourceBlockedError, match="captcha"):
         source.fetch_keyword("компьютер")
+
+
+def test_fetch_keyword_uses_rts_timeout() -> None:
+    session = TimeoutCaptureSession()
+    source = RtsPublicSource(session=session)
+
+    source.fetch_keyword("МФУ")
+
+    assert session.timeout == RTS_TIMEOUT_SECONDS
 
 
 def test_fetch_keywords_queries_all_configured_endpoints() -> None:
@@ -139,7 +174,7 @@ def test_fetch_with_report_returns_endpoint_health_when_one_endpoint_is_blocked(
         ],
     )
 
-    result = source.fetch_with_report(["РњР¤РЈ"])
+    result = source.fetch_with_report(["МФУ"])
 
     assert len(result.tenders) == 1
     assert [(item.source, item.status, item.found) for item in result.health] == [
@@ -147,6 +182,25 @@ def test_fetch_with_report_returns_endpoint_health_when_one_endpoint_is_blocked(
         ("rts-open", "ok", 1),
     ]
     assert "rts-blocked" in result.errors[0]
+
+
+def test_fetch_with_report_marks_partial_endpoint_and_measures_elapsed(monkeypatch) -> None:
+    times = iter([10.0, 12.5])
+    monkeypatch.setattr("tender_parser.sources.rts.monotonic", lambda: next(times))
+    source = RtsPublicSource(
+        session=PartialEndpointSession(),
+        endpoints=[
+            RtsMarketEndpoint("https://partial.rts-tender.ru/market/", "rts-partial"),
+        ],
+    )
+
+    result = source.fetch_with_report(["МФУ", "принтер"])
+
+    assert len(result.tenders) == 1
+    assert [(item.source, item.status, item.found, item.elapsed_seconds) for item in result.health] == [
+        ("rts-partial", "partial", 1, 2.5)
+    ]
+    assert "captcha" in result.errors[0]
 
 
 def test_fetch_keywords_raises_fetch_error_when_every_endpoint_is_blocked() -> None:

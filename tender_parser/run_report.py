@@ -6,7 +6,7 @@ from typing import Literal
 from tender_parser.models import TenderRecord
 
 
-SourceStatus = Literal["ok", "empty", "skipped", "blocked", "timeout", "ssl_error", "error"]
+SourceStatus = Literal["ok", "empty", "skipped", "partial", "blocked", "timeout", "ssl_error", "error"]
 
 
 @dataclass(frozen=True)
