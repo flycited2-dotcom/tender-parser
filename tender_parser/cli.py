@@ -8,7 +8,7 @@ from typing import Protocol, Sequence
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
 from tender_parser.dedup import deduplicate_tenders
-from tender_parser.exporters.excel import export_excel
+from tender_parser.exporters.excel import export_excel, sort_for_review
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
@@ -125,18 +125,20 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     storage = TenderStorage(data_dir / "tenders.db")
     first_seen = storage.upsert_many(evaluated)
 
-    matched = [tender for tender in evaluated if tender.filter_status == "matched"]
-    review = [tender for tender in evaluated if tender.filter_status == "review"]
-    excluded = [tender for tender in evaluated if tender.filter_status == "excluded"]
-    actionable = matched + review
-    new_actionable = [
-        tender for tender in first_seen if tender.filter_status in {"matched", "review"}
-    ]
+    hot = [tender for tender in evaluated if tender.review_priority == "hot"]
+    review = [tender for tender in evaluated if tender.review_priority == "review"]
+    wide = [tender for tender in evaluated if tender.review_priority == "wide"]
+    excluded = [tender for tender in evaluated if tender.review_priority == "excluded"]
+    actionable = sort_for_review(hot + review + wide)
+    new_actionable = sort_for_review(
+        [tender for tender in first_seen if tender.review_priority in {"hot", "review", "wide"}]
+    )
 
     date_stamp = current_time.strftime("%Y-%m-%d")
     excel_path = export_excel(
-        matched,
+        hot,
         review,
+        wide,
         excluded,
         exports_dir / f"tenders_{date_stamp}.xlsx",
         new_tenders=new_actionable,
@@ -153,8 +155,9 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
 
     print(f"Найдено: {len(raw_tenders)}")
     print(f"После дедупликации: {len(deduplication.tenders)}")
-    print(f"Подходящие: {len(matched)}")
+    print(f"Горячие: {len(hot)}")
     print(f"На проверку: {len(review)}")
+    print(f"Широкий хвост: {len(wide)}")
     print(f"Отсеянные: {len(excluded)}")
     print(f"Новые для CRM: {len(new_actionable)}")
     for health in source_result.health:

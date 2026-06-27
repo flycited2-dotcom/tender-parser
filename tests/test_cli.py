@@ -1,6 +1,8 @@
 from datetime import datetime
 from pathlib import Path
 
+from openpyxl import load_workbook
+
 from tender_parser.cli import _all_keywords, build_default_source, run
 from tender_parser.models import TenderRecord
 from tender_parser.sources.b2b_center import B2BCenterSource
@@ -146,7 +148,9 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert (tmp_path / "exports" / "latest.json").exists()
     assert (tmp_path / "exports" / "new_tenders.json").exists()
     assert (tmp_path / "exports" / "run_report.json").exists()
-    assert list((tmp_path / "exports").glob("tenders_*.xlsx"))
+    excel_path = next((tmp_path / "exports").glob("tenders_*.xlsx"))
+    workbook = load_workbook(excel_path)
+    assert workbook.sheetnames == ["Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
 
 
 def test_run_exports_only_current_run_matches(tmp_path: Path) -> None:
