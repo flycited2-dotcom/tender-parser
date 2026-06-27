@@ -26,7 +26,7 @@
 - Публичные endpoints настраиваются в `tender_parser/config.py` через `RTS_MARKET_ENDPOINTS`.
 - Региональные endpoints могут задавать `region_hint`, чтобы закупки из региональной витрины не терялись из-за пустого региона в строке таблицы.
 - Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`; RTS больше не резервный fallback и запускается в общем сборе.
-- `CompositeSource.fetch_with_report` собирает `ok`/`empty`/`skipped`/`error` для каждого источника и длительность запроса. Результат пишется в `exports/run_report.json`.
+- `CompositeSource.fetch_with_report` собирает `ok`/`empty`/`skipped`/`partial`/`blocked`/`timeout`/`ssl_error`/`error` для каждого источника и длительность запроса. Результат пишется в `exports/run_report.json`.
 - Высокоуверенные дубли ЕИС/Rostender склеиваются до фильтрации; приоритет у ЕИС. Перед хранением `TenderStorage` возвращает впервые увиденные карточки, из которых формируется `exports/new_tenders.json`.
 - Excel теперь начинается с листа `Новые`, затем идут `Горячие`, `На проверку`, `Широкий хвост`, `Отсеянные`. Для фонового запуска есть `run_tender_parser_silent.bat`; `Настроить_ежедневный_запуск.ps1 -Time "08:00"` создает задачу Windows Task Scheduler.
 - `TenderRecord.match_confidence` разделяет карточки на `точное`, `вероятное` и `ручная проверка`; поле экспортируется в Excel, `latest.json` и `new_tenders.json`.
@@ -38,7 +38,7 @@
 - `EatIntegrationSource` активируется только при наличии `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. Без них источник отдает `SourceFetchError`, composite идет дальше.
 - `.env` загружается CLI из `--base-dir` до построения источников; реальные секреты игнорируются Git, шаблон лежит в `.env.example`.
 - `python -m tender_parser check-env` проверяет ЕАТ-настройки и не выводит значения токенов.
-- RTS-Tender foundation: `docs/rts_tender_foundation_2026-06-28.md`. Публичный RTS v2 уже пишет health-report по каждому endpoint; следующий отдельный инкремент - `RtsCabinetSource` после проверки ЛК/API/экспорта.
+- RTS-Tender foundation: `docs/rts_tender_foundation_2026-06-28.md`. Публичный RTS v2 уже пишет health-report по каждому endpoint, использует focused `RTS_SEARCH_QUERIES` и `RTS_TIMEOUT_SECONDS=8`; следующий отдельный инкремент - `RtsCabinetSource` после проверки ЛК/API/экспорта.
 - ЕИС/`zakupki.gov.ru` добавлен как главный широкий источник для 44-ФЗ/223-ФЗ. Отдельные ЭТП остаются дополнительными каналами для коммерческих, малых и региональных закупок.
 - `EisZakupkiSource` отключает `session.trust_env`, потому что системный proxy в текущей среде приводил к долгим таймаутам на `zakupki.gov.ru`.
 
@@ -52,6 +52,8 @@ python -m tender_parser run
 ```
 
 На live-проверке 2026-05-29 Rosatom публичный источник вернул captcha/rate-limit, региональные RTS endpoints таймаутились, общий RTS падал по SSL. Поэтому добавлен Rostender fallback. ЭТП ГПБ RSS также таймаутится из текущей сети, но источник подключен с коротким timeout и не блокирует дальнейший сбор. Tender.Pro API отвечает стабильно и добавляет открытые процедуры в общий поток. Торги82 подключен через `https://etp.torgi82.ru/searchServlet`; endpoint отдает JSON последних 20 процедур.
+
+Live-run 2026-06-28 после включения RTS в основной слой показал, что RTS реально добавляет кандидатов: 2 новых `rts-rosatom` записи попали в `new_tenders.json` на ручную проверку. После tuning `RTS_TIMEOUT_SECONDS=8` worktree live-run занял 206 секунд, RTS timeout-строки стали по ~8 секунд; `new_count` worktree-запуска не сравнивать с основной базой, потому что локальная SQLite в worktree была свежая.
 
 Последний live-запуск 2026-06-28 после слоя приоритизации:
 

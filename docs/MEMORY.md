@@ -22,7 +22,8 @@
 - Если срок подачи не указан, но товар, целевой регион и сумма подтверждены, карточка остается `вероятное`, а не исключается.
 - `B2BCenterSource` читает разрешенную публичную таблицу торгов по товарным запросам. Карточки без региона или цены остаются `ручная проверка`.
 - Матрица из 80 запросов (16 товарных групп x 5 регионов) общая для ЕИС, ЭТП ГПБ и Rostender; у каждого источника остаются собственные лимиты ошибок.
-- RTS endpoint-ы возвращают отдельные `SourceHealth` строки: `ok`, `empty`, `blocked`, `timeout`, `ssl_error` или `error`.
+- RTS endpoint-ы возвращают отдельные `SourceHealth` строки: `ok`, `empty`, `partial`, `blocked`, `timeout`, `ssl_error` или `error`.
+- RTS использует focused `RTS_SEARCH_QUERIES` и короткий `RTS_TIMEOUT_SECONDS=8`, чтобы не тратить минуты на заведомо зависающие региональные поддомены.
 - Обычный запуск сейчас использует верхний `CompositeSource` с live-слоем `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`.
 - `EatIntegrationSource` пропускается без `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. По умолчанию отправляет токен как `Authorization: Bearer ...`; при необходимости настраиваются `EAT_AUTH_HEADER`, `EAT_AUTH_SCHEME`, `EAT_MAX_DETAILS`.
 - Локальные секреты теперь можно держать в `.env`; файл игнорируется Git, а `.env.example` хранит только пустые placeholders.
@@ -89,3 +90,7 @@
 - `exports/latest.json`: 177 actionable, из них 37 `rostender`, 138 `b2b-center`, 1 `torgi82`, 1 `tender-pro`.
 - `review_priority`: 23 `hot`, 15 `review`, 139 `wide`.
 - `EtpGpbRssSource` и `EisZakupkiSource` в этом запуске дали timeout; ЕАТ пропущен без токена; Tender.Pro, Торги82, B2B-Center и Rostender отработали.
+
+Live-run 2026-06-28 после включения RTS в основной слой дал 2 новых RTS-кандидата в `new_tenders.json`: ремонт/заправка картриджей и обслуживание кондиционеров. Оба без региона, поэтому ушли в `review`.
+
+Tuning live-run в worktree после `RTS_TIMEOUT_SECONDS=8` и `RTS_SEARCH_QUERIES` занял 206 секунд вместо предыдущих 324 секунд. `new_count` этого worktree-запуска не сравнивать с основной ежедневной дельтой, потому что база в worktree была свежая.
