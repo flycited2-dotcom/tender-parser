@@ -10,12 +10,13 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from openpyxl import load_workbook
+from pypdf import PdfReader
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS, STOP_TERMS
 from tender_parser.text import normalize_text
 
 
-SUPPORTED_SUFFIXES = {".csv", ".docx", ".html", ".htm", ".json", ".txt", ".xlsx", ".xml"}
+SUPPORTED_SUFFIXES = {".csv", ".docx", ".html", ".htm", ".json", ".pdf", ".txt", ".xlsx", ".xml"}
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,8 @@ def _read_document_text(path: Path) -> str:
         return _strip_html(_read_text(path))
     if suffix == ".json":
         return _read_json_text(path)
+    if suffix == ".pdf":
+        return _read_pdf_text(path)
     if suffix == ".xlsx":
         return _read_xlsx_text(path)
     if suffix == ".xml":
@@ -159,6 +162,18 @@ def _read_docx_text(path: Path) -> str:
         xml_text = archive.read("word/document.xml").decode("utf-8", errors="ignore")
     root = ElementTree.fromstring(xml_text)
     return " ".join(element.text or "" for element in root.iter())
+
+
+def _read_pdf_text(path: Path) -> str:
+    reader = PdfReader(path)
+    values: list[str] = []
+    for page in reader.pages:
+        values.append(page.extract_text() or "")
+        for annotation in page.annotations or []:
+            value = annotation.get_object().get("/Contents")
+            if value:
+                values.append(str(value))
+    return " ".join(values)
 
 
 def _flatten_json(value: object) -> str:

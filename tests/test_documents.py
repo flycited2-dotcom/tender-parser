@@ -4,6 +4,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from pathlib import Path
 
 from openpyxl import Workbook
+from pypdf import PdfWriter
+from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, TextStringObject
 
 from tender_parser.documents import DocumentAnalyzer
 
@@ -70,3 +72,27 @@ def test_document_analyzer_extracts_evidence_from_docx(tmp_path: Path) -> None:
     assert "сейф" in evidence.matched_terms
     assert "херсонская область" in evidence.regions
     assert "terms.docx" in evidence.summary
+
+
+def test_document_analyzer_extracts_evidence_from_pdf(tmp_path: Path) -> None:
+    documents_dir = tmp_path / "documents"
+    documents_dir.mkdir()
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=300)
+    annotation = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Annot"),
+            NameObject("/Subtype"): NameObject("/Text"),
+            NameObject("/Rect"): ArrayObject([FloatObject(10), FloatObject(10), FloatObject(20), FloatObject(20)]),
+            NameObject("/Contents"): TextStringObject("Поставка МФУ в Симферополь"),
+        }
+    )
+    writer.add_annotation(0, annotation)
+    with (documents_dir / "notice.pdf").open("wb") as handle:
+        writer.write(handle)
+
+    evidence = DocumentAnalyzer(documents_dir).analyze()
+
+    assert "мфу" in evidence.matched_terms
+    assert "симферополь" in evidence.regions
+    assert "notice.pdf" in evidence.summary
