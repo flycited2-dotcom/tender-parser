@@ -13,6 +13,8 @@
 - Есть быстрые launcher-файлы: `Запустить_локальные_выгрузки.bat` для `--profile local` и `Диагностика_RTS.bat` для `--profile rts`.
 - Ручной запуск: `python -m tender_parser run`.
 - CLI поддерживает профили `--profile full|fast|local|rts`; `fast` исключает текущие timeout/captcha источники ЕИС/ГПБ/RTS, `local` читает только `imports/` и `documents/`, `rts` изолирует RTS-диагностику.
+- Фоновый `run_tender_parser_silent.bat` теперь по умолчанию запускает `--profile fast`; режим можно переопределить через `TENDER_PARSER_PROFILE=full|fast|local|rts`.
+- Планировщик `Настроить_ежедневный_запуск.ps1` принимает `-Profile full|fast|local|rts`, по умолчанию `fast`.
 - История хранится в `data/tenders.db`.
 - Текущая выгрузка создается в `exports/tenders_YYYY-MM-DD.xlsx`.
 - CRM-заготовка создается в `exports/latest.json`, а ежедневная дельта - в `exports/new_tenders.json`.
@@ -36,6 +38,7 @@
 - `EatIntegrationSource` пропускается без `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. По умолчанию отправляет токен как `Authorization: Bearer ...`; при необходимости настраиваются `EAT_AUTH_HEADER`, `EAT_AUTH_SCHEME`, `EAT_MAX_DETAILS`.
 - Локальные секреты теперь можно держать в `.env`; файл игнорируется Git, а `.env.example` хранит только пустые placeholders.
 - CLI-команда `python -m tender_parser check-env` проверяет ЕАТ-настройки и печатает только `configured`/`missing`, без значений токенов.
+- Helper `Настроить_EAT_env.ps1` безопасно записывает локальный `.env` для ЕАТ/Березки, не печатает токен и сразу запускает `check-env`; пошаговая инструкция лежит в `docs/EAT_TOKEN_SETUP.md`.
 - RTS-Tender вынесен в отдельный foundation-документ `docs/rts_tender_foundation_2026-06-28.md`; публичный RTS v2 с диагностикой endpoint-ов реализован, следующий шаг - кабинетный/API-режим после проверки ЛК.
 - Стратегическое решение от 2026-05-30: не пытаться делать хрупкие скрейперы для каждой ЭТП подряд. ЕИС/`zakupki.gov.ru` подключен как главный широкий источник, потому что Сбербанк-АСТ, ЗаказРФ, РТС, Росселторг и другие площадки часто дублируют 44-ФЗ/223-ФЗ закупки туда. ЭТП после этого подключаются как усилители охвата и источники уникальных коммерческих/малых закупок.
 - `EisZakupkiSource` использует публичную HTML-выдачу `/epz/order/extendedsearch/results.html`, query-list `EIS_SEARCH_QUERIES`, короткий `EIS_TIMEOUT_SECONDS=8`, `EIS_MAX_ERRORS=3` и `session.trust_env=False`. Последнее важно: в текущей среде системный proxy заставлял `zakupki.gov.ru` таймаутиться, а прямой запрос отдает карточки быстро.
@@ -62,7 +65,7 @@
 
 Следующий практический уровень охвата: **ЕАТ по токену, RTS-Tender кабинет/API, затем альтернативный официальный канал ЕИС и углубление B2B-Center**.
 
-1. Проверить `.env`: скопировать `.env.example`, заполнить `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`, затем запустить `python -m tender_parser check-env`.
+1. Получить в ЛК ЕАТ/Березки токен и код внешней системы, затем запустить `Настроить_EAT_env.ps1 -ApiToken "..." -ExtSystem "..."`.
 2. Включить ЕАТ/Березку после получения токена и кода внешней системы в личном кабинете.
 3. Проработать RTS-Tender кабинет/API/экспорт, если ЛК дает официальный доступ; публичный RTS v2 уже дает endpoint-level health.
 4. Стабилизировать основной охват: проверить официальный XML/open-data канал ЕИС и альтернативный endpoint ГПБ, не полагаясь на один HTML/RSS URL.

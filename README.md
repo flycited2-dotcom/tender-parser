@@ -39,6 +39,12 @@ PDF читается по текстовому слою; если это ска�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_ежедневный_запуск.ps1
 ```
 
+По умолчанию ежедневный запуск использует профиль `fast`, чтобы не ждать текущие timeout/captcha-источники. Полный режим можно включить явно:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_ежедневный_запуск.ps1 -Profile full
+```
+
 Другое время задается так:
 
 ```powershell
@@ -100,6 +106,8 @@ $env:EAT_API_TOKEN="токен из ЛК ЕАТ"
 $env:EAT_EXT_SYSTEM="код внешней системы из ЛК ЕАТ"
 python -m tender_parser run
 ```
+
+Подробная инструкция и безопасный helper для `.env`: `docs/EAT_TOKEN_SETUP.md`.
 
 По умолчанию токен отправляется в заголовке `Authorization: Bearer ...`. Если в ЛК/документации указан другой заголовок, можно переопределить `EAT_AUTH_HEADER` и `EAT_AUTH_SCHEME`.
 
