@@ -10,13 +10,19 @@
 Запустить_парсер.bat
 ```
 
-После завершения откроется папка `exports`.
+После завершения откроется `exports/latest.html`.
+
+Быстрые кнопки:
+
+- `Запустить_локальные_выгрузки.bat` - обработать только `imports/` и `documents/`, без сетевых площадок.
+- `Диагностика_RTS.bat` - проверить только RTS-Tender и записать его health/report.
 
 ## Ручные выгрузки и документы
 
 Для максимального охвата можно подмешивать выгрузки из личных кабинетов и площадок без отдельной интеграции:
 
 - положите CSV/XLSX/XML-файлы в папку `imports/`;
+- шаблоны лежат в `docs/templates/import_template.csv` и `docs/templates/rts_export_template.csv`;
 - поддерживаемые колонки: название, ссылка, номер, заказчик, регион, сумма, срок подачи, дата публикации, источник, описание;
 - положите доказательства в папку `documents/`: TXT, CSV, XML, JSON, HTML, XLSX, DOCX, PDF;
 - при запуске парсер прочитает `imports/`, добавит источник `ImportFolderSource` в `run_report.json`, затем проверит `documents/` и заполнит поля `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
@@ -74,6 +80,15 @@ python -m venv .venv
 .\.venv\Scripts\activate
 python -m pip install -r requirements.txt
 python -m tender_parser run
+```
+
+Профили запуска:
+
+```powershell
+python -m tender_parser run --profile full   # все источники, режим по умолчанию
+python -m tender_parser run --profile fast   # без текущих timeout/captcha источников ЕИС/ГПБ/RTS
+python -m tender_parser run --profile local  # только imports/ и documents/
+python -m tender_parser run --profile rts    # только RTS-Tender для диагностики
 ```
 
 ## ЕАТ / Березка

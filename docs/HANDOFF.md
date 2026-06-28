@@ -8,6 +8,7 @@
 
 - CLI: `python -m tender_parser run`
 - Windows launcher: `Запустить_парсер.bat`
+- Fast/local/RTS launchers: `Запустить_локальные_выгрузки.bat`, `Диагностика_RTS.bat`
 - Source parser: `tender_parser/sources/rts.py`
 - ETP GPB RSS parser: `tender_parser/sources/etp_gpb.py`
 - Tender.Pro API parser: `tender_parser/sources/tender_pro.py`
@@ -35,6 +36,8 @@
 - PDF читается по текстовому слою через `pypdf`; сканы без OCR не извлекаются. Папки `imports/` и `documents/` игнорируются Git.
 - Высокоуверенные дубли ЕИС/Rostender склеиваются до фильтрации; приоритет у ЕИС. Перед хранением `TenderStorage` возвращает впервые увиденные карточки, из которых формируется `exports/new_tenders.json`.
 - CLI создает `exports/latest.html` через `tender_parser/exporters/html_report.py`; это статический отчет для ручного просмотра actionable-тендеров и health-таблицы источников.
+- CLI поддерживает `--profile full|fast|local|rts`: `full` - все источники, `fast` - без ЕИС/ГПБ/RTS timeout/captcha слоя, `local` - только `imports/` и `documents/`, `rts` - изолированная RTS-диагностика.
+- CSV-шаблоны для ручных выгрузок: `docs/templates/import_template.csv` и `docs/templates/rts_export_template.csv`.
 - Excel теперь начинается с листа `Новые`, затем идут `Горячие`, `На проверку`, `Широкий хвост`, `Отсеянные`. Для фонового запуска есть `run_tender_parser_silent.bat`; `Настроить_ежедневный_запуск.ps1 -Time "08:00"` создает задачу Windows Task Scheduler.
 - `TenderRecord.match_confidence` разделяет карточки на `точное`, `вероятное` и `ручная проверка`; поле экспортируется в Excel, `latest.json` и `new_tenders.json`.
 - Quality layer added: `review_priority` splits candidates into `hot`, `review`, `wide`, and `excluded`; поле хранится в SQLite и экспортируется в Excel/JSON для будущей CRM.
@@ -102,6 +105,7 @@ Live-run 2026-06-28 после включения RTS в основной сло
 8. Для CRM читать `exports/new_tenders.json` как дельту, `exports/latest.json` как полную очередь и `exports/run_report.json` как диагностику.
 9. При изменении словарей править `tender_parser/config.py` и добавлять focused tests в `tests/test_filters.py`.
 10. Для быстрого прироста охвата без нового scraper брать выгрузки из кабинетов/площадок, класть их в `imports/`, а технические задания/карточки в текстовом виде - в `documents/`, затем запускать обычный `python -m tender_parser run`.
+11. Для ежедневной ручной проверки сначала смотреть `exports/latest.html`; для быстрой обработки кабинетных файлов запускать `python -m tender_parser run --profile local`, для RTS-разбора - `python -m tender_parser run --profile rts`.
 
 ## Git
 

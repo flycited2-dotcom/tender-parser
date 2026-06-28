@@ -9,14 +9,12 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 call ".venv\Scripts\activate.bat"
-python -m tender_parser run
+python -m tender_parser run --profile local
 
-if exist "exports" (
-    if exist "exports\latest.html" (
-        start "" "exports\latest.html"
-    ) else (
-        start "" "exports"
-    )
+if exist "exports\latest.html" (
+    start "" "exports\latest.html"
+) else (
+    if exist "exports" start "" "exports"
 )
 
 pause

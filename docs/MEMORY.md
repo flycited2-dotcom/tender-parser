@@ -9,7 +9,10 @@
 ## Ключевые решения
 
 - Запуск для пользователя: двойной клик по `Запустить_парсер.bat`.
+- `Запустить_парсер.bat` открывает `exports/latest.html` после завершения.
+- Есть быстрые launcher-файлы: `Запустить_локальные_выгрузки.bat` для `--profile local` и `Диагностика_RTS.bat` для `--profile rts`.
 - Ручной запуск: `python -m tender_parser run`.
+- CLI поддерживает профили `--profile full|fast|local|rts`; `fast` исключает текущие timeout/captcha источники ЕИС/ГПБ/RTS, `local` читает только `imports/` и `documents/`, `rts` изолирует RTS-диагностику.
 - История хранится в `data/tenders.db`.
 - Текущая выгрузка создается в `exports/tenders_YYYY-MM-DD.xlsx`.
 - CRM-заготовка создается в `exports/latest.json`, а ежедневная дельта - в `exports/new_tenders.json`.
@@ -28,6 +31,7 @@
 - Обычный запуск сейчас использует верхний `CompositeSource` с live-слоем `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`.
 - Обычный запуск дополнительно читает локальные кабинетные выгрузки из `imports/` через `ImportFolderSource` и добавляет отдельную строку здоровья источника в `exports/run_report.json`.
 - Локальный слой доказательств читает `documents/` (TXT/CSV/XML/JSON/HTML/XLSX/DOCX/PDF), извлекает товарные ключи, целевые регионы и стоп-термины, затем `TenderEnricher` до фильтрации заполняет `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
+- Шаблоны ручных выгрузок лежат в `docs/templates/import_template.csv` и `docs/templates/rts_export_template.csv`; реальные выгрузки кладутся в `imports/` и не коммитятся.
 - Enrichment-поля сохраняются в SQLite и экспортируются в Excel/JSON; `detail_status` принимает `not_checked`, `imported`, `documents_checked`, `enriched`.
 - `EatIntegrationSource` пропускается без `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. По умолчанию отправляет токен как `Authorization: Bearer ...`; при необходимости настраиваются `EAT_AUTH_HEADER`, `EAT_AUTH_SCHEME`, `EAT_MAX_DETAILS`.
 - Локальные секреты теперь можно держать в `.env`; файл игнорируется Git, а `.env.example` хранит только пустые placeholders.
