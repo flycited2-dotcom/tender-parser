@@ -33,11 +33,11 @@
 - Produces `TenderRecord.delivery_region_evidence: str`
 - Produces `TenderRecord.source_confidence: float`
 
-- [ ] Add failing tests for JSON export fields.
-- [ ] Add failing tests for SQLite round-trip and legacy migration.
-- [ ] Add failing tests for Excel headers.
-- [ ] Implement model fields, storage columns, JSON fields, Excel headers.
-- [ ] Run targeted tests and commit `Add enrichment fields to tender records`.
+- [x] Add failing tests for JSON export fields.
+- [x] Add failing tests for SQLite round-trip and legacy migration.
+- [x] Add failing tests for Excel headers.
+- [x] Implement model fields, storage columns, JSON fields, Excel headers.
+- [x] Run targeted tests and commit `Add enrichment fields to tender records`.
 
 ### Task 2: Import Folder Source
 
@@ -50,11 +50,11 @@
 - Produces `ImportFolderSource(imports_dir: Path).fetch_with_report(keywords: list[str]) -> SourceFetchResult`
 - Supports `.csv`, `.xlsx`, `.xml`
 
-- [ ] Add failing CSV import test.
-- [ ] Add failing XLSX import test.
-- [ ] Add failing XML import test.
-- [ ] Implement parsers with header aliases and safe partial records.
-- [ ] Run targeted tests and commit `Add import folder source`.
+- [x] Add failing CSV import test.
+- [x] Add failing XLSX import test.
+- [x] Add failing XML import test.
+- [x] Implement parsers with header aliases and safe partial records.
+- [x] Run targeted tests and commit `Add import folder source`.
 
 ### Task 3: Document Evidence And Enricher
 
@@ -68,11 +68,11 @@
 - Produces `DocumentAnalyzer(documents_dir: Path).analyze() -> DocumentEvidence`
 - Produces `TenderEnricher(document_analyzer: DocumentAnalyzer).enrich(tenders: list[TenderRecord]) -> list[TenderRecord]`
 
-- [ ] Add failing document evidence test.
-- [ ] Add failing tender enrichment test for region evidence and matches.
-- [ ] Implement text document reading and evidence extraction.
-- [ ] Implement `TenderEnricher`.
-- [ ] Run targeted tests and commit `Add document evidence enrichment`.
+- [x] Add failing document evidence test.
+- [x] Add failing tender enrichment test for region evidence and matches.
+- [x] Implement text document reading and evidence extraction.
+- [x] Implement `TenderEnricher`.
+- [x] Run targeted tests and commit `Add document evidence enrichment`.
 
 ### Task 4: CLI Integration
 
@@ -84,10 +84,10 @@
 - CLI reads `imports/` and `documents/` under `--base-dir`.
 - Source health includes `ImportFolderSource`.
 
-- [ ] Add failing CLI test proving an imported CSV row reaches `latest.json`.
-- [ ] Wire `ImportFolderSource` into `run`.
-- [ ] Wire `DocumentAnalyzer` and `TenderEnricher` before `evaluate_tender`.
-- [ ] Run CLI tests and commit `Wire deep enrichment into CLI`.
+- [x] Add failing CLI test proving an imported CSV row reaches `latest.json`.
+- [x] Wire `ImportFolderSource` into `run`.
+- [x] Wire `DocumentAnalyzer` and `TenderEnricher` before `evaluate_tender`.
+- [x] Run CLI tests and commit `Wire deep enrichment into CLI`.
 
 ### Task 5: Docs And Finish
 
@@ -97,8 +97,8 @@
 - Modify: `docs/HANDOFF.md`
 - Modify: this plan
 
-- [ ] Document `imports/`, `documents/`, enrichment fields, and current binary document limitation.
-- [ ] Run `pytest -q` in worktree.
+- [x] Document `imports/`, `documents/`, enrichment fields, and current binary document limitation.
+- [x] Run `pytest -q` in worktree.
 - [ ] Merge into `codex/rts-tender-parser`.
 - [ ] Run `pytest -q` in main checkout.
 - [ ] Push `codex/rts-tender-parser` to `target`.

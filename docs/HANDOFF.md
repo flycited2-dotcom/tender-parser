@@ -16,6 +16,9 @@
 - EIS/zakupki.gov.ru parser: `tender_parser/sources/eis.py`
 - Rostender parser: `tender_parser/sources/rostender.py`
 - Composite source: `tender_parser/sources/composite.py`
+- Cabinet/export import source: `tender_parser/sources/imports.py`
+- Document evidence analyzer: `tender_parser/documents.py`
+- Tender enrichment layer: `tender_parser/enrichment.py`
 - Source health types: `tender_parser/run_report.py`
 - Cross-source deduplication: `tender_parser/dedup.py`
 - Filters: `tender_parser/filters.py`
@@ -27,6 +30,9 @@
 - Региональные endpoints могут задавать `region_hint`, чтобы закупки из региональной витрины не терялись из-за пустого региона в строке таблицы.
 - Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`; RTS больше не резервный fallback и запускается в общем сборе.
 - `CompositeSource.fetch_with_report` собирает `ok`/`empty`/`skipped`/`partial`/`blocked`/`timeout`/`ssl_error`/`error` для каждого источника и длительность запроса. Результат пишется в `exports/run_report.json`.
+- При каждом обычном запуске CLI дополнительно читает `imports/` через `ImportFolderSource`; поддерживаются CSV/XLSX/XML с колонками названия, ссылки, номера, заказчика, региона, суммы, срока, даты публикации, источника и описания.
+- Перед дедупликацией и фильтрацией CLI запускает `TenderEnricher(DocumentAnalyzer(base_dir / "documents"))`: TXT/CSV/XML/JSON/HTML-документы дают `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
+- PDF/DOCX/XLS пока не читаются напрямую; для документного слоя их нужно предварительно сохранить в текстовый/табличный формат. Папки `imports/` и `documents/` игнорируются Git.
 - Высокоуверенные дубли ЕИС/Rostender склеиваются до фильтрации; приоритет у ЕИС. Перед хранением `TenderStorage` возвращает впервые увиденные карточки, из которых формируется `exports/new_tenders.json`.
 - Excel теперь начинается с листа `Новые`, затем идут `Горячие`, `На проверку`, `Широкий хвост`, `Отсеянные`. Для фонового запуска есть `run_tender_parser_silent.bat`; `Настроить_ежедневный_запуск.ps1 -Time "08:00"` создает задачу Windows Task Scheduler.
 - `TenderRecord.match_confidence` разделяет карточки на `точное`, `вероятное` и `ручная проверка`; поле экспортируется в Excel, `latest.json` и `new_tenders.json`.
@@ -94,6 +100,7 @@ Live-run 2026-06-28 после включения RTS в основной сло
 7. После этого смотреть Фабрикант, ОТС и OnlineContract.
 8. Для CRM читать `exports/new_tenders.json` как дельту, `exports/latest.json` как полную очередь и `exports/run_report.json` как диагностику.
 9. При изменении словарей править `tender_parser/config.py` и добавлять focused tests в `tests/test_filters.py`.
+10. Для быстрого прироста охвата без нового scraper брать выгрузки из кабинетов/площадок, класть их в `imports/`, а технические задания/карточки в текстовом виде - в `documents/`, затем запускать обычный `python -m tender_parser run`.
 
 ## Git
 

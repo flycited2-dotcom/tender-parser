@@ -25,6 +25,9 @@
 - RTS endpoint-ы возвращают отдельные `SourceHealth` строки: `ok`, `empty`, `partial`, `blocked`, `timeout`, `ssl_error` или `error`.
 - RTS использует focused `RTS_SEARCH_QUERIES` и короткий `RTS_TIMEOUT_SECONDS=8`, чтобы не тратить минуты на заведомо зависающие региональные поддомены.
 - Обычный запуск сейчас использует верхний `CompositeSource` с live-слоем `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`.
+- Обычный запуск дополнительно читает локальные кабинетные выгрузки из `imports/` через `ImportFolderSource` и добавляет отдельную строку здоровья источника в `exports/run_report.json`.
+- Локальный слой доказательств читает `documents/` (TXT/CSV/XML/JSON/HTML), извлекает товарные ключи, целевые регионы и стоп-термины, затем `TenderEnricher` до фильтрации заполняет `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
+- Enrichment-поля сохраняются в SQLite и экспортируются в Excel/JSON; `detail_status` принимает `not_checked`, `imported`, `documents_checked`, `enriched`.
 - `EatIntegrationSource` пропускается без `EAT_API_TOKEN` и `EAT_EXT_SYSTEM`. По умолчанию отправляет токен как `Authorization: Bearer ...`; при необходимости настраиваются `EAT_AUTH_HEADER`, `EAT_AUTH_SCHEME`, `EAT_MAX_DETAILS`.
 - Локальные секреты теперь можно держать в `.env`; файл игнорируется Git, а `.env.example` хранит только пустые placeholders.
 - CLI-команда `python -m tender_parser check-env` проверяет ЕАТ-настройки и печатает только `configured`/`missing`, без значений токенов.
@@ -75,6 +78,7 @@
 - Сбербанк-АСТ: `www.sberbank-ast.ru` и `utp.sberbank-ast.ru` из текущей сети таймаутятся; `world.sberbank-ast.ru` показывает публичный Procurement list, но это отдельная англоязычная ветка.
 - ЗаказРФ: официальная инструкция подтверждает раздел `Поиск торгов`, но live-домены `www/etp/223etp/bp.zakazrf.ru` из текущей сети таймаутятся.
 - ЕИС и ЭТП ГПБ остаются внешне нестабильными: их сбои теперь не скрываются и не портят остальные результаты, но для большого охвата нужен дополнительный официальный канал ЕИС либо кабинетный доступ.
+- Бинарные PDF/DOCX/XLS-документы пока не извлекаются напрямую: для `documents/` их нужно предварительно сохранить как TXT/HTML/CSV/XML/JSON.
 
 ## Последний live-run
 

@@ -12,6 +12,17 @@
 
 После завершения откроется папка `exports`.
 
+## Ручные выгрузки и документы
+
+Для максимального охвата можно подмешивать выгрузки из личных кабинетов и площадок без отдельной интеграции:
+
+- положите CSV/XLSX/XML-файлы в папку `imports/`;
+- поддерживаемые колонки: название, ссылка, номер, заказчик, регион, сумма, срок подачи, дата публикации, источник, описание;
+- положите текстовые доказательства в папку `documents/`: TXT, CSV, XML, JSON, HTML;
+- при запуске парсер прочитает `imports/`, добавит источник `ImportFolderSource` в `run_report.json`, затем проверит `documents/` и заполнит поля `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
+
+PDF/DOCX/XLS-документы пока лучше предварительно сохранять как TXT/HTML/CSV/XML/JSON. Реальные кабинетные выгрузки и документы не коммитятся: `imports/` и `documents/` добавлены в `.gitignore`.
+
 ## Ежедневный сбор
 
 Для фонового запуска без окна есть `run_tender_parser_silent.bat`: лог будет записываться в `logs/daily.log`.
@@ -35,6 +46,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_еже�
 - `exports/latest.json` - JSON для будущей CRM с подходящими закупками и кандидатами на ручную проверку, включая поле `review_priority`.
 - `exports/new_tenders.json` - только впервые увиденные подходящие закупки и кандидаты на проверку; основной файл для ежедневной CRM-очереди, отсортированный по приоритету.
 - `exports/run_report.json` - здоровье источников: статус, число карточек, время запроса, ошибка или причина пропуска.
+- JSON и Excel содержат enrichment-поля: `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
 - Публичные источники: ЕИС `zakupki.gov.ru`, ЭТП ГПБ RSS, Tender.Pro API, Торги82 JSON, B2B-Center, `rostender.info` и RTS-market с диагностикой по каждому endpoint.
 - ЕАТ/Березка подключается как интеграционный API-источник при наличии токена из личного кабинета.
 - Исследование следующих ЭТП для подключения: `docs/etp_source_research_2026-05-29.md`.
