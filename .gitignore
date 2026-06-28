@@ -8,5 +8,7 @@ __pycache__/
 
 data/
 exports/
+imports/
+documents/
 logs/
 .worktrees/
