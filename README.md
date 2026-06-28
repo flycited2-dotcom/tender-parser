@@ -44,6 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_еже�
 - `data/tenders.db` - локальная история закупок.
 - `exports/tenders_YYYY-MM-DD.xlsx` - Excel с листами `Новые`, `Горячие`, `На проверку`, `Широкий хвост` и `Отсеянные`.
 - `exports/latest.json` - JSON для будущей CRM с подходящими закупками и кандидатами на ручную проверку, включая поле `review_priority`.
+- `exports/latest.html` - человекочитаемый браузерный отчет для ручного просмотра: приоритеты, ссылки, регион/сумма/срок, evidence и здоровье источников.
 - `exports/new_tenders.json` - только впервые увиденные подходящие закупки и кандидаты на проверку; основной файл для ежедневной CRM-очереди, отсортированный по приоритету.
 - `exports/run_report.json` - здоровье источников: статус, число карточек, время запроса, ошибка или причина пропуска.
 - JSON и Excel содержат enrichment-поля: `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
