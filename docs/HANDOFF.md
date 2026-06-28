@@ -31,8 +31,8 @@
 - Основной live-слой в обычном запуске - `EtpGpbRssSource`, `TenderProSource`, `Torgi82Source`, `B2BCenterSource`, `EatIntegrationSource`, `EisZakupkiSource`, `RostenderSource`, `RtsPublicSource`; RTS больше не резервный fallback и запускается в общем сборе.
 - `CompositeSource.fetch_with_report` собирает `ok`/`empty`/`skipped`/`partial`/`blocked`/`timeout`/`ssl_error`/`error` для каждого источника и длительность запроса. Результат пишется в `exports/run_report.json`.
 - При каждом обычном запуске CLI дополнительно читает `imports/` через `ImportFolderSource`; поддерживаются CSV/XLSX/XML с колонками названия, ссылки, номера, заказчика, региона, суммы, срока, даты публикации, источника и описания.
-- Перед дедупликацией и фильтрацией CLI запускает `TenderEnricher(DocumentAnalyzer(base_dir / "documents"))`: TXT/CSV/XML/JSON/HTML-документы дают `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
-- PDF/DOCX/XLS пока не читаются напрямую; для документного слоя их нужно предварительно сохранить в текстовый/табличный формат. Папки `imports/` и `documents/` игнорируются Git.
+- Перед дедупликацией и фильтрацией CLI запускает `TenderEnricher(DocumentAnalyzer(base_dir / "documents"))`: TXT/CSV/XML/JSON/HTML/XLSX/DOCX/PDF-документы дают `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
+- PDF читается по текстовому слою через `pypdf`; сканы без OCR не извлекаются. Папки `imports/` и `documents/` игнорируются Git.
 - Высокоуверенные дубли ЕИС/Rostender склеиваются до фильтрации; приоритет у ЕИС. Перед хранением `TenderStorage` возвращает впервые увиденные карточки, из которых формируется `exports/new_tenders.json`.
 - Excel теперь начинается с листа `Новые`, затем идут `Горячие`, `На проверку`, `Широкий хвост`, `Отсеянные`. Для фонового запуска есть `run_tender_parser_silent.bat`; `Настроить_ежедневный_запуск.ps1 -Time "08:00"` создает задачу Windows Task Scheduler.
 - `TenderRecord.match_confidence` разделяет карточки на `точное`, `вероятное` и `ручная проверка`; поле экспортируется в Excel, `latest.json` и `new_tenders.json`.

@@ -27,12 +27,12 @@
 - Consumes: `DocumentAnalyzer(documents_dir: Path).analyze() -> DocumentEvidence`
 - Produces: support for `.xlsx` and `.docx` suffixes in `SUPPORTED_SUFFIXES`
 
-- [ ] Add failing XLSX document test.
-- [ ] Add failing DOCX document test.
-- [ ] Implement `_read_xlsx_text(path: Path) -> str`.
-- [ ] Implement `_read_docx_text(path: Path) -> str`.
-- [ ] Run `pytest tests/test_documents.py -q`.
-- [ ] Commit `Add office document readers`.
+- [x] Add failing XLSX document test.
+- [x] Add failing DOCX document test.
+- [x] Implement `_read_xlsx_text(path: Path) -> str`.
+- [x] Implement `_read_docx_text(path: Path) -> str`.
+- [x] Run `pytest tests/test_documents.py -q`.
+- [x] Commit `Add office document readers`.
 
 ### Task 2: PDF Document Reader
 
@@ -45,12 +45,12 @@
 - Produces: support for `.pdf` suffix in `SUPPORTED_SUFFIXES`
 - Uses: `pypdf.PdfReader`
 
-- [ ] Add `pypdf==6.14.2` to `requirements.txt`.
-- [ ] Install requirements in the local venv.
-- [ ] Add failing PDF document test using `pypdf.PdfWriter` with an embedded text annotation.
-- [ ] Implement `_read_pdf_text(path: Path) -> str`.
-- [ ] Run `pytest tests/test_documents.py -q`.
-- [ ] Commit `Add PDF document reader`.
+- [x] Add `pypdf==6.14.2` to `requirements.txt`.
+- [x] Install requirements in the local venv.
+- [x] Add failing PDF document test using `pypdf.PdfWriter` with an embedded text annotation.
+- [x] Implement `_read_pdf_text(path: Path) -> str`.
+- [x] Run `pytest tests/test_documents.py -q`.
+- [x] Commit `Add PDF document reader`.
 
 ### Task 3: Docs And Verification
 
@@ -60,8 +60,8 @@
 - Modify: `docs/HANDOFF.md`
 - Modify: this plan
 
-- [ ] Document PDF/DOCX/XLSX support and image-only PDF limitation.
-- [ ] Run `pytest -q` in worktree.
+- [x] Document PDF/DOCX/XLSX support and image-only PDF limitation.
+- [x] Run `pytest -q` in worktree.
 - [ ] Merge into `codex/rts-tender-parser`.
 - [ ] Run `pytest -q` in main checkout.
 - [ ] Push `codex/rts-tender-parser` to `target`.
