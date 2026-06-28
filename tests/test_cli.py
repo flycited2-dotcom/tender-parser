@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -261,3 +262,70 @@ def test_run_merges_cross_source_duplicates(tmp_path: Path) -> None:
     assert result == 0
     assert '"count": 1' in latest
     assert '"source": "eis-zakupki"' in latest
+
+
+def test_run_adds_import_folder_records_to_current_report(tmp_path: Path) -> None:
+    imports_dir = tmp_path / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "manual.csv").write_text(
+        "Название;Ссылка;Номер;Заказчик;Регион;Сумма;Срок подачи;Источник\n"
+        "Поставка МФУ;https://example.test/imported;IMP-1;Администрация;Симферополь;45000;25.05.2026 10:00;Manual\n",
+        encoding="utf-8",
+    )
+
+    result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=EmptySource(),
+    )
+
+    latest = json.loads((tmp_path / "exports" / "latest.json").read_text(encoding="utf-8"))
+    run_report = json.loads((tmp_path / "exports" / "run_report.json").read_text(encoding="utf-8"))
+
+    assert result == 0
+    assert latest["count"] == 1
+    assert latest["items"][0]["source"] == "import-manual"
+    assert latest["items"][0]["detail_status"] == "imported"
+    assert any(source["source"] == "ImportFolderSource" and source["found"] == 1 for source in run_report["sources"])
+
+
+def test_run_enriches_records_from_documents_before_filtering(tmp_path: Path) -> None:
+    documents_dir = tmp_path / "documents"
+    documents_dir.mkdir()
+    (documents_dir / "specification.txt").write_text(
+        "Адрес поставки: г. Севастополь. Требуется поставка многофункциональных устройств.",
+        encoding="utf-8",
+    )
+
+    result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=EmptySource(),
+    )
+
+    assert result == 0
+    assert json.loads((tmp_path / "exports" / "latest.json").read_text(encoding="utf-8"))["count"] == 0
+
+    class DocumentOnlySource:
+        def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+            return [
+                TenderRecord(
+                    title="Поставка оргтехники",
+                    url="https://example.test/document-only",
+                    source="fake",
+                    tender_number="DOC-1",
+                    price=55_000,
+                    deadline=datetime(2026, 5, 25, 10, 0),
+                )
+            ]
+
+    second_result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=DocumentOnlySource(),
+    )
+
+    latest = json.loads((tmp_path / "exports" / "latest.json").read_text(encoding="utf-8"))
+
+    assert second_result == 0
+    assert latest["count"] == 1
+    assert latest["items"][0]["detail_status"] == "enriched"
+    assert "севастополь" in latest["items"][0]["document_matches"]
+    assert "specification.txt" in latest["items"][0]["delivery_region_evidence"]

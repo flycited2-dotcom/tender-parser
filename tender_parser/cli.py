@@ -8,6 +8,8 @@ from typing import Protocol, Sequence
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
 from tender_parser.dedup import deduplicate_tenders
+from tender_parser.documents import DocumentAnalyzer
+from tender_parser.enrichment import TenderEnricher
 from tender_parser.env import get_env_status, load_env_file
 from tender_parser.exporters.excel import export_excel, sort_for_review
 from tender_parser.exporters.json_exporter import export_json, export_run_report
@@ -19,6 +21,7 @@ from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
 from tender_parser.sources.etp_gpb import EtpGpbRssSource
+from tender_parser.sources.imports import ImportFolderSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.tender_pro import TenderProSource
@@ -134,7 +137,12 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         print("Excel и JSON не перезаписаны, предыдущий отчет сохранен.")
         return 2
 
-    raw_tenders = source_result.tenders
+    import_result = ImportFolderSource(base_dir / "imports").fetch_with_report(_all_keywords())
+    source_result.tenders.extend(import_result.tenders)
+    source_result.health.extend(import_result.health)
+    source_result.errors.extend(import_result.errors)
+
+    raw_tenders = TenderEnricher(DocumentAnalyzer(base_dir / "documents")).enrich(source_result.tenders)
     deduplication = deduplicate_tenders(raw_tenders)
     evaluated = [evaluate_tender(tender, now=current_time) for tender in deduplication.tenders]
 
