@@ -4,7 +4,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
-from typing import Protocol, Sequence
+from typing import Literal, Protocol, Sequence
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
 from tender_parser.dedup import deduplicate_tenders
@@ -36,6 +36,7 @@ class TenderSource(Protocol):
 
 
 EAT_REQUIRED_ENV_KEYS = ["EAT_API_TOKEN", "EAT_EXT_SYSTEM"]
+RunProfile = Literal["full", "fast", "local", "rts"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
     parser.add_argument("--dry-run", action="store_true", help="Create directories and exit")
     parser.add_argument("--now", default="", help="Override current datetime for tests, ISO format")
+    parser.add_argument(
+        "--profile",
+        default="full",
+        choices=["full", "fast", "local", "rts"],
+        help="Source profile: full, fast, local imports/documents only, or RTS diagnostics only",
+    )
     return parser
 
 
@@ -69,6 +76,29 @@ def _all_keywords() -> list[str]:
 
 
 def build_default_source() -> TenderSource:
+    return build_source_for_profile("full")
+
+
+def build_source_for_profile(profile: RunProfile) -> TenderSource:
+    if profile == "local":
+        return CompositeSource([])
+    if profile == "rts":
+        return CompositeSource([RtsPublicSource()])
+    if profile == "fast":
+        return CompositeSource(
+            [
+                CompositeSource(
+                    [
+                        TenderProSource(),
+                        Torgi82Source(),
+                        B2BCenterSource(),
+                        EatIntegrationSource(),
+                        RostenderSource(),
+                    ]
+                ),
+            ],
+            stop_after_first_success=True,
+        )
     return CompositeSource(
         [
             CompositeSource(
@@ -130,7 +160,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         return 0
 
     current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
-    active_source = source or build_default_source()
+    active_source = source or build_source_for_profile(args.profile)
     try:
         source_result = _fetch_with_report(active_source, _all_keywords())
     except SourceFetchError as exc:

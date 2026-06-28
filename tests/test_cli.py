@@ -4,7 +4,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from tender_parser.cli import _all_keywords, build_default_source, run
+from tender_parser.cli import _all_keywords, build_default_source, build_source_for_profile, run
 from tender_parser.models import TenderRecord
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
@@ -170,6 +170,50 @@ def test_build_default_source_uses_composite_source() -> None:
     assert isinstance(first_layer.sources[6], RostenderSource)
     assert isinstance(first_layer.sources[7], RtsPublicSource)
     assert len(source.sources) == 1
+
+
+def test_build_fast_profile_excludes_currently_slow_sources() -> None:
+    source = build_source_for_profile("fast")
+
+    assert isinstance(source, CompositeSource)
+    names = [item.__class__.__name__ for item in source.sources[0].sources]
+    assert names == [
+        "TenderProSource",
+        "Torgi82Source",
+        "B2BCenterSource",
+        "EatIntegrationSource",
+        "RostenderSource",
+    ]
+
+
+def test_build_rts_profile_runs_only_rts_source() -> None:
+    source = build_source_for_profile("rts")
+
+    assert isinstance(source, CompositeSource)
+    assert len(source.sources) == 1
+    assert isinstance(source.sources[0], RtsPublicSource)
+
+
+def test_run_local_profile_uses_imports_without_live_sources(tmp_path: Path) -> None:
+    imports_dir = tmp_path / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "manual.csv").write_text(
+        "Название;Ссылка;Номер;Заказчик;Регион;Сумма;Срок подачи;Источник\n"
+        "Поставка принтеров;https://example.test/local;LOCAL-1;Администрация;Севастополь;55000;25.05.2026 10:00;Manual\n",
+        encoding="utf-8",
+    )
+
+    result = run(
+        ["--profile", "local", "--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+    )
+
+    latest = json.loads((tmp_path / "exports" / "latest.json").read_text(encoding="utf-8"))
+    run_report = json.loads((tmp_path / "exports" / "run_report.json").read_text(encoding="utf-8"))
+
+    assert result == 0
+    assert latest["count"] == 1
+    assert latest["items"][0]["source"] == "import-manual"
+    assert [source["source"] for source in run_report["sources"]] == ["ImportFolderSource"]
 
 
 def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> None:
