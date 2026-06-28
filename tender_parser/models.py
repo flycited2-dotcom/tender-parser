@@ -8,6 +8,7 @@ from typing import Literal
 FilterStatus = Literal["matched", "review", "excluded"]
 MatchConfidence = Literal["точное", "вероятное", "ручная проверка"]
 ReviewPriority = Literal["hot", "review", "wide", "excluded"]
+DetailStatus = Literal["not_checked", "imported", "documents_checked", "enriched"]
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,10 @@ class TenderRecord:
     match_confidence: MatchConfidence | None = None
     review_priority: ReviewPriority | None = None
     matched_terms: list[str] = field(default_factory=list)
+    detail_status: DetailStatus = "not_checked"
+    document_matches: list[str] = field(default_factory=list)
+    delivery_region_evidence: str = ""
+    source_confidence: float = 0.0
 
     @property
     def unique_key(self) -> str:

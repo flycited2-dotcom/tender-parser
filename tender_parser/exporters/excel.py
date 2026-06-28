@@ -24,6 +24,10 @@ HEADERS = [
     "ссылка",
     "причина_включения",
     "причина_исключения",
+    "detail_status",
+    "document_matches",
+    "delivery_region_evidence",
+    "source_confidence",
     "источник",
 ]
 
@@ -68,6 +72,10 @@ def _append_rows(sheet: Worksheet, tenders: list[TenderRecord]) -> None:
                 tender.url,
                 tender.include_reason,
                 tender.exclude_reason,
+                tender.detail_status,
+                "; ".join(tender.document_matches),
+                tender.delivery_region_evidence,
+                tender.source_confidence,
                 tender.source,
             ]
         )

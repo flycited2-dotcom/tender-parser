@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
+import json
 from pathlib import Path
 
 from tender_parser.models import TenderRecord
@@ -50,7 +51,11 @@ class TenderStorage:
                     exclude_reason TEXT,
                     filter_status TEXT NOT NULL,
                     match_confidence TEXT,
-                    review_priority TEXT
+                    review_priority TEXT,
+                    detail_status TEXT,
+                    document_matches TEXT,
+                    delivery_region_evidence TEXT,
+                    source_confidence REAL
                 )
                 """
             )
@@ -62,6 +67,14 @@ class TenderStorage:
                 conn.execute("ALTER TABLE tenders ADD COLUMN match_confidence TEXT")
             if "review_priority" not in columns:
                 conn.execute("ALTER TABLE tenders ADD COLUMN review_priority TEXT")
+            if "detail_status" not in columns:
+                conn.execute("ALTER TABLE tenders ADD COLUMN detail_status TEXT")
+            if "document_matches" not in columns:
+                conn.execute("ALTER TABLE tenders ADD COLUMN document_matches TEXT")
+            if "delivery_region_evidence" not in columns:
+                conn.execute("ALTER TABLE tenders ADD COLUMN delivery_region_evidence TEXT")
+            if "source_confidence" not in columns:
+                conn.execute("ALTER TABLE tenders ADD COLUMN source_confidence REAL")
 
     def upsert_many(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
         now = datetime.now().isoformat(timespec="seconds")
@@ -81,9 +94,10 @@ class TenderStorage:
                         unique_key, title, url, source, tender_number, customer, region,
                         price, deadline, status, published_at, discovered_at, last_seen_at,
                         raw_text, category, include_reason, exclude_reason, filter_status,
-                        match_confidence, review_priority
+                        match_confidence, review_priority, detail_status, document_matches,
+                        delivery_region_evidence, source_confidence
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(unique_key) DO UPDATE SET
                         title=excluded.title,
                         url=excluded.url,
@@ -100,7 +114,11 @@ class TenderStorage:
                         exclude_reason=excluded.exclude_reason,
                         filter_status=excluded.filter_status,
                         match_confidence=excluded.match_confidence,
-                        review_priority=excluded.review_priority
+                        review_priority=excluded.review_priority,
+                        detail_status=excluded.detail_status,
+                        document_matches=excluded.document_matches,
+                        delivery_region_evidence=excluded.delivery_region_evidence,
+                        source_confidence=excluded.source_confidence
                     """,
                     (
                         tender.unique_key,
@@ -123,6 +141,10 @@ class TenderStorage:
                         tender.filter_status,
                         tender.match_confidence,
                         tender.review_priority,
+                        tender.detail_status,
+                        json.dumps(tender.document_matches, ensure_ascii=False),
+                        tender.delivery_region_evidence,
+                        tender.source_confidence,
                     ),
                 )
         return first_seen
@@ -155,4 +177,8 @@ class TenderStorage:
             filter_status=row["filter_status"],
             match_confidence=row["match_confidence"],
             review_priority=row["review_priority"],
+            detail_status=row["detail_status"] or "not_checked",
+            document_matches=json.loads(row["document_matches"] or "[]"),
+            delivery_region_evidence=row["delivery_region_evidence"] or "",
+            source_confidence=row["source_confidence"] or 0.0,
         )

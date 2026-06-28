@@ -32,6 +32,10 @@ def _to_dict(tender: TenderRecord) -> dict[str, object]:
         "include_reason": tender.include_reason,
         "exclude_reason": tender.exclude_reason,
         "matched_terms": tender.matched_terms,
+        "detail_status": tender.detail_status,
+        "document_matches": tender.document_matches,
+        "delivery_region_evidence": tender.delivery_region_evidence,
+        "source_confidence": tender.source_confidence,
     }
 
 
