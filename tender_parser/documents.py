@@ -3,16 +3,19 @@ from __future__ import annotations
 import csv
 import json
 import re
+from zipfile import ZipFile
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree
 
+from openpyxl import load_workbook
+
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS, STOP_TERMS
 from tender_parser.text import normalize_text
 
 
-SUPPORTED_SUFFIXES = {".csv", ".html", ".htm", ".json", ".txt", ".xml"}
+SUPPORTED_SUFFIXES = {".csv", ".docx", ".html", ".htm", ".json", ".txt", ".xlsx", ".xml"}
 
 
 @dataclass(frozen=True)
@@ -114,10 +117,14 @@ def _read_document_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         return _read_csv_text(path)
+    if suffix == ".docx":
+        return _read_docx_text(path)
     if suffix in {".html", ".htm"}:
         return _strip_html(_read_text(path))
     if suffix == ".json":
         return _read_json_text(path)
+    if suffix == ".xlsx":
+        return _read_xlsx_text(path)
     if suffix == ".xml":
         return " ".join(element.text or "" for element in ElementTree.fromstring(_read_text(path)).iter())
     return _read_text(path)
@@ -133,6 +140,25 @@ def _read_csv_text(path: Path) -> str:
 def _read_json_text(path: Path) -> str:
     payload = json.loads(_read_text(path))
     return _flatten_json(payload)
+
+
+def _read_xlsx_text(path: Path) -> str:
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        values: list[str] = []
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                values.extend(str(cell) for cell in row if cell is not None)
+        return " ".join(values)
+    finally:
+        workbook.close()
+
+
+def _read_docx_text(path: Path) -> str:
+    with ZipFile(path) as archive:
+        xml_text = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+    root = ElementTree.fromstring(xml_text)
+    return " ".join(element.text or "" for element in root.iter())
 
 
 def _flatten_json(value: object) -> str:
