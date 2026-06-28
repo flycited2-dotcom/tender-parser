@@ -216,6 +216,20 @@ def test_run_local_profile_uses_imports_without_live_sources(tmp_path: Path) -> 
     assert [source["source"] for source in run_report["sources"]] == ["ImportFolderSource"]
 
 
+def test_run_rts_profile_preserves_diagnostic_report_when_all_endpoints_fail(tmp_path: Path) -> None:
+    result = run(
+        ["--profile", "rts", "--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=CompositeSource([BlockedSource()]),
+    )
+
+    run_report = json.loads((tmp_path / "exports" / "run_report.json").read_text(encoding="utf-8"))
+
+    assert result == 0
+    assert run_report["summary"]["raw_count"] == 0
+    assert run_report["sources"][0]["source"] == "BlockedSource"
+    assert run_report["sources"][0]["status"] == "error"
+
+
 def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> None:
     result = run(
         ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],

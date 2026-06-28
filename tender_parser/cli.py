@@ -118,10 +118,15 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
     )
 
 
-def _fetch_with_report(source: TenderSource, keywords: list[str]) -> SourceFetchResult:
+def _fetch_with_report(
+    source: TenderSource,
+    keywords: list[str],
+    *,
+    preserve_error_report: bool = False,
+) -> SourceFetchResult:
     if isinstance(source, CompositeSource):
         result = source.fetch_with_report(keywords)
-        if not result.tenders and result.errors:
+        if not result.tenders and result.errors and not preserve_error_report:
             raise SourceFetchError(f"все источники недоступны: {'; '.join(result.errors)}")
         return result
 
@@ -162,7 +167,11 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
     active_source = source or build_source_for_profile(args.profile)
     try:
-        source_result = _fetch_with_report(active_source, _all_keywords())
+        source_result = _fetch_with_report(
+            active_source,
+            _all_keywords(),
+            preserve_error_report=args.profile == "rts",
+        )
     except SourceFetchError as exc:
         print(f"Ошибка источника: {exc}")
         print("Excel и JSON не перезаписаны, предыдущий отчет сохранен.")
