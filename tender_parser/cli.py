@@ -12,6 +12,7 @@ from tender_parser.documents import DocumentAnalyzer
 from tender_parser.enrichment import TenderEnricher
 from tender_parser.env import get_env_status, load_env_file
 from tender_parser.exporters.excel import export_excel, sort_for_review
+from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
@@ -169,6 +170,14 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     )
     json_path = export_json(actionable, exports_dir / "latest.json")
     new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
+    html_path = export_html_report(
+        actionable,
+        exports_dir / "latest.html",
+        source_report=source_result,
+        raw_count=len(raw_tenders),
+        unique_count=len(deduplication.tenders),
+        new_count=len(new_actionable),
+    )
     report_path = export_run_report(
         source_result,
         exports_dir / "run_report.json",
@@ -192,6 +201,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         )
     print(f"Excel: {excel_path}")
     print(f"JSON: {json_path}")
+    print(f"HTML: {html_path}")
     print(f"Новые JSON: {new_json_path}")
     print(f"Отчет источников: {report_path}")
     return 0

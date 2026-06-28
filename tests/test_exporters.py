@@ -6,6 +6,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from tender_parser.exporters.excel import export_excel, sort_for_review
+from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
@@ -125,3 +126,39 @@ def test_export_run_report_writes_source_health(tmp_path: Path) -> None:
     assert data["summary"] == {"raw_count": 12, "unique_count": 10, "new_count": 3}
     assert data["sources"][0]["status"] == "ok"
     assert data["sources"][0]["found"] == 12
+
+
+def test_export_html_report_writes_review_dashboard(tmp_path: Path) -> None:
+    output = tmp_path / "latest.html"
+    tender = replace(
+        make_tender("matched"),
+        document_matches=["мфу", "симферополь"],
+        delivery_region_evidence="notice.pdf: regions=симферополь; terms=мфу",
+        source_confidence=0.9,
+    )
+    report = SourceFetchResult(
+        health=[
+            SourceHealth(
+                source="ImportFolderSource",
+                status="ok",
+                found=1,
+                elapsed_seconds=0.1,
+            )
+        ]
+    )
+
+    export_html_report(
+        [tender],
+        output,
+        source_report=report,
+        raw_count=1,
+        unique_count=1,
+        new_count=1,
+    )
+
+    html = output.read_text(encoding="utf-8")
+    assert "<!doctype html>" in html
+    assert "Поставка МФУ" in html
+    assert "https://example.test/tender-1/" in html
+    assert "notice.pdf" in html
+    assert "ImportFolderSource" in html

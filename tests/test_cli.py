@@ -181,11 +181,13 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert result == 0
     assert (tmp_path / "data" / "tenders.db").exists()
     assert (tmp_path / "exports" / "latest.json").exists()
+    assert (tmp_path / "exports" / "latest.html").exists()
     assert (tmp_path / "exports" / "new_tenders.json").exists()
     assert (tmp_path / "exports" / "run_report.json").exists()
     excel_path = next((tmp_path / "exports").glob("tenders_*.xlsx"))
     workbook = load_workbook(excel_path)
     assert workbook.sheetnames == ["Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
+    assert "Поставка МФУ" in (tmp_path / "exports" / "latest.html").read_text(encoding="utf-8")
 
 
 def test_run_exports_only_current_run_matches(tmp_path: Path) -> None:
