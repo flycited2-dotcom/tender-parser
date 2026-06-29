@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tender_parser.browser.rts_cabinet import RtsCabinetBrowserClient
 from tender_parser.browser.session import check_chrome_debug_endpoint
 from tender_parser.sources.rts_cabinet import (
     RtsCabinetBrowserSource,
@@ -27,6 +28,57 @@ def test_check_chrome_debug_endpoint_returns_true_for_local_debug_server(monkeyp
     monkeypatch.setattr("tender_parser.browser.session.requests.get", fake_get)
 
     assert check_chrome_debug_endpoint("http://127.0.0.1:9222") is True
+
+
+class FakePage:
+    url = "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx"
+
+    def wait_for_load_state(self, state: str, timeout: int) -> None:
+        assert state == "domcontentloaded"
+        assert timeout == 5000
+
+    def content(self) -> str:
+        return "<html><body>ok</body></html>"
+
+
+class FakeBrowser:
+    def __init__(self) -> None:
+        self.contexts = [type("Context", (), {"pages": [FakePage()]})()]
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeChromium:
+    def __init__(self, browser: FakeBrowser) -> None:
+        self.browser = browser
+
+    def connect_over_cdp(self, debug_url: str) -> FakeBrowser:
+        assert debug_url == "http://127.0.0.1:9222"
+        return self.browser
+
+
+class FakePlaywrightManager:
+    def __init__(self, browser: FakeBrowser) -> None:
+        self.chromium = FakeChromium(browser)
+
+    def __enter__(self) -> "FakePlaywrightManager":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+
+def test_browser_client_does_not_close_external_chrome() -> None:
+    browser = FakeBrowser()
+    client = RtsCabinetBrowserClient(playwright_factory=lambda: FakePlaywrightManager(browser))
+
+    url, html = client.read_current_page()
+
+    assert "rts-tender.ru" in url
+    assert "ok" in html
+    assert browser.closed is False
 
 
 def test_parse_cabinet_page_extracts_visible_results() -> None:
