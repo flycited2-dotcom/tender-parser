@@ -3,3 +3,4 @@ openpyxl==3.1.5
 pypdf==6.14.2
 pytest==8.3.4
 requests==2.32.3
+playwright==1.61.0

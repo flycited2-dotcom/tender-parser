@@ -2,16 +2,65 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from time import monotonic
 from typing import Literal
+from typing import Protocol
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
 from tender_parser.models import TenderRecord
+from tender_parser.run_report import SourceFetchResult, SourceHealth
+from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import normalize_text, parse_deadline, parse_price_rub
 
 
 CabinetState = Literal["results", "login", "blocked", "unknown"]
+
+
+class CabinetBrowserClient(Protocol):
+    def read_current_page(self) -> tuple[str, str]:
+        ...
+
+
+class RtsCabinetBrowserSource:
+    def __init__(self, client: CabinetBrowserClient | None = None) -> None:
+        self.client = client
+
+    def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+        result = self.fetch_with_report(keywords)
+        if result.errors:
+            raise SourceFetchError("; ".join(result.errors))
+        return result.tenders
+
+    def fetch_with_report(self, keywords: list[str]) -> SourceFetchResult:
+        started_at = monotonic()
+        try:
+            url, html = self._client().read_current_page()
+        except Exception as exc:
+            detail = f"chrome unavailable: {exc}"
+            return _result("skipped", started_at, detail=detail, errors=[detail])
+
+        state = detect_cabinet_state(html, url)
+        if state == "login":
+            detail = "login required: open RTS cabinet Chrome profile and sign in manually"
+            return _result("blocked", started_at, detail=detail, errors=[detail])
+        if state == "blocked":
+            detail = "blocked: RTS shows captcha or anti-bot page"
+            return _result("blocked", started_at, detail=detail, errors=[detail])
+        if state == "unknown":
+            detail = "unknown RTS cabinet page: open search results before running collector"
+            return _result("error", started_at, detail=detail, errors=[detail])
+
+        tenders = parse_cabinet_page(html, url)
+        return _result("ok" if tenders else "empty", started_at, tenders=tenders)
+
+    def _client(self) -> CabinetBrowserClient:
+        if self.client is None:
+            from tender_parser.browser.rts_cabinet import RtsCabinetBrowserClient
+
+            self.client = RtsCabinetBrowserClient()
+        return self.client
 
 
 def detect_cabinet_state(html: str, url: str) -> CabinetState:
@@ -109,3 +158,27 @@ def _parse_price(value: str | None) -> float | None:
 
 def _clean(value: str) -> str:
     return " ".join(value.split())
+
+
+def _result(
+    status: Literal["ok", "empty", "skipped", "blocked", "error"],
+    started_at: float,
+    *,
+    tenders: list[TenderRecord] | None = None,
+    detail: str = "",
+    errors: list[str] | None = None,
+) -> SourceFetchResult:
+    items = tenders or []
+    return SourceFetchResult(
+        tenders=items,
+        health=[
+            SourceHealth(
+                source="rts-cabinet",
+                status=status,
+                found=len(items),
+                elapsed_seconds=round(monotonic() - started_at, 3),
+                detail=detail,
+            )
+        ],
+        errors=errors or [],
+    )

@@ -465,7 +465,7 @@ class RtsCabinetBrowserClient:
 Add to `requirements.txt`:
 
 ```text
-playwright==1.49.1
+playwright==1.61.0
 ```
 
 - [ ] **Step 5: Run tests**
@@ -797,4 +797,3 @@ Type consistency:
 - `detect_cabinet_state(html: str, url: str)` is introduced in Task 1 and consumed in Task 2.
 - `RtsCabinetBrowserSource` is introduced in Task 2 and consumed in Task 3.
 - CLI profile name is consistently `rts-cabinet`.
-
