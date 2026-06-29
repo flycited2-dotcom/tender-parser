@@ -13,6 +13,7 @@ from tender_parser.sources.eis import EisZakupkiSource
 from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
+from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.torgi82 import Torgi82Source
 
@@ -192,6 +193,14 @@ def test_build_rts_profile_runs_only_rts_source() -> None:
     assert isinstance(source, CompositeSource)
     assert len(source.sources) == 1
     assert isinstance(source.sources[0], RtsPublicSource)
+
+
+def test_build_rts_cabinet_profile_runs_only_cabinet_source() -> None:
+    source = build_source_for_profile("rts-cabinet")
+
+    assert isinstance(source, CompositeSource)
+    assert len(source.sources) == 1
+    assert isinstance(source.sources[0], RtsCabinetBrowserSource)
 
 
 def test_run_local_profile_uses_imports_without_live_sources(tmp_path: Path) -> None:

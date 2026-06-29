@@ -27,3 +27,13 @@ def test_eat_setup_helper_writes_ignored_env_file() -> None:
     assert "EAT_API_TOKEN=$ApiToken" in text
     assert "EAT_EXT_SYSTEM=$ExtSystem" in text
     assert "check-env" in text
+
+
+def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:
+    open_text = (ROOT / "Открыть_RTS_кабинет_Chrome.bat").read_text(encoding="utf-8")
+    collect_text = (ROOT / "Собрать_RTS_кабинет.bat").read_text(encoding="utf-8")
+
+    assert "--remote-debugging-address=127.0.0.1" in open_text
+    assert "--remote-debugging-port=9222" in open_text
+    assert "browser_profiles\\rts_chrome" in open_text
+    assert "python -m tender_parser run --profile rts-cabinet" in collect_text

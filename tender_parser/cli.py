@@ -25,6 +25,7 @@ from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.imports import ImportFolderSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
+from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.torgi82 import Torgi82Source
 from tender_parser.storage import TenderStorage
@@ -36,7 +37,7 @@ class TenderSource(Protocol):
 
 
 EAT_REQUIRED_ENV_KEYS = ["EAT_API_TOKEN", "EAT_EXT_SYSTEM"]
-RunProfile = Literal["full", "fast", "local", "rts"]
+RunProfile = Literal["full", "fast", "local", "rts", "rts-cabinet"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,8 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--profile",
         default="full",
-        choices=["full", "fast", "local", "rts"],
-        help="Source profile: full, fast, local imports/documents only, or RTS diagnostics only",
+        choices=["full", "fast", "local", "rts", "rts-cabinet"],
+        help="Source profile: full, fast, local imports/documents only, RTS diagnostics, or RTS cabinet browser mode",
     )
     return parser
 
@@ -84,6 +85,8 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
         return CompositeSource([])
     if profile == "rts":
         return CompositeSource([RtsPublicSource()])
+    if profile == "rts-cabinet":
+        return CompositeSource([RtsCabinetBrowserSource()])
     if profile == "fast":
         return CompositeSource(
             [
@@ -170,7 +173,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         source_result = _fetch_with_report(
             active_source,
             _all_keywords(),
-            preserve_error_report=args.profile == "rts",
+            preserve_error_report=args.profile in {"rts", "rts-cabinet"},
         )
     except SourceFetchError as exc:
         print(f"Ошибка источника: {exc}")

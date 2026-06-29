@@ -11,4 +11,5 @@ exports/
 imports/
 documents/
 logs/
+browser_profiles/
 .worktrees/
