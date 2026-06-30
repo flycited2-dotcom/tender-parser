@@ -154,6 +154,9 @@ def test_all_keywords_includes_expanded_network_and_electrical_terms() -> None:
     assert "сетевое оборудование" in keywords
     assert "точка доступа" in keywords
     assert "электротехническая продукция" in keywords
+    assert "разъединитель" in keywords
+    assert "изолятор" in keywords
+    assert "трансформатор тока" in keywords
 
 
 def test_build_default_source_uses_composite_source() -> None:

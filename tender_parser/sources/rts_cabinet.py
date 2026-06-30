@@ -68,8 +68,19 @@ def detect_cabinet_state(html: str, url: str) -> CabinetState:
     lower_html = html.lower()
     if "captcha" in normalized or "проверка безопасности" in normalized or "/captcha" in url.lower():
         return "blocked"
-    if "вход в личный кабинет" in normalized or 'type="password"' in lower_html or "/login" in url.lower():
+    url_lower = url.lower()
+    logged_in = "выход" in normalized
+    login_page = (
+        "/login" in url_lower
+        or "login.aspx" in url_lower
+        or "единая система входа" in normalized
+        or ("вход в личный кабинет" in normalized and not logged_in)
+        or ('type="password"' in lower_html and not logged_in)
+    )
+    if login_page:
         return "login"
+    if "jqgrow" in lower_html and "номер закупки" in normalized:
+        return "results"
     if "номер процедуры" in normalized and ("наименование" in normalized or "нмцк" in normalized):
         return "results"
     return "unknown"
@@ -77,7 +88,7 @@ def detect_cabinet_state(html: str, url: str) -> CabinetState:
 
 def parse_cabinet_page(html: str, source_url: str) -> list[TenderRecord]:
     soup = BeautifulSoup(html, "html.parser")
-    tenders: list[TenderRecord] = []
+    tenders: list[TenderRecord] = _parse_jqgrid_rows(soup, source_url)
     for table in soup.find_all("table"):
         headers = [_clean(cell.get_text(" ", strip=True)).lower() for cell in table.find_all("th")]
         if not _looks_like_results_table(headers):
@@ -114,6 +125,55 @@ def parse_cabinet_page(html: str, source_url: str) -> list[TenderRecord]:
                 )
             )
     return tenders
+
+
+def _parse_jqgrid_rows(soup: BeautifulSoup, source_url: str) -> list[TenderRecord]:
+    tenders: list[TenderRecord] = []
+    for row in soup.select("tr.jqgrow"):
+        number_cell = _jq_cell(row, "Number")
+        title_cell = _jq_cell(row, "TradeName") or _jq_cell(row, "Name")
+        title = _clean(_cell_text(title_cell)) if title_cell else ""
+        if not title:
+            continue
+        link = title_cell.find("a", href=True) if title_cell else None
+        if link is None and number_cell is not None:
+            link = number_cell.find("a", href=True)
+        tenders.append(
+            TenderRecord(
+                title=title,
+                url=urljoin(source_url, str(link["href"])) if link else source_url,
+                source="rts-cabinet",
+                tender_number=_clean(_cell_text(number_cell)) or _clean(_cell_text(_jq_cell(row, "TradeId"))),
+                customer=_clean(_cell_text(_jq_cell(row, "OrganizerName"))),
+                region=_clean(_cell_text(_jq_cell(row, "Region"))),
+                price=_parse_price(_cell_text(_jq_cell(row, "StartPrice"))),
+                deadline=_parse_date(_cell_text(_jq_cell(row, "ApplicationEndDate"))),
+                published_at=_parse_date(_cell_text(_jq_cell(row, "PublicationDate"))),
+                status=_clean(_cell_text(_jq_cell(row, "LotStateString"))),
+                discovered_at=datetime.now(),
+                raw_text=_clean(row.get_text(" ", strip=True)),
+                detail_status="enriched",
+                source_confidence=0.9,
+            )
+        )
+    return tenders
+
+
+def _jq_cell(row, suffix: str):
+    for cell in row.find_all(["td", "th"]):
+        aria = str(cell.get("aria-describedby") or "")
+        if aria.endswith(f"_{suffix}"):
+            return cell
+    return None
+
+
+def _cell_text(cell) -> str:
+    if cell is None:
+        return ""
+    title = cell.get("title")
+    if title:
+        return str(title)
+    return cell.get_text(" ", strip=True)
 
 
 def _looks_like_results_table(headers: list[str]) -> bool:
@@ -154,6 +214,14 @@ def _parse_price(value: str | None) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    text = normalize_text(value)
+    match = re.search(r"\d{2}\.\d{2}\.\d{4}(?:\s+\d{2}:\d{2})?", text)
+    if match:
+        return parse_deadline(match.group(0))
+    return parse_deadline(value)
 
 
 def _clean(value: str) -> str:

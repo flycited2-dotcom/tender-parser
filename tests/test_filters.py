@@ -231,6 +231,23 @@ def test_evaluate_tender_matches_actual_monitor_word() -> None:
     assert "монитор" in result.include_reason.lower()
 
 
+def test_evaluate_tender_matches_rts_electrical_equipment_terms() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка разъединителей и изоляторов 10 кВ",
+            raw_text="Разъединитель РВЗ 10 кВ, изоляторы, трансформатор тока 35кВ",
+            region="Респ. Крым",
+            price=None,
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "review"
+    assert result.category == "Электротехника и оборудование"
+    assert result.review_priority == "review"
+    assert "разъединитель" in result.include_reason.lower()
+
+
 def test_evaluate_tender_matches_region_from_title() -> None:
     result = evaluate_tender(
         make_tender(title="Поставка МФУ в Севастополь", region=None, raw_text="Поставка МФУ"),

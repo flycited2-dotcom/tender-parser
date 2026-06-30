@@ -102,6 +102,57 @@ def test_parse_cabinet_page_extracts_visible_results() -> None:
     assert tender.source_confidence == 0.9
 
 
+def test_parse_cabinet_page_extracts_jqgrid_results() -> None:
+    html = """
+    <html>
+      <body>
+        <table class="ui-jqgrid-htable">
+          <tr>
+            <th>\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u043a\u0443\u043f\u043a\u0438</th>
+            <th>\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0437\u0430\u043a\u0443\u043f\u043a\u0438</th>
+            <th>\u041d\u0430\u0447\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043d\u0430</th>
+          </tr>
+        </table>
+        <table id="BaseMainContent_MainContent_jqgTrade">
+          <tr class="jqgrow" id="5967801">
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_PublicationDate">30.06.2026 17:12<br>\u041c\u0421\u041a</td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_Number">
+              <a href="/supplier/auction/Trade/View.aspx?Id=3952750&amp;Logging=TradeByNumber">RTS454-26043531702296</a>
+            </td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_OrganizerName">\u0423\u0424\u041f\u0421 \u0413.\u041c\u041e\u0421\u041a\u0412\u042b</td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_Region">\u0433. \u041c\u043e\u0441\u043a\u0432\u0430</td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_TradeName">
+              <a href="/supplier/auction/Trade/View.aspx?Id=3952750&amp;Logging=TradeByName">
+                \u041e\u043a\u0430\u0437\u0430\u043d\u0438\u0435 \u0443\u0441\u043b\u0443\u0433 \u043f\u043e \u0444\u0438\u0437\u0438\u0447\u0435\u0441\u043a\u043e\u0439 \u043e\u0445\u0440\u0430\u043d\u0435
+              </a>
+            </td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_Name">
+              \u041e\u043a\u0430\u0437\u0430\u043d\u0438\u0435 \u0443\u0441\u043b\u0443\u0433 \u043f\u043e \u0444\u0438\u0437\u0438\u0447\u0435\u0441\u043a\u043e\u0439 \u043e\u0445\u0440\u0430\u043d\u0435
+            </td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_StartPrice">184 773,66 \u0440\u0443\u0431.</td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_ApplicationEndDate">08.07.2026 09:00<br>\u041c\u0421\u041a</td>
+            <td aria-describedby="BaseMainContent_MainContent_jqgTrade_LotStateString">\u041f\u0440\u0438\u0435\u043c \u0437\u0430\u044f\u0432\u043e\u043a</td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    tenders = parse_cabinet_page(html, "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx")
+
+    assert len(tenders) == 1
+    tender = tenders[0]
+    assert tender.tender_number == "RTS454-26043531702296"
+    assert tender.title == "\u041e\u043a\u0430\u0437\u0430\u043d\u0438\u0435 \u0443\u0441\u043b\u0443\u0433 \u043f\u043e \u0444\u0438\u0437\u0438\u0447\u0435\u0441\u043a\u043e\u0439 \u043e\u0445\u0440\u0430\u043d\u0435"
+    assert tender.url == "https://223.rts-tender.ru/supplier/auction/Trade/View.aspx?Id=3952750&Logging=TradeByName"
+    assert tender.customer == "\u0423\u0424\u041f\u0421 \u0413.\u041c\u041e\u0421\u041a\u0412\u042b"
+    assert tender.region == "\u0433. \u041c\u043e\u0441\u043a\u0432\u0430"
+    assert tender.price == 184_773.66
+    assert tender.deadline is not None
+    assert tender.deadline.year == 2026
+    assert tender.status == "\u041f\u0440\u0438\u0435\u043c \u0437\u0430\u044f\u0432\u043e\u043a"
+
+
 def test_detect_cabinet_state_identifies_results_login_and_blocked() -> None:
     results = (FIXTURES / "rts_cabinet_results_sample.html").read_text(encoding="utf-8")
     login = (FIXTURES / "rts_cabinet_login_sample.html").read_text(encoding="utf-8")
@@ -110,6 +161,24 @@ def test_detect_cabinet_state_identifies_results_login_and_blocked() -> None:
     assert detect_cabinet_state(results, "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx") == "results"
     assert detect_cabinet_state(login, "https://223.rts-tender.ru/login") == "login"
     assert detect_cabinet_state(blocked, "https://223.rts-tender.ru/captcha") == "blocked"
+
+
+def test_detect_cabinet_state_keeps_logged_in_search_page_unknown() -> None:
+    html = """
+    <html>
+      <head><title>\u041f\u043e\u0438\u0441\u043a \u0437\u0430\u043a\u0443\u043f\u043e\u043a</title></head>
+      <body>
+        <a>\u0412\u044b\u0445\u043e\u0434</a>
+        <p>\u0415\u0441\u043b\u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043d\u0435 \u0431\u0443\u0434\u0435\u0442 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u043e,
+        \u043f\u043e\u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u044b\u0439 \u0432\u0445\u043e\u0434 \u0432 \u043b\u0438\u0447\u043d\u044b\u0439
+        \u043a\u0430\u0431\u0438\u043d\u0435\u0442.</p>
+      </body>
+    </html>
+    """
+
+    state = detect_cabinet_state(html, "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx")
+
+    assert state == "unknown"
 
 
 class FakeCabinetClient:
