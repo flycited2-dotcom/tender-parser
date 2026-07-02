@@ -6,7 +6,7 @@ from datetime import datetime
 
 from tender_parser.config import CATEGORY_KEYWORDS, MIN_PRICE_RUB, REGION_TERMS, STOP_TERMS
 from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
-from tender_parser.text import normalize_text
+from tender_parser.text import normalize_text, word_term_matches
 
 
 STOP_TERM_VARIANTS = {
@@ -38,9 +38,7 @@ def _category_term_matches(text: str, term: str) -> bool:
     if not normalized:
         return False
     if " " not in normalized:
-        if normalized == "монитор":
-            return re.search(r"(?<![\w])монитор(?!инг)[\w-]*(?![\w])", text) is not None
-        return re.search(rf"(?<![\w]){re.escape(normalized)}[\w-]*(?![\w])", text) is not None
+        return word_term_matches(text, normalized)
     return normalized in text
 
 

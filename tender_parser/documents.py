@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS, STOP_TERMS
-from tender_parser.text import normalize_text
+from tender_parser.text import normalize_text, word_term_matches
 
 
 SUPPORTED_SUFFIXES = {".csv", ".docx", ".html", ".htm", ".json", ".pdf", ".txt", ".xlsx", ".xml"}
@@ -91,7 +91,7 @@ def _term_matches(text: str, term: str) -> bool:
     if not term:
         return False
     if " " not in term:
-        return re.search(rf"(?<![\w]){re.escape(term)}[\w-]*(?![\w])", text) is not None
+        return word_term_matches(text, term)
     if term in text:
         return True
     return _phrase_stems_match(text, term)

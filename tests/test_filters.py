@@ -217,6 +217,31 @@ def test_evaluate_tender_excludes_generic_consumables_without_target_context() -
     assert result.review_priority == "excluded"
 
 
+def test_evaluate_tender_does_not_treat_arsenic_as_mouse() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка соединений мышьяка в Республику Крым",
+            raw_text="Поставка соединений мышьяка в Республику Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
+
+
+def test_evaluate_tender_does_not_treat_thyroid_as_switchboard() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="УЗИ щитовидной железы в Республике Крым",
+            raw_text="УЗИ щитовидной железы",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+
+
 def test_evaluate_tender_matches_actual_monitor_word() -> None:
     result = evaluate_tender(
         make_tender(
