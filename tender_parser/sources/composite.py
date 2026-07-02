@@ -73,7 +73,7 @@ class CompositeSource:
                 continue
 
             for tender in tenders:
-                dedupe_key = tender.tender_number or tender.unique_key
+                dedupe_key = tender.unique_key
                 if dedupe_key in seen:
                     continue
                 seen.add(dedupe_key)

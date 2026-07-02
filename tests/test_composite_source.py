@@ -112,6 +112,26 @@ def test_composite_source_uses_source_level_health_report() -> None:
     ]
 
 
+def test_composite_source_keeps_same_number_from_different_sources() -> None:
+    class OtherSource:
+        def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+            return [
+                TenderRecord(
+                    title="Другой тендер с тем же номером",
+                    url="https://other.test/tender-1/",
+                    source="other",
+                    tender_number="1",
+                )
+            ]
+
+    source = CompositeSource([GoodSource(), OtherSource()])
+
+    tenders = source.fetch_keywords(["мфу"])
+
+    assert len(tenders) == 2
+    assert {tender.source for tender in tenders} == {"good", "other"}
+
+
 def test_composite_source_raises_when_every_source_fails() -> None:
     source = CompositeSource([FailingSource(), FailingSource()])
 
