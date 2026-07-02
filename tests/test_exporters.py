@@ -33,6 +33,9 @@ def make_tender(status: str) -> TenderRecord:
     )
 
 
+NOW = datetime(2026, 5, 19, 12, 0)
+
+
 def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
     output = tmp_path / "tenders.xlsx"
     export_excel(
@@ -41,15 +44,61 @@ def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
         [replace(make_tender("review"), review_priority="wide")],
         [make_tender("excluded")],
         output,
+        now=NOW,
     )
 
     workbook = load_workbook(output)
-    assert workbook.sheetnames == ["Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
-    assert workbook["Горячие"]["D1"].value == "приоритет"
-    assert workbook["Горячие"]["D2"].value == "hot"
-    assert workbook["Горячие"]["E2"].value == "Поставка МФУ"
-    assert workbook["На проверку"]["E2"].value == "Поставка МФУ"
-    assert workbook["Широкий хвост"]["E2"].value == "Поставка МФУ"
+    assert workbook.sheetnames == ["Дашборд", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
+    hot_sheet = workbook["Горячие"]
+    assert hot_sheet["A1"].value == "приоритет"
+    assert hot_sheet["A2"].value == "Горячий"
+    assert hot_sheet["C2"].value == "Поставка МФУ"
+    assert workbook["На проверку"]["C2"].value == "Поставка МФУ"
+    assert workbook["Широкий хвост"]["C2"].value == "Поставка МФУ"
+
+
+def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    export_excel([make_tender("matched")], [], [], [], output, now=NOW)
+
+    sheet = load_workbook(output)["Горячие"]
+    assert sheet.auto_filter.ref is not None
+    assert sheet.freeze_panes == "D2"
+    assert sheet["C2"].hyperlink.target == "https://example.test/tender-1/"
+    assert sheet["E2"].value == 45_000.0
+    assert "₽" in sheet["E2"].number_format
+    assert sheet["F2"].value == datetime(2026, 5, 25, 10, 0)
+    assert sheet["A2"].fill.start_color.rgb == "FFFBE0D6"
+    assert sheet["B2"].value == 6
+    assert sheet["B2"].fill.start_color.rgb == "FFFEECCA"
+    assert len(sheet.data_validations.dataValidation) == 1
+
+
+def test_export_excel_builds_dashboard_with_kpi_and_sources(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    health = [SourceHealth(source="rts-cabinet", status="ok", found=1, elapsed_seconds=0.5)]
+    export_excel(
+        [make_tender("matched")],
+        [make_tender("review")],
+        [],
+        [make_tender("excluded")],
+        output,
+        new_tenders=[make_tender("matched")],
+        now=NOW,
+        source_health=health,
+    )
+
+    dashboard = load_workbook(output)["Дашборд"]
+    labels = {dashboard.cell(row=4, column=index).value for index in range(1, 7)}
+    assert {"Горячие", "На проверку", "Новые для CRM"} <= labels
+    values = [dashboard.cell(row=5, column=index).value for index in range(1, 7)]
+    assert 1 in values
+    column_a = [cell.value for cell in dashboard["A"] if cell.value]
+    assert "Actionable по источникам" in column_a
+    assert "Топ горячих" in column_a
+    assert "Здоровье источников" in column_a
+    assert "test" in column_a
+    assert "rts-cabinet" in column_a
 
 
 def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) -> None:
@@ -62,11 +111,12 @@ def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) 
         [],
         output,
         new_tenders=[make_tender("matched")],
+        now=NOW,
     )
 
     workbook = load_workbook(output)
-    assert workbook.sheetnames[0] == "Новые"
-    assert workbook["Новые"]["E2"].value == "Поставка МФУ"
+    assert workbook.sheetnames[:2] == ["Дашборд", "Новые"]
+    assert workbook["Новые"]["C2"].value == "Поставка МФУ"
 
 
 def test_sort_for_review_orders_by_priority_deadline_price_and_discovery() -> None:

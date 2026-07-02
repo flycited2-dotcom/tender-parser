@@ -209,6 +209,8 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         excluded,
         exports_dir / f"tenders_{date_stamp}.xlsx",
         new_tenders=new_actionable,
+        now=current_time,
+        source_health=source_result.health,
     )
     json_path = export_json(actionable, exports_dir / "latest.json")
     new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
