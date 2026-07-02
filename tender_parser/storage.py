@@ -16,6 +16,9 @@ def _str_to_dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+ACTIONABLE_PRIORITIES = {"hot", "review", "wide"}
+
+
 class TenderStorage:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -77,16 +80,26 @@ class TenderStorage:
                 conn.execute("ALTER TABLE tenders ADD COLUMN source_confidence REAL")
 
     def upsert_many(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
+        """Сохраняет карточки и возвращает новые для CRM-очереди.
+
+        Новыми считаются впервые увиденные карточки и карточки, впервые
+        перешедшие из неактионабельного статуса в hot/review/wide.
+        """
         now = datetime.now().isoformat(timespec="seconds")
         first_seen: list[TenderRecord] = []
         with self._connect() as conn:
             for tender in tenders:
                 discovered = _dt_to_str(tender.discovered_at) or now
                 exists = conn.execute(
-                    "SELECT 1 FROM tenders WHERE unique_key = ?",
+                    "SELECT review_priority FROM tenders WHERE unique_key = ?",
                     (tender.unique_key,),
                 ).fetchone()
                 if exists is None:
+                    first_seen.append(tender)
+                elif (
+                    exists["review_priority"] not in ACTIONABLE_PRIORITIES
+                    and tender.review_priority in ACTIONABLE_PRIORITIES
+                ):
                     first_seen.append(tender)
                 conn.execute(
                     """
@@ -101,14 +114,14 @@ class TenderStorage:
                     ON CONFLICT(unique_key) DO UPDATE SET
                         title=excluded.title,
                         url=excluded.url,
-                        customer=excluded.customer,
-                        region=excluded.region,
-                        price=excluded.price,
-                        deadline=excluded.deadline,
-                        status=excluded.status,
-                        published_at=excluded.published_at,
+                        customer=COALESCE(NULLIF(excluded.customer, ''), customer),
+                        region=COALESCE(NULLIF(excluded.region, ''), region),
+                        price=COALESCE(excluded.price, price),
+                        deadline=COALESCE(NULLIF(excluded.deadline, ''), deadline),
+                        status=COALESCE(NULLIF(excluded.status, ''), status),
+                        published_at=COALESCE(NULLIF(excluded.published_at, ''), published_at),
                         last_seen_at=excluded.last_seen_at,
-                        raw_text=excluded.raw_text,
+                        raw_text=COALESCE(NULLIF(excluded.raw_text, ''), raw_text),
                         category=excluded.category,
                         include_reason=excluded.include_reason,
                         exclude_reason=excluded.exclude_reason,
