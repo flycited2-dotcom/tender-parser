@@ -1,10 +1,27 @@
 from datetime import datetime
 
-from tender_parser.text import normalize_text, parse_deadline, parse_price_rub
+from tender_parser.text import normalize_text, parse_deadline, parse_price_rub, word_term_matches
 
 
 def test_normalize_text_lowercases_and_collapses_spaces() -> None:
     assert normalize_text("  МФУ\nПринтер   ") == "мфу принтер"
+
+
+def test_normalize_text_folds_yo_and_narrow_spaces() -> None:
+    assert normalize_text("Щёлкино 100 000") == "щелкино 100 000"
+
+
+def test_parse_price_rub_without_currency_marker_when_not_required() -> None:
+    assert parse_price_rub("1 052 860,00", require_currency=False) == 1052860.0
+    assert parse_price_rub("1 052 860,00") is None
+
+
+def test_word_term_matches_uses_exception_table() -> None:
+    assert word_term_matches("клавиатура и мышь беспроводная", "мышь") is True
+    assert word_term_matches("соединения мышьяка", "мышь") is False
+    assert word_term_matches("узи щитовидной железы", "щит") is False
+    assert word_term_matches("щиты распределительные", "щит") is True
+    assert word_term_matches("мониторинг цен", "монитор") is False
 
 
 def test_parse_price_rub_accepts_russian_format() -> None:
