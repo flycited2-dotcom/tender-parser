@@ -25,7 +25,7 @@ def _first_matching_term(text: str, terms: list[str]) -> str | None:
     return None
 
 
-def _matching_category(text: str) -> tuple[str | None, list[str]]:
+def matching_category(text: str) -> tuple[str | None, list[str]]:
     for category, terms in CATEGORY_KEYWORDS.items():
         matches = [normalize_text(term) for term in terms if _category_term_matches(text, term)]
         if matches:
@@ -118,7 +118,7 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if tender.deadline is not None and tender.deadline <= current:
         return _exclude(tender, "срок подачи истек")
 
-    category, terms = _matching_category(searchable)
+    category, terms = matching_category(searchable)
     if not category:
         return _exclude(tender, "категория интереса не найдена")
 

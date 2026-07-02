@@ -2,13 +2,17 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote_plus
 
+from tender_parser.models import TenderRecord
 from tender_parser.sources.b2b_center import (
     B2BCenterSource,
     build_search_url,
+    is_detail_candidate,
+    parse_detail_page,
     parse_market_page,
 )
 
 SAMPLE_HTML = Path("tests/fixtures/b2b_center_market_sample.html").read_text(encoding="utf-8")
+DETAIL_HTML = Path("tests/fixtures/b2b_center_detail_sample.html").read_text(encoding="utf-8")
 
 
 def test_build_search_url_uses_b2b_public_keyword_contract() -> None:
@@ -54,10 +58,80 @@ class MarketSession:
 
 def test_fetch_keywords_uses_configured_queries_and_deduplicates() -> None:
     session = MarketSession()
-    source = B2BCenterSource(session=session, queries=["мфу", "принтер"])
+    source = B2BCenterSource(session=session, queries=["мфу", "принтер"], max_details=0)
 
     tenders = source.fetch_keywords(["ignored"])
 
     assert len(tenders) == 2
     assert len(session.requested_urls) == 2
     assert "f_keyword=" in session.requested_urls[0]
+
+
+class DetailResponse:
+    text = DETAIL_HTML
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class DetailSession(MarketSession):
+    def get(self, url: str, timeout: int) -> MarketResponse | DetailResponse:
+        self.requested_urls.append(url)
+        if "/tender-" in url:
+            return DetailResponse()
+        return MarketResponse()
+
+
+def test_parse_detail_page_extracts_price_deadline_customer_and_address() -> None:
+    detail = parse_detail_page(DETAIL_HTML)
+
+    assert detail.price == 1_234_567.89
+    assert detail.deadline == datetime(2026, 6, 30, 12, 0)
+    assert detail.published_at == datetime(2026, 6, 23, 10, 15)
+    assert detail.customer == 'ГБУЗ "Симферопольская больница"'
+    assert "Симферополь" in (detail.delivery_address or "")
+
+
+def test_is_detail_candidate_requires_category_and_missing_fields() -> None:
+    interesting = TenderRecord(
+        title="Поставка МФУ", url="https://example.test/1", source="b2b-center", raw_text="Поставка МФУ"
+    )
+    boring = TenderRecord(
+        title="Поставка щебня", url="https://example.test/2", source="b2b-center", raw_text="Поставка щебня"
+    )
+    complete = TenderRecord(
+        title="Поставка МФУ",
+        url="https://example.test/3",
+        source="b2b-center",
+        region="Симферополь",
+        price=100_000.0,
+        raw_text="Поставка МФУ",
+    )
+
+    assert is_detail_candidate(interesting) is True
+    assert is_detail_candidate(boring) is False
+    assert is_detail_candidate(complete) is False
+
+
+def test_fetch_keywords_enriches_candidates_with_detail_pages() -> None:
+    session = DetailSession()
+    source = B2BCenterSource(session=session, queries=["мфу"], detail_delay_seconds=0)
+
+    tenders = source.fetch_keywords([])
+
+    mfu = next(tender for tender in tenders if tender.tender_number == "4499001")
+    assert mfu.price == 1_234_567.89
+    assert mfu.region == "Симферополь"
+    assert mfu.customer == 'ООО "Крымский заказчик"'
+    assert mfu.detail_status == "enriched"
+    assert "Симферополь" in mfu.raw_text
+
+
+def test_fetch_keywords_limits_detail_requests() -> None:
+    session = DetailSession()
+    source = B2BCenterSource(session=session, queries=["мфу"], max_details=1, detail_delay_seconds=0)
+
+    source.fetch_keywords([])
+
+    detail_urls = [url for url in session.requested_urls if "/tender-" in url]
+    assert len(detail_urls) == 1
