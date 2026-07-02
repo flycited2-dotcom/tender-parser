@@ -140,6 +140,36 @@ class QueryCaptureSession:
         return MarketResponse(url, EMPTY_HTML)
 
 
+class SharedTenderSession:
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+
+    def get(self, url: str, timeout: int) -> MarketResponse:
+        return MarketResponse(url, SAMPLE_HTML)
+
+
+def test_fetch_with_report_visits_region_hinted_endpoints_first() -> None:
+    source = RtsPublicSource(
+        session=SharedTenderSession(),
+        endpoints=[
+            RtsMarketEndpoint("https://www.rosatom.rts-tender.ru/market/", "rts-rosatom"),
+            RtsMarketEndpoint(
+                "https://zakupki-simferopol.rts-tender.ru/market/",
+                "rts-zakupki-simferopol",
+                "Симферополь",
+            ),
+        ],
+        queries=["мфу"],
+    )
+
+    result = source.fetch_with_report(["мфу"])
+
+    kept = [tender for tender in result.tenders if tender.tender_number == "4455001"]
+    assert kept
+    assert kept[0].region == "Симферополь"
+    assert kept[0].source == "rts-zakupki-simferopol"
+
+
 def test_fetch_keyword_raises_when_source_returns_captcha() -> None:
     source = RtsPublicSource(session=CaptchaSession())
 

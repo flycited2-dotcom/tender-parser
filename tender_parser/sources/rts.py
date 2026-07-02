@@ -176,7 +176,8 @@ class RtsPublicSource:
         health: list[SourceHealth] = []
         seen: set[str] = set()
         queries = self.queries or list(keywords)
-        for endpoint in self.endpoints:
+        # Региональные endpoint'ы идут первыми, чтобы дубль номера не терял region_hint.
+        for endpoint in sorted(self.endpoints, key=lambda item: item.region_hint is None):
             started_at = monotonic()
             endpoint_tenders: list[TenderRecord] = []
             endpoint_error = ""
