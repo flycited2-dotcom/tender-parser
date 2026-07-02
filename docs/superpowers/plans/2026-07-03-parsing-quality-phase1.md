@@ -18,7 +18,7 @@
 - Modify: `tender_parser/text.py`
 - Test: `tests/test_text.py`
 
-- [ ] **Step 1: Failing-тесты** — в `tests/test_text.py`:
+- [x] **Step 1: Failing-тесты** — в `tests/test_text.py`:
 
 ```python
 def test_normalize_text_folds_yo_and_narrow_spaces() -> None:
@@ -38,7 +38,7 @@ def test_word_term_matches_uses_exception_table() -> None:
     assert word_term_matches("мониторинг цен", "монитор") is False
 ```
 
-- [ ] **Step 2: Реализация** — `normalize_text` чистит ` `/` ` и сводит `ё→е`; `parse_price_rub(value, *, require_currency=True)`; новая функция:
+- [x] **Step 2: Реализация** — `normalize_text` чистит ` `/` ` и сводит `ё→е`; `parse_price_rub(value, *, require_currency=True)`; новая функция:
 
 ```python
 TERM_SUFFIX_EXCEPTIONS = {
@@ -56,7 +56,7 @@ def word_term_matches(text: str, term: str) -> bool:
     return re.search(rf"(?<![\w]){re.escape(term)}{suffix_guard}[\w-]*(?![\w])", text) is not None
 ```
 
-- [ ] **Step 3: pytest зелёный, commit** `Fold yo and narrow spaces, share word matching`
+- [x] **Step 3: pytest зелёный, commit** `Fold yo and narrow spaces, share word matching`
 
 ### Task 2: Общий word-matching в фильтрах и документах
 
@@ -65,7 +65,7 @@ def word_term_matches(text: str, term: str) -> bool:
 - Modify: `tender_parser/documents.py:90-97` (`_term_matches` single-word ветка → `word_term_matches`)
 - Test: `tests/test_filters.py`
 
-- [ ] **Step 1: Failing-тесты** — в `tests/test_filters.py`:
+- [x] **Step 1: Failing-тесты** — в `tests/test_filters.py`:
 
 ```python
 def test_evaluate_tender_does_not_treat_arsenic_as_mouse() -> None:
@@ -86,7 +86,7 @@ def test_evaluate_tender_does_not_treat_thyroid_as_switchboard() -> None:
     assert result.filter_status == "excluded"
 ```
 
-- [ ] **Step 2: Реализация, pytest зелёный (все старые монитор/трубопровод тесты не тронуты), commit** `Use shared word matching in filters and documents`
+- [x] **Step 2: Реализация, pytest зелёный (все старые монитор/трубопровод тесты не тронуты), commit** `Use shared word matching in filters and documents`
 
 ### Task 3: Единый региональный модуль `regions.py`
 
@@ -94,7 +94,7 @@ def test_evaluate_tender_does_not_treat_thyroid_as_switchboard() -> None:
 - Create: `tender_parser/regions.py`
 - Test: `tests/test_regions.py`
 
-- [ ] **Step 1: Failing-тесты** — `tests/test_regions.py`:
+- [x] **Step 1: Failing-тесты** — `tests/test_regions.py`:
 
 ```python
 from tender_parser.regions import detect_region, region_bucket
@@ -131,9 +131,9 @@ def test_region_bucket_groups_simferopol_with_crimea() -> None:
     assert region_bucket("Москва") == ""
 ```
 
-- [ ] **Step 2: Реализация** — словарь canonical → варианты (стемы, падежи, города; матчинг по префиксной границе слова `(?<![\w])`), порядок: Симферополь, Севастополь, Республика Крым, Крым (+города), Запорожская область (+Мелитополь, Бердянск, Энергодар, Токмак), Херсонская область (+Херсон-стем, Геническ, Скадовск, Каховка). `region_bucket` маппит канонику в bucket, Симферополь → `crimea`.
+- [x] **Step 2: Реализация** — словарь canonical → варианты (стемы, падежи, города; матчинг по префиксной границе слова `(?<![\w])`), порядок: Симферополь, Севастополь, Республика Крым, Крым (+города), Запорожская область (+Мелитополь, Бердянск, Энергодар, Токмак), Херсонская область (+Херсон-стем, Геническ, Скадовск, Каховка). `region_bucket` маппит канонику в bucket, Симферополь → `crimea`.
 
-- [ ] **Step 3: pytest зелёный, commit** `Add unified region dictionary`
+- [x] **Step 3: pytest зелёный, commit** `Add unified region dictionary`
 
 ### Task 4: Фильтры — регионы через `detect_region`, стоп-термы без заказчика
 
@@ -141,7 +141,7 @@ def test_region_bucket_groups_simferopol_with_crimea() -> None:
 - Modify: `tender_parser/filters.py:105-125`
 - Test: `tests/test_filters.py`
 
-- [ ] **Step 1: Failing-тесты**:
+- [x] **Step 1: Failing-тесты**:
 
 ```python
 def test_evaluate_tender_keeps_crimean_city_region() -> None:
@@ -165,7 +165,7 @@ def test_evaluate_tender_ignores_stop_terms_in_customer_name() -> None:
     assert result.filter_status == "matched"
 ```
 
-- [ ] **Step 2: Реализация** — регион: `region = detect_region(" ".join([title, region, customer, raw_text]))`, include_reason получает каноническое имя; стоп-термы: проверять по `title + raw_text` с вырезанной подстрокой `customer`:
+- [x] **Step 2: Реализация** — регион: `region = detect_region(" ".join([title, region, customer, raw_text]))`, include_reason получает каноническое имя; стоп-термы: проверять по `title + raw_text` с вырезанной подстрокой `customer`:
 
 ```python
 def _stop_searchable(tender: TenderRecord) -> str:
@@ -175,7 +175,7 @@ def _stop_searchable(tender: TenderRecord) -> str:
     return normalize_text(" ".join([tender.title, raw_text]))
 ```
 
-- [ ] **Step 3: pytest зелёный (существующие регион/стоп-тесты обязаны пройти без правок), commit** `Detect regions via shared dictionary, scope stop terms to subject`
+- [x] **Step 3: pytest зелёный (существующие регион/стоп-тесты обязаны пройти без правок), commit** `Detect regions via shared dictionary, scope stop terms to subject`
 
 ### Task 5: ЕИС и дедуп переходят на `regions.py`
 
@@ -184,7 +184,7 @@ def _stop_searchable(tender: TenderRecord) -> str:
 - Modify: `tender_parser/dedup.py:21-27,74-79` (`REGION_BUCKETS`/`_region_bucket` → `regions.region_bucket`)
 - Test: существующие `tests/test_eis_source.py`, `tests/test_dedup.py`
 
-- [ ] **Step 1: Реализация, pytest зелёный (фикстура ЕИС даёт «Республика Крым» и «Симферополь»), commit** `Reuse region dictionary in EIS and dedup`
+- [x] **Step 1: Реализация, pytest зелёный (фикстура ЕИС даёт «Республика Крым» и «Симферополь»), commit** `Reuse region dictionary in EIS and dedup`
 
 ### Task 6: Дедуп в CompositeSource по `unique_key`
 
@@ -192,7 +192,7 @@ def _stop_searchable(tender: TenderRecord) -> str:
 - Modify: `tender_parser/sources/composite.py:76`
 - Test: `tests/test_composite_source.py`
 
-- [ ] **Step 1: Failing-тест**:
+- [x] **Step 1: Failing-тест**:
 
 ```python
 def test_composite_source_keeps_same_number_from_different_sources() -> None:
@@ -205,7 +205,7 @@ def test_composite_source_keeps_same_number_from_different_sources() -> None:
     assert len(tenders) == 2
 ```
 
-- [ ] **Step 2: Реализация** — `dedupe_key = tender.unique_key`; pytest зелёный, commit `Deduplicate composite results by source-scoped key`
+- [x] **Step 2: Реализация** — `dedupe_key = tender.unique_key`; pytest зелёный, commit `Deduplicate composite results by source-scoped key`
 
 ### Task 7: RTS — региональные endpoint'ы первыми
 
@@ -213,7 +213,7 @@ def test_composite_source_keeps_same_number_from_different_sources() -> None:
 - Modify: `tender_parser/sources/rts.py:179` (стабильная сортировка: `region_hint` первыми)
 - Test: `tests/test_rts_source.py`
 
-- [ ] **Step 1: Failing-тест** — дубль номера между rosatom и симферопольским endpoint'ом сохраняет карточку с `region_hint`:
+- [x] **Step 1: Failing-тест** — дубль номера между rosatom и симферопольским endpoint'ом сохраняет карточку с `region_hint`:
 
 ```python
 def test_fetch_with_report_visits_region_hinted_endpoints_first() -> None:
@@ -227,7 +227,7 @@ def test_fetch_with_report_visits_region_hinted_endpoints_first() -> None:
     assert kept and kept[0].region == "Симферополь"
 ```
 
-- [ ] **Step 2: Реализация** — `for endpoint in sorted(self.endpoints, key=lambda e: e.region_hint is None):`; pytest зелёный, commit `Visit region-hinted RTS endpoints first`
+- [x] **Step 2: Реализация** — `for endpoint in sorted(self.endpoints, key=lambda e: e.region_hint is None):`; pytest зелёный, commit `Visit region-hinted RTS endpoints first`
 
 ### Task 8: Хранилище — merge непустых полей + «впервые actionable»
 
@@ -235,7 +235,7 @@ def test_fetch_with_report_visits_region_hinted_endpoints_first() -> None:
 - Modify: `tender_parser/storage.py:79-150`
 - Test: `tests/test_storage.py`
 
-- [ ] **Step 1: Failing-тесты**:
+- [x] **Step 1: Failing-тесты**:
 
 ```python
 def test_storage_keeps_filled_fields_when_update_is_empty(tmp_path: Path) -> None:
@@ -261,9 +261,9 @@ def test_storage_reports_promotion_to_actionable(tmp_path: Path) -> None:
     assert again == []
 ```
 
-- [ ] **Step 2: Реализация** — в `ON CONFLICT DO UPDATE`: `customer=COALESCE(NULLIF(excluded.customer,''), customer)` и аналогично region/price/deadline/published_at/raw_text; перед вставкой читать `review_priority`, промо = был не в `{hot,review,wide}` → стал в них; возвращать first-seen + промо.
+- [x] **Step 2: Реализация** — в `ON CONFLICT DO UPDATE`: `customer=COALESCE(NULLIF(excluded.customer,''), customer)` и аналогично region/price/deadline/published_at/raw_text; перед вставкой читать `review_priority`, промо = был не в `{hot,review,wide}` → стал в них; возвращать first-seen + промо.
 
-- [ ] **Step 3: pytest зелёный, commit** `Merge non-empty fields on upsert and report promotions`
+- [x] **Step 3: pytest зелёный, commit** `Merge non-empty fields on upsert and report promotions`
 
 ### Task 9: Импорты — устойчивость к битой строке
 
@@ -271,7 +271,7 @@ def test_storage_reports_promotion_to_actionable(tmp_path: Path) -> None:
 - Modify: `tender_parser/sources/imports.py:52-127` (`_read_file(path, errors)`, per-row `try/except ValueError`)
 - Test: `tests/test_import_source.py`
 
-- [ ] **Step 1: Failing-тест**:
+- [x] **Step 1: Failing-тест**:
 
 ```python
 def test_import_folder_source_skips_bad_row_and_keeps_good_ones(tmp_path: Path) -> None:
@@ -287,7 +287,7 @@ def test_import_folder_source_skips_bad_row_and_keeps_good_ones(tmp_path: Path) 
     assert "mix.csv" in result.health[0].detail
 ```
 
-- [ ] **Step 2: Реализация, pytest зелёный, commit** `Keep good import rows when one row is invalid`
+- [x] **Step 2: Реализация, pytest зелёный, commit** `Keep good import rows when one row is invalid`
 
 ### Task 10: Tender.Pro ключ из env + единый парсер цены в rts_cabinet/imports
 
@@ -298,13 +298,13 @@ def test_import_folder_source_skips_bad_row_and_keeps_good_ones(tmp_path: Path) 
 - Modify: `tender_parser/sources/eis.py:36` (`recordsPerPage=_50`, live-проверка в следующем запуске)
 - Test: существующие + `tests/test_tender_pro_source.py`
 
-- [ ] **Step 1: Реализация, pytest зелёный, commit** `Read Tender.Pro key from env, unify price parsing, widen EIS page`
+- [x] **Step 1: Реализация, pytest зелёный, commit** `Read Tender.Pro key from env, unify price parsing, widen EIS page`
 
 ### Task 11: Финал
 
-- [ ] Полный `python -m pytest -q` зелёный.
-- [ ] Обновить `docs/HANDOFF.md` (раздел «Обновление 2026-07-03») и `README.md` при необходимости.
-- [ ] Commit `Document parsing quality phase 1`.
+- [x] Полный `python -m pytest -q` зелёный.
+- [x] Обновить `docs/HANDOFF.md` (раздел «Обновление 2026-07-03») и `README.md` при необходимости.
+- [x] Commit `Document parsing quality phase 1`.
 
 ## Self-Review
 
