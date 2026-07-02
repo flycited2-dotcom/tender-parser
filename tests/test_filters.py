@@ -273,6 +273,30 @@ def test_evaluate_tender_matches_rts_electrical_equipment_terms() -> None:
     assert "разъединитель" in result.include_reason.lower()
 
 
+def test_evaluate_tender_keeps_crimean_city_region() -> None:
+    result = evaluate_tender(
+        make_tender(title="Поставка МФУ", region="г. Ялта", raw_text="Поставка МФУ"),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert "регион: крым" in result.include_reason.lower()
+
+
+def test_evaluate_tender_ignores_stop_terms_in_customer_name() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка МФУ в Республику Крым",
+            customer="ГБУЗ Клинико-диагностическая лаборатория",
+            raw_text="Поставка МФУ в Республику Крым ГБУЗ Клинико-диагностическая лаборатория",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.review_priority == "hot"
+
+
 def test_evaluate_tender_matches_region_from_title() -> None:
     result = evaluate_tender(
         make_tender(title="Поставка МФУ в Севастополь", region=None, raw_text="Поставка МФУ"),

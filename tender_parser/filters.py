@@ -4,8 +4,9 @@ import re
 from dataclasses import replace
 from datetime import datetime
 
-from tender_parser.config import CATEGORY_KEYWORDS, MIN_PRICE_RUB, REGION_TERMS, STOP_TERMS
+from tender_parser.config import CATEGORY_KEYWORDS, MIN_PRICE_RUB, STOP_TERMS
 from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
+from tender_parser.regions import detect_region
 from tender_parser.text import normalize_text, word_term_matches
 
 
@@ -100,11 +101,18 @@ def _include_reason(
     return "; ".join(parts)
 
 
+def _stop_searchable(tender: TenderRecord) -> str:
+    raw_text = tender.raw_text
+    if tender.customer:
+        raw_text = raw_text.replace(tender.customer, " ")
+    return normalize_text(" ".join([tender.title, raw_text]))
+
+
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
 
-    stop_term = _first_matching_term(searchable, STOP_TERMS)
+    stop_term = _first_matching_term(_stop_searchable(tender), STOP_TERMS)
     if stop_term:
         return _exclude(tender, f"стоп-тема: {stop_term}")
 
@@ -115,7 +123,7 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if not category:
         return _exclude(tender, "категория интереса не найдена")
 
-    region = _first_matching_term(searchable, REGION_TERMS)
+    region = detect_region(searchable)
     if tender.region and not region:
         return _exclude(tender, "регион не целевой")
 
