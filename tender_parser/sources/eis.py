@@ -8,8 +8,9 @@ from urllib.parse import urlencode, urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from tender_parser.config import EIS_MAX_ERRORS, EIS_SEARCH_QUERIES, EIS_TIMEOUT_SECONDS, REGION_TERMS
+from tender_parser.config import EIS_MAX_ERRORS, EIS_SEARCH_QUERIES, EIS_TIMEOUT_SECONDS
 from tender_parser.models import TenderRecord
+from tender_parser.regions import detect_region
 from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import normalize_text, parse_price_rub
 
@@ -17,14 +18,6 @@ from tender_parser.text import normalize_text, parse_price_rub
 EIS_SEARCH_URL = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
 EIS_SOURCE_NAME = "eis-zakupki"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.2"
-REGION_VARIANTS = {
-    "Симферополь": ["симферополь", "симферополя"],
-    "Севастополь": ["севастополь", "севастополя"],
-    "Республика Крым": ["республика крым", "республике крым"],
-    "Крым": ["крым"],
-    "Запорожская область": ["запорожская область", "запорожской области"],
-    "Херсонская область": ["херсонская область", "херсонской области"],
-}
 
 
 def build_search_url(query: str, page: int = 1) -> str:
@@ -62,7 +55,7 @@ def parse_search_page(html: str, source_url: str) -> list[TenderRecord]:
                 source=EIS_SOURCE_NAME,
                 tender_number=tender_number,
                 customer=customer,
-                region=_extract_region(raw_text),
+                region=detect_region(raw_text),
                 price=parse_price_rub(_text(card.select_one(".price-block__value"))),
                 deadline=_parse_date(_data_value(card, "Окончание подачи заявок"), end_of_day=True),
                 status=_text(card.select_one(".registry-entry__header-mid__title")) or "Актуально",
@@ -156,17 +149,6 @@ def _extract_url(card: object, source_url: str) -> str | None:
     if link is None or not link.get("href"):
         return None
     return urljoin(source_url, str(link["href"]))
-
-
-def _extract_region(raw_text: str) -> str | None:
-    normalized = normalize_text(raw_text)
-    for region, variants in REGION_VARIANTS.items():
-        if any(variant in normalized for variant in variants):
-            return region
-    for region in REGION_TERMS:
-        if normalize_text(region) in normalized:
-            return region
-    return None
 
 
 def _parse_date(value: str, end_of_day: bool) -> datetime | None:

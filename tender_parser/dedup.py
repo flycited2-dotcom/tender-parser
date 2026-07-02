@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from tender_parser.models import TenderRecord
+from tender_parser.regions import region_bucket
 from tender_parser.text import normalize_text
 
 
@@ -17,13 +18,6 @@ SOURCE_PRIORITY = {
     "torgi82": 60,
     "rts-market": 50,
     "rostender": 10,
-}
-REGION_BUCKETS = {
-    "crimea": ["крым"],
-    "sevastopol": ["севастопол"],
-    "simferopol": ["симферопол"],
-    "zaporizhzhia": ["запорож"],
-    "kherson": ["херсон"],
 }
 
 
@@ -72,11 +66,7 @@ def _regions_compatible(left: TenderRecord, right: TenderRecord) -> bool:
 
 
 def _region_bucket(tender: TenderRecord) -> str:
-    text = normalize_text(" ".join([tender.region or "", tender.customer or "", tender.raw_text]))
-    for bucket, variants in REGION_BUCKETS.items():
-        if any(variant in text for variant in variants):
-            return bucket
-    return ""
+    return region_bucket(" ".join([tender.region or "", tender.customer or "", tender.raw_text]))
 
 
 def _merge_tenders(left: TenderRecord, right: TenderRecord) -> TenderRecord:
