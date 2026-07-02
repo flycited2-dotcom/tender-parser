@@ -26,7 +26,7 @@ def build_search_url(query: str, page: int = 1) -> str:
         "morphology": "on",
         "pageNumber": str(page),
         "sortDirection": "false",
-        "recordsPerPage": "_10",
+        "recordsPerPage": "_50",
         "showLotsInfoHidden": "false",
         "fz44": "on",
         "fz223": "on",

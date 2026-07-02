@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Iterable
 from urllib.parse import urlencode
@@ -21,9 +22,13 @@ TENDER_PRO_DETAIL_URL = "https://www.tender.pro/api/_tender.info.json"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.2"
 
 
+def _api_key() -> str:
+    return os.getenv("TENDER_PRO_API_KEY", "") or TENDER_PRO_API_KEY
+
+
 def build_list_url(max_rows: int = TENDER_PRO_MAX_ROWS) -> str:
     params = {
-        "_key": TENDER_PRO_API_KEY,
+        "_key": _api_key(),
         "set_type_id": "2",
         "set_id": TENDER_PRO_SET_ID,
         "max_rows": str(max_rows),
@@ -113,7 +118,7 @@ def _as_text(value: object) -> str:
 
 def _build_detail_url(tender_id: object, company_id: object) -> str:
     params = {
-        "_key": TENDER_PRO_API_KEY,
+        "_key": _api_key(),
         "id": str(tender_id),
     }
     if company_id is not None:

@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
+from tender_parser.text import parse_price_rub
 
 
 HEADER_ALIASES = {
@@ -226,17 +227,7 @@ def _transliterate(value: str) -> str:
 
 
 def _parse_price(value: str | None) -> float | None:
-    if not value:
-        return None
-    cleaned = re.sub(r"[^\d,.\-]", "", value)
-    if not cleaned:
-        return None
-    if "," in cleaned:
-        cleaned = cleaned.replace(".", "").replace(",", ".")
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
+    return parse_price_rub(value, require_currency=False)
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

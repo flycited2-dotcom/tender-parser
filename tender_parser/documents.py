@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import re
 from zipfile import ZipFile
 from dataclasses import dataclass, field
 from html.parser import HTMLParser

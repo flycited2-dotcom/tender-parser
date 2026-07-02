@@ -198,22 +198,7 @@ def _title_from_row(values: list[str], link_text: str) -> str:
 
 
 def _parse_price(value: str | None) -> float | None:
-    parsed = parse_price_rub(value)
-    if parsed is not None:
-        return parsed
-    text = normalize_text(value)
-    if not text:
-        return None
-    match = re.search(r"\d[\d\s.,]*\d", text)
-    if not match:
-        return None
-    cleaned = match.group(0).replace(" ", "")
-    if "," in cleaned:
-        cleaned = cleaned.replace(".", "").replace(",", ".")
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
+    return parse_price_rub(value, require_currency=False)
 
 
 def _parse_date(value: str | None) -> datetime | None:
