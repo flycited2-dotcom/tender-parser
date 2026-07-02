@@ -55,7 +55,7 @@ class ImportFolderSource:
             if not path.is_file():
                 continue
             try:
-                tenders.extend(_read_file(path))
+                tenders.extend(_read_file(path, errors))
             except (OSError, ValueError, ElementTree.ParseError) as exc:
                 errors.append(f"{path.name}: {exc}")
 
@@ -79,26 +79,38 @@ class ImportFolderSource:
         )
 
 
-def _read_file(path: Path) -> list[TenderRecord]:
+def _read_file(path: Path, errors: list[str]) -> list[TenderRecord]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        return _read_csv(path)
+        return _read_csv(path, errors)
     if suffix == ".xlsx":
-        return _read_xlsx(path)
+        return _read_xlsx(path, errors)
     if suffix == ".xml":
-        return _read_xml(path)
+        return _read_xml(path, errors)
     return []
 
 
-def _read_csv(path: Path) -> list[TenderRecord]:
+def _append_row(result: list[TenderRecord], row: dict[str, str], path: Path, errors: list[str]) -> None:
+    try:
+        result.append(_record_from_row(row, path))
+    except ValueError as exc:
+        errors.append(str(exc))
+
+
+def _read_csv(path: Path, errors: list[str]) -> list[TenderRecord]:
     text = path.read_text(encoding="utf-8-sig")
     sample = text[:2048]
     delimiter = ";" if sample.count(";") >= sample.count(",") else ","
     rows = csv.DictReader(text.splitlines(), delimiter=delimiter)
-    return [_record_from_row(_normalize_row(row), path) for row in rows if _normalize_row(row)]
+    result: list[TenderRecord] = []
+    for row in rows:
+        normalized = _normalize_row(row)
+        if normalized:
+            _append_row(result, normalized, path, errors)
+    return result
 
 
-def _read_xlsx(path: Path) -> list[TenderRecord]:
+def _read_xlsx(path: Path, errors: list[str]) -> list[TenderRecord]:
     workbook = load_workbook(path, read_only=True, data_only=True)
     sheet = workbook.active
     rows = list(sheet.iter_rows(values_only=True))
@@ -110,11 +122,11 @@ def _read_xlsx(path: Path) -> list[TenderRecord]:
         values = {headers[index]: value for index, value in enumerate(row) if index < len(headers)}
         normalized = _normalize_row(values)
         if normalized:
-            result.append(_record_from_row(normalized, path))
+            _append_row(result, normalized, path, errors)
     return result
 
 
-def _read_xml(path: Path) -> list[TenderRecord]:
+def _read_xml(path: Path, errors: list[str]) -> list[TenderRecord]:
     root = ElementTree.fromstring(path.read_text(encoding="utf-8"))
     result: list[TenderRecord] = []
     for element in root.iter():
@@ -123,7 +135,7 @@ def _read_xml(path: Path) -> list[TenderRecord]:
         row = {child.tag: child.text or "" for child in list(element)}
         normalized = _normalize_row(row)
         if normalized:
-            result.append(_record_from_row(normalized, path))
+            _append_row(result, normalized, path, errors)
     return result
 
 

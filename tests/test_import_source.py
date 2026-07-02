@@ -79,6 +79,24 @@ def test_import_folder_source_reads_xml_export(tmp_path: Path) -> None:
     assert tender.price == 99_000.0
 
 
+def test_import_folder_source_skips_bad_row_and_keeps_good_ones(tmp_path: Path) -> None:
+    imports_dir = tmp_path / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "mix.csv").write_text(
+        "Название;Ссылка\n"
+        "Поставка МФУ;https://example.test/1\n"
+        ";https://example.test/2\n"
+        "Поставка кондиционеров;https://example.test/3\n",
+        encoding="utf-8",
+    )
+
+    result = ImportFolderSource(imports_dir).fetch_with_report([])
+
+    assert len(result.tenders) == 2
+    assert result.health[0].status == "partial"
+    assert "mix.csv" in result.health[0].detail
+
+
 def test_import_folder_source_reports_empty_when_folder_missing(tmp_path: Path) -> None:
     result = ImportFolderSource(tmp_path / "missing").fetch_with_report([])
 
