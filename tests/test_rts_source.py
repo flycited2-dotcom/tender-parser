@@ -191,6 +191,7 @@ def test_fetch_with_report_uses_rts_query_list_by_default() -> None:
     source = RtsPublicSource(
         session=session,
         endpoints=[RtsMarketEndpoint("https://one.rts-tender.ru/market/", "rts-one")],
+        query_delay_seconds=0,
     )
 
     source.fetch_with_report(["Симферополь"])
@@ -208,6 +209,7 @@ def test_fetch_keywords_queries_all_configured_endpoints() -> None:
             RtsMarketEndpoint("https://one.rts-tender.ru/market/", "rts-one"),
             RtsMarketEndpoint("https://two.rts-tender.ru/market/", "rts-two", "Симферополь"),
         ],
+        query_delay_seconds=0,
     )
 
     tenders = source.fetch_keywords(["МФУ"])
@@ -226,6 +228,7 @@ def test_fetch_with_report_returns_endpoint_health_when_one_endpoint_is_blocked(
             RtsMarketEndpoint("https://blocked.rts-tender.ru/market/", "rts-blocked"),
             RtsMarketEndpoint("https://open.rts-tender.ru/market/", "rts-open"),
         ],
+        query_delay_seconds=0,
     )
 
     result = source.fetch_with_report(["МФУ"])

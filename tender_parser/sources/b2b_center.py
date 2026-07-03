@@ -17,6 +17,7 @@ from tender_parser.config import (
     HTTP_TIMEOUT_SECONDS,
 )
 from tender_parser.filters import matching_category
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.regions import detect_region
 from tender_parser.sources.rts import SourceFetchError
@@ -157,8 +158,7 @@ class B2BCenterSource:
         for query in self.queries or list(keywords):
             url = build_search_url(query)
             try:
-                response = self.session.get(url, timeout=HTTP_TIMEOUT_SECONDS)
-                response.raise_for_status()
+                response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS)
             except requests.RequestException as exc:
                 errors.append(f"{query}: {exc}")
                 if len(errors) >= self.max_errors:
@@ -189,8 +189,7 @@ class B2BCenterSource:
 
     def _fetch_detail(self, url: str) -> B2BDetail | None:
         try:
-            response = self.session.get(url, timeout=HTTP_TIMEOUT_SECONDS)
-            response.raise_for_status()
+            response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS)
         except requests.RequestException:
             return None
         finally:

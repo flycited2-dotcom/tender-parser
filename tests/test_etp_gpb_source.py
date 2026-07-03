@@ -81,7 +81,8 @@ class TimeoutSession:
         raise requests.Timeout("timed out")
 
 
-def test_fetch_keywords_stops_after_configured_errors() -> None:
+def test_fetch_keywords_stops_after_configured_errors(monkeypatch) -> None:
+    monkeypatch.setattr("tender_parser.http.sleep", lambda _: None)
     session = TimeoutSession()
     source = EtpGpbRssSource(
         session=session,
@@ -94,4 +95,5 @@ def test_fetch_keywords_stops_after_configured_errors() -> None:
     except SourceFetchError:
         pass
 
-    assert len(session.requested_urls) == 1
+    # 1 запрос до лимита ошибок, с одним retry на timeout.
+    assert len(session.requested_urls) == 2

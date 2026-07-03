@@ -13,6 +13,7 @@ from tender_parser.config import (
     TENDER_PRO_MAX_ROWS,
     TENDER_PRO_SET_ID,
 )
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.sources.rts import SourceFetchError
 
@@ -100,8 +101,7 @@ class TenderProSource:
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
         url = build_list_url(max_rows=self.max_rows)
         try:
-            response = self.session.get(url, timeout=HTTP_TIMEOUT_SECONDS)
-            response.raise_for_status()
+            response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS)
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
             raise SourceFetchError(f"Tender.Pro API недоступен: {exc}") from exc

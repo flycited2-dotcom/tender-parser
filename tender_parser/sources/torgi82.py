@@ -9,6 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from tender_parser.config import HTTP_TIMEOUT_SECONDS
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import parse_price_rub
@@ -64,8 +65,7 @@ class Torgi82Source:
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
         url = build_search_url()
         try:
-            response = self.session.get(url, timeout=HTTP_TIMEOUT_SECONDS)
-            response.raise_for_status()
+            response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS)
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
             raise SourceFetchError(f"Торги82 недоступен: {exc}") from exc

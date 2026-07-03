@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from time import monotonic
+from time import monotonic, sleep
 from typing import Iterable, cast
 from urllib.parse import urlencode, urljoin
 
@@ -16,9 +16,11 @@ from tender_parser.config import (
     RTS_MARKET_BASE_URL,
     RTS_MARKET_ENDPOINTS,
     RTS_MAX_PAGES_PER_KEYWORD,
+    RTS_QUERY_DELAY_SECONDS,
     RTS_SEARCH_QUERIES,
     RTS_TIMEOUT_SECONDS,
 )
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth, SourceStatus
 from tender_parser.text import normalize_text, parse_deadline, parse_price_rub
@@ -130,12 +132,14 @@ class RtsPublicSource:
         endpoints: list[RtsMarketEndpoint] | None = None,
         queries: list[str] | None = None,
         timeout_seconds: int = RTS_TIMEOUT_SECONDS,
+        query_delay_seconds: float = RTS_QUERY_DELAY_SECONDS,
     ) -> None:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.endpoints = endpoints or _default_endpoints()
         self.queries = queries or RTS_SEARCH_QUERIES
         self.timeout_seconds = timeout_seconds
+        self.query_delay_seconds = query_delay_seconds
 
     def fetch_keyword(
         self,
@@ -147,8 +151,7 @@ class RtsPublicSource:
         tenders: list[TenderRecord] = []
         for page_index in range(max_pages):
             url = build_search_url(keyword, page_index, active_endpoint.base_url)
-            response = self.session.get(url, timeout=self.timeout_seconds)
-            response.raise_for_status()
+            response = get_with_retry(self.session, url, timeout=self.timeout_seconds)
             if is_blocked_response(response.url, response.text):
                 raise SourceBlockedError(
                     "captcha: RTS-Tender ограничил скорость просмотра endpoint"
@@ -182,7 +185,9 @@ class RtsPublicSource:
             endpoint_tenders: list[TenderRecord] = []
             endpoint_error = ""
             endpoint_status = "empty"
-            for keyword in queries:
+            for index, keyword in enumerate(queries):
+                if index and self.query_delay_seconds:
+                    sleep(self.query_delay_seconds)
                 try:
                     fetched = self.fetch_keyword(keyword, endpoint=endpoint)
                 except SourceFetchError as exc:

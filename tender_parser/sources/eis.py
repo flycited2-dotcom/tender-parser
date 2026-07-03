@@ -9,6 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from tender_parser.config import EIS_MAX_ERRORS, EIS_SEARCH_QUERIES, EIS_TIMEOUT_SECONDS
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.regions import detect_region
 from tender_parser.sources.rts import SourceFetchError
@@ -94,8 +95,7 @@ class EisZakupkiSource:
             for page in range(1, self.max_pages_per_query + 1):
                 url = build_search_url(query, page=page)
                 try:
-                    response = self.session.get(url, timeout=self.timeout_seconds)
-                    response.raise_for_status()
+                    response = get_with_retry(self.session, url, timeout=self.timeout_seconds)
                 except requests.RequestException as exc:
                     errors.append(f"{query}: {exc}")
                     break

@@ -11,6 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from tender_parser.config import ETP_GPB_MAX_ERRORS, ETP_GPB_SEARCH_QUERIES, ETP_GPB_TIMEOUT_SECONDS
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import parse_price_rub
@@ -84,8 +85,7 @@ class EtpGpbRssSource:
         for query in queries:
             url = build_rss_url(query)
             try:
-                response = self.session.get(url, timeout=self.timeout_seconds)
-                response.raise_for_status()
+                response = get_with_retry(self.session, url, timeout=self.timeout_seconds)
             except requests.RequestException as exc:
                 errors.append(f"{query}: {exc}")
                 if len(errors) >= self.max_errors:

@@ -9,6 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from tender_parser.config import HTTP_TIMEOUT_SECONDS, ROSTENDER_SEARCH_QUERIES
+from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import normalize_text, parse_price_rub
@@ -87,8 +88,7 @@ class RostenderSource:
             for page in range(1, self.max_pages_per_query + 1):
                 url = build_search_url(query, page)
                 try:
-                    response = self.session.get(url, timeout=HTTP_TIMEOUT_SECONDS)
-                    response.raise_for_status()
+                    response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS)
                 except requests.RequestException as exc:
                     errors.append(f"{query}: {exc}")
                     break

@@ -81,7 +81,8 @@ class TimeoutSession:
         raise requests.Timeout("slow EIS")
 
 
-def test_fetch_keywords_stops_after_configured_network_errors() -> None:
+def test_fetch_keywords_stops_after_configured_network_errors(monkeypatch) -> None:
+    monkeypatch.setattr("tender_parser.http.sleep", lambda _: None)
     session = TimeoutSession()
     source = EisZakupkiSource(
         session=session,
@@ -95,7 +96,8 @@ def test_fetch_keywords_stops_after_configured_network_errors() -> None:
     except Exception:
         pass
 
-    assert session.timeouts == [7, 7]
+    # 2 запроса до лимита ошибок, каждый с одним retry на timeout.
+    assert session.timeouts == [7, 7, 7, 7]
 
 
 def test_default_session_ignores_environment_proxies() -> None:
