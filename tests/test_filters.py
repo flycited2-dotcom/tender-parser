@@ -359,6 +359,67 @@ def test_evaluate_tender_matches_large_appliances() -> None:
     assert result.category == "Бытовая техника"
 
 
+def test_evaluate_tender_matches_multiword_terms_in_oblique_cases() -> None:
+    network = evaluate_tender(
+        make_tender(
+            title="Поставка сетевого оборудования в Республику Крым",
+            raw_text="Поставка сетевого оборудования",
+        ),
+        now=NOW,
+    )
+    stationery = evaluate_tender(
+        make_tender(
+            title="Поставка канцелярских товаров в Севастополь",
+            raw_text="Поставка канцелярских товаров",
+        ),
+        now=NOW,
+    )
+
+    assert network.filter_status == "matched"
+    assert network.category == "Компьютерная техника и периферия"
+    assert stationery.filter_status == "matched"
+    assert stationery.category == "Канцелярия и офис"
+
+
+def test_evaluate_tender_excludes_stop_phrases_in_oblique_cases() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Выполнение капитального ремонта здания котельной со светильниками",
+            raw_text="Выполнение капитального ремонта здания",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_excludes_sale_listings() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title='АО "РУСАЛ" реализует б/у мониторы со склада в Республике Крым',
+            raw_text="реализует б/у мониторы",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_matches_measuring_devices_and_batteries() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка вольтметров и аккумуляторных батарей",
+            raw_text="Вольтметр трехфазный, батарея аккумуляторная свинцово-кислотная",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Электротехника и оборудование"
+
+
 def test_evaluate_tender_excludes_insulin_supply_with_pen_injector() -> None:
     result = evaluate_tender(
         make_tender(

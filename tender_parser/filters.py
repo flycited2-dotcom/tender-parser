@@ -6,7 +6,7 @@ from datetime import datetime
 from tender_parser.config import CATEGORY_KEYWORDS, MIN_PRICE_RUB, STOP_TERMS
 from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
 from tender_parser.regions import detect_region
-from tender_parser.text import normalize_text, word_term_matches
+from tender_parser.text import normalize_text, phrase_stems_match, word_term_matches
 
 
 STOP_TERM_VARIANTS = {
@@ -17,7 +17,11 @@ STOP_TERM_VARIANTS = {
 def _first_matching_term(text: str, terms: list[str]) -> str | None:
     for term in terms:
         normalized = normalize_text(term)
-        if normalized and normalized in text:
+        if not normalized:
+            continue
+        if normalized in text:
+            return normalized
+        if " " in normalized and phrase_stems_match(text, normalized):
             return normalized
         for variant in STOP_TERM_VARIANTS.get(normalized, []):
             if normalize_text(variant) in text:
@@ -39,7 +43,7 @@ def _category_term_matches(text: str, term: str) -> bool:
         return False
     if " " not in normalized:
         return word_term_matches(text, normalized)
-    return normalized in text
+    return normalized in text or phrase_stems_match(text, normalized)
 
 
 def _exclude(tender: TenderRecord, reason: str) -> TenderRecord:

@@ -20,6 +20,24 @@ def normalize_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", cleaned).strip().lower()
 
 
+def stem(word: str) -> str:
+    return word[: max(4, min(7, len(word) - 2))]
+
+
+def phrase_stems_match(text: str, term: str) -> bool:
+    """Матчит многословный термин по стемам слов по порядку — покрывает падежи."""
+    stems = [stem(word) for word in term.split() if len(stem(word)) >= 4]
+    if not stems:
+        return False
+    position = 0
+    for part in stems:
+        found_at = text.find(part, position)
+        if found_at < 0:
+            return False
+        position = found_at + len(part)
+    return True
+
+
 def word_term_matches(text: str, term: str) -> bool:
     # (?<!-) — часть составного слова после дефиса не считается словом («шприц-ручка» не «ручка»).
     if not term:
