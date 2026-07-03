@@ -51,10 +51,11 @@ def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
     assert workbook.sheetnames == ["Дашборд", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
     hot_sheet = workbook["Горячие"]
     assert hot_sheet["A1"].value == "приоритет"
+    assert hot_sheet["B1"].value == "новый"
     assert hot_sheet["A2"].value == "Горячий"
-    assert hot_sheet["C2"].value == "Поставка МФУ"
-    assert workbook["На проверку"]["C2"].value == "Поставка МФУ"
-    assert workbook["Широкий хвост"]["C2"].value == "Поставка МФУ"
+    assert hot_sheet["D2"].value == "Поставка МФУ"
+    assert workbook["На проверку"]["D2"].value == "Поставка МФУ"
+    assert workbook["Широкий хвост"]["D2"].value == "Поставка МФУ"
 
 
 def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> None:
@@ -63,14 +64,14 @@ def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> Non
 
     sheet = load_workbook(output)["Горячие"]
     assert sheet.auto_filter.ref is not None
-    assert sheet.freeze_panes == "D2"
-    assert sheet["C2"].hyperlink.target == "https://example.test/tender-1/"
-    assert sheet["E2"].value == 45_000.0
-    assert "₽" in sheet["E2"].number_format
-    assert sheet["F2"].value == datetime(2026, 5, 25, 10, 0)
+    assert sheet.freeze_panes == "E2"
+    assert sheet["D2"].hyperlink.target == "https://example.test/tender-1/"
+    assert sheet["F2"].value == 45_000.0
+    assert "₽" in sheet["F2"].number_format
+    assert sheet["G2"].value == datetime(2026, 5, 25, 10, 0)
     assert sheet["A2"].fill.start_color.rgb == "FFFBE0D6"
-    assert sheet["B2"].value == 6
-    assert sheet["B2"].fill.start_color.rgb == "FFFEECCA"
+    assert sheet["C2"].value == 6
+    assert sheet["C2"].fill.start_color.rgb == "FFFEECCA"
     assert len(sheet.data_validations.dataValidation) == 1
 
 
@@ -99,6 +100,37 @@ def test_export_excel_builds_dashboard_with_kpi_and_sources(tmp_path: Path) -> N
     assert "Здоровье источников" in column_a
     assert "test" in column_a
     assert "rts-cabinet" in column_a
+
+
+def test_new_tenders_are_marked_on_all_sheets(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    tender = make_tender("matched")
+    export_excel(
+        [tender],
+        [],
+        [],
+        [],
+        output,
+        new_tenders=[tender],
+        now=NOW,
+        new_keys={tender.unique_key},
+    )
+
+    workbook = load_workbook(output)
+    hot = workbook["Горячие"]
+    headers = [cell.value for cell in hot[1]]
+    new_col = headers.index("новый") + 1
+    assert hot.cell(row=2, column=new_col).value == "🆕"
+    assert workbook["Новые"].cell(row=2, column=new_col).value == "🆕"
+
+
+def test_old_tenders_have_no_new_mark(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    export_excel([make_tender("matched")], [], [], [], output, now=NOW, new_keys=set())
+
+    hot = load_workbook(output)["Горячие"]
+    headers = [cell.value for cell in hot[1]]
+    assert hot.cell(row=2, column=headers.index("новый") + 1).value in ("", None)
 
 
 def test_manual_selections_survive_reexport(tmp_path: Path) -> None:
@@ -169,7 +201,7 @@ def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) 
 
     workbook = load_workbook(output)
     assert workbook.sheetnames[:2] == ["Дашборд", "Новые"]
-    assert workbook["Новые"]["C2"].value == "Поставка МФУ"
+    assert workbook["Новые"]["D2"].value == "Поставка МФУ"
 
 
 def test_sort_for_review_orders_by_priority_deadline_price_and_discovery() -> None:

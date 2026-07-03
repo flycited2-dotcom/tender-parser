@@ -18,6 +18,7 @@ from tender_parser.run_report import SourceHealth
 
 HEADERS = [
     "приоритет",
+    "новый",
     "дней_до_срока",
     "название",
     "регион",
@@ -42,6 +43,7 @@ HEADERS = [
 
 COLUMN_WIDTHS = {
     "приоритет": 12,
+    "новый": 7,
     "дней_до_срока": 9,
     "название": 55,
     "регион": 20,
@@ -206,6 +208,7 @@ def _append_rows(
     tenders: list[TenderRecord],
     now: datetime,
     selections: Mapping[SelectionKey, SelectionValue] | None = None,
+    new_keys: set[str] | None = None,
 ) -> None:
     sheet.append(HEADERS)
     _style_header(sheet, len(HEADERS))
@@ -223,6 +226,7 @@ def _append_rows(
         sheet.append(
             [
                 PRIORITY_LABELS.get(tender.review_priority or "", tender.review_priority or ""),
+                "🆕" if new_keys and tender.unique_key in new_keys else "",
                 days if days is not None else "",
                 tender.title,
                 tender.region or "",
@@ -257,14 +261,14 @@ def _append_rows(
         priority_cell = sheet.cell(row=row, column=1)
         priority_cell.font = Font(bold=True, size=10)
 
-        days_cell = sheet.cell(row=row, column=2)
+        days_cell = sheet.cell(row=row, column=HEADERS.index("дней_до_срока") + 1)
         if days is not None and days <= 2:
             days_cell.fill = PatternFill("solid", start_color=DEADLINE_URGENT_FILL)
             days_cell.font = Font(bold=True)
         elif days is not None and days <= 7:
             days_cell.fill = PatternFill("solid", start_color=DEADLINE_SOON_FILL)
 
-        title_cell = sheet.cell(row=row, column=3)
+        title_cell = sheet.cell(row=row, column=HEADERS.index("название") + 1)
         title_cell.alignment = WRAP_TOP
         if tender.url:
             title_cell.hyperlink = tender.url
@@ -279,7 +283,7 @@ def _append_rows(
 
     last_row = max(sheet.max_row, 2)
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}{last_row}"
-    sheet.freeze_panes = "D2"
+    sheet.freeze_panes = "E2"
     choice_validation.add(f"{choice_column}2:{choice_column}{last_row}")
 
 
@@ -476,6 +480,7 @@ def export_excel(
     now: datetime | None = None,
     source_health: list[SourceHealth] | None = None,
     manual_selections: Mapping[SelectionKey, SelectionValue] | None = None,
+    new_keys: set[str] | None = None,
 ) -> Path:
     current = now or datetime.now()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -500,14 +505,24 @@ def export_excel(
         if _selection_for(tender, manual_selections)[0].startswith(PICKED_CHOICES)
     ]
     if picked:
-        _append_rows(workbook.create_sheet("Мой отбор"), sort_for_review(picked), current, manual_selections)
+        _append_rows(
+            workbook.create_sheet("Мой отбор"), sort_for_review(picked), current, manual_selections, new_keys
+        )
 
     if new_tenders is not None:
-        _append_rows(workbook.create_sheet("Новые"), sort_for_review(new_tenders), current, manual_selections)
-    _append_rows(workbook.create_sheet("Горячие"), sort_for_review(hot), current, manual_selections)
-    _append_rows(workbook.create_sheet("На проверку"), sort_for_review(review), current, manual_selections)
-    _append_rows(workbook.create_sheet("Широкий хвост"), sort_for_review(wide), current, manual_selections)
-    _append_rows(workbook.create_sheet("Отсеянные"), sort_for_review(excluded), current, manual_selections)
+        _append_rows(
+            workbook.create_sheet("Новые"), sort_for_review(new_tenders), current, manual_selections, new_keys
+        )
+    _append_rows(workbook.create_sheet("Горячие"), sort_for_review(hot), current, manual_selections, new_keys)
+    _append_rows(
+        workbook.create_sheet("На проверку"), sort_for_review(review), current, manual_selections, new_keys
+    )
+    _append_rows(
+        workbook.create_sheet("Широкий хвост"), sort_for_review(wide), current, manual_selections, new_keys
+    )
+    _append_rows(
+        workbook.create_sheet("Отсеянные"), sort_for_review(excluded), current, manual_selections, new_keys
+    )
 
     for name, color in TAB_COLORS.items():
         if name in workbook.sheetnames:

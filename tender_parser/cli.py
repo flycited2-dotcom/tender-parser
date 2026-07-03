@@ -256,6 +256,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         now=current_time,
         source_health=source_result.health,
         manual_selections=load_manual_selections(exports_dir),
+        new_keys={tender.unique_key for tender in first_seen},
     )
     json_path = export_json(actionable, exports_dir / "latest.json")
     new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
