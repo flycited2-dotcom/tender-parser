@@ -38,6 +38,10 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     assert "exports\\latest.html" in report_text
     watch_text = (ROOT / "Автосбор_RTS_кабинета.bat").read_text(encoding="utf-8")
     assert "python -m tender_parser rts-watch" in watch_text
+    poisk_text = (ROOT / "Поиск_RTS_другие_площадки.bat").read_text(encoding="utf-8")
+    assert "rts-tender.ru/poisk/search?id=0926554c-d570-4b2b-b397-606a9c045f4c" in poisk_text
+    assert "--remote-debugging-port=9222" in poisk_text
+    assert "python -m tender_parser rts-watch" in poisk_text
 
 
 def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:

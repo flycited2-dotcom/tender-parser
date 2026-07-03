@@ -7,6 +7,7 @@ from time import sleep
 
 from tender_parser.rts_accumulator import RtsAccumulator
 from tender_parser.sources.rts_cabinet import detect_cabinet_state, parse_cabinet_page
+from tender_parser.sources.rts_poisk import parse_poisk_page
 
 
 RECONNECT_DELAY_SECONDS = 5.0
@@ -29,7 +30,12 @@ BADGE_JS = """
 
 
 def collect_from_page(html: str, url: str, accumulator: RtsAccumulator) -> tuple[int, int] | None:
-    """Добавляет видимую выдачу кабинета в накопитель; None, если это не страница результатов."""
+    """Добавляет видимую выдачу кабинета или поиска в накопитель; None, если результатов нет."""
+    if "/poisk" in url:
+        tenders = parse_poisk_page(html, url)
+        if not tenders:
+            return None
+        return accumulator.add_many(tenders)
     if detect_cabinet_state(html, url) != "results":
         return None
     tenders = parse_cabinet_page(html, url)
