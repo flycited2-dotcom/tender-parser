@@ -4,10 +4,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
+from math import ceil
+
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
@@ -114,6 +116,34 @@ LINK_FONT = Font(color="FF0B63CE", underline="single")
 WRAP_TOP = Alignment(wrap_text=True, vertical="top")
 TOP = Alignment(vertical="top")
 
+_GRID_SIDE = Side(style="thin", color="FFD8DDE3")
+GRID_BORDER = Border(left=_GRID_SIDE, right=_GRID_SIDE, top=_GRID_SIDE, bottom=_GRID_SIDE)
+
+# Колонки с переносом текста: по ним считается высота строки (ширина уменьшена на поля).
+WRAP_COLUMNS = {
+    "название": 53,
+    "причина_включения": 43,
+    "причина_исключения": 33,
+    "delivery_region_evidence": 28,
+}
+ROW_LINE_HEIGHT = 13.5
+MAX_ROW_LINES = 5
+
+
+def _row_lines(tender: TenderRecord) -> int:
+    values = {
+        "название": tender.title,
+        "причина_включения": tender.include_reason,
+        "причина_исключения": tender.exclude_reason,
+        "delivery_region_evidence": tender.delivery_region_evidence,
+    }
+    lines = 1
+    for header, width in WRAP_COLUMNS.items():
+        text = values.get(header) or ""
+        if text:
+            lines = max(lines, ceil(len(text) / width))
+    return min(lines, MAX_ROW_LINES)
+
 
 def _format_dt(value: datetime | None) -> str:
     return value.strftime("%Y-%m-%d %H:%M") if value else ""
@@ -201,6 +231,12 @@ def _style_header(sheet: Worksheet, columns: int, row: int = 1) -> None:
         cell.font = HEADER_FONT
         cell.fill = fill
         cell.alignment = Alignment(vertical="center", wrap_text=True)
+        cell.border = GRID_BORDER
+
+
+def _border_row(sheet: Worksheet, row: int, columns: int) -> None:
+    for index in range(1, columns + 1):
+        sheet.cell(row=row, column=index).border = GRID_BORDER
 
 
 def _append_rows(
@@ -255,8 +291,10 @@ def _append_rows(
         for index in range(1, len(HEADERS) + 1):
             cell = sheet.cell(row=row, column=index)
             cell.alignment = TOP
+            cell.border = GRID_BORDER
             if row_fill is not None:
                 cell.fill = row_fill
+        sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * _row_lines(tender) + 3
 
         priority_cell = sheet.cell(row=row, column=1)
         priority_cell.font = Font(bold=True, size=10)
@@ -295,22 +333,32 @@ def _count_by(tenders: list[TenderRecord], key) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
 
-def _add_bar_chart(sheet: Worksheet, title: str, first_row: int, last_row: int, anchor: str) -> None:
+def _add_bar_chart(sheet: Worksheet, title: str, first_row: int, last_row: int, anchor_row: int) -> int:
+    """Горизонтальный bar со значениями на барах и именами на оси; возвращает нижнюю строку."""
     chart = BarChart()
     chart.type = "bar"
     chart.title = title
     chart.legend = None
-    chart.height = max(4.5, 0.9 * (last_row - first_row + 1) + 2)
-    chart.width = 13
+    chart.height = max(5.0, 1.0 * (last_row - first_row + 1) + 2.5)
+    chart.width = 16
     data = Reference(sheet, min_col=2, min_row=first_row - 1, max_row=last_row)
     categories = Reference(sheet, min_col=1, min_row=first_row, max_row=last_row)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(categories)
-    chart.dataLabels = DataLabelList()
-    chart.dataLabels.showVal = True
+    labels = DataLabelList()
+    labels.showVal = True
+    labels.showSerName = False
+    labels.showCatName = False
+    labels.showLegendKey = False
+    labels.showPercent = False
+    chart.dataLabels = labels
+    chart.y_axis.delete = False
+    chart.x_axis.delete = False
     series = chart.series[0]
     series.graphicalProperties.solidFill = CHART_BAR_COLOR
-    sheet.add_chart(chart, anchor)
+    sheet.add_chart(chart, f"D{anchor_row}")
+    # ~0.53 см на строку Excel по умолчанию
+    return anchor_row + ceil(chart.height / 0.53) + 1
 
 
 def _dashboard_section(sheet: Worksheet, row: int, title: str) -> int:
@@ -330,9 +378,9 @@ def _build_dashboard(
     now: datetime,
     source_health: list[SourceHealth] | None,
 ) -> None:
-    sheet.column_dimensions["A"].width = 30
+    sheet.column_dimensions["A"].width = 55
     for letter in "BCDEF":
-        sheet.column_dimensions[letter].width = 15
+        sheet.column_dimensions[letter].width = 14
     sheet.sheet_view.showGridLines = False
 
     title = sheet.cell(row=1, column=1, value="Тендеры — панель управления")
@@ -367,8 +415,10 @@ def _build_dashboard(
         row += 1
         sheet.cell(row=row, column=1, value=name)
         sheet.cell(row=row, column=2, value=count)
+        _border_row(sheet, row, 2)
     if sources:
-        _add_bar_chart(sheet, "Actionable по источникам", header_row + 1, row, "D" + str(header_row))
+        chart_bottom = _add_bar_chart(sheet, "Actionable по источникам", header_row + 1, row, header_row)
+        row = max(row, chart_bottom)
 
     row += 2
     row = _dashboard_section(sheet, row, "Actionable по категориям")
@@ -381,8 +431,10 @@ def _build_dashboard(
         row += 1
         sheet.cell(row=row, column=1, value=name)
         sheet.cell(row=row, column=2, value=count)
+        _border_row(sheet, row, 2)
     if categories:
-        _add_bar_chart(sheet, "Actionable по категориям", header_row + 1, row, "D" + str(header_row))
+        chart_bottom = _add_bar_chart(sheet, "Actionable по категориям", header_row + 1, row, header_row)
+        row = max(row, chart_bottom)
 
     closing_soon = [
         tender
@@ -414,6 +466,8 @@ def _build_dashboard(
             deadline_cell.number_format = DATE_FORMAT
             days_cell = sheet.cell(row=row, column=5, value=_days_left(tender.deadline, now))
             days_cell.fill = PatternFill("solid", start_color=DEADLINE_URGENT_FILL)
+            _border_row(sheet, row, 5)
+            sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * min(ceil(len(tender.title) / 53), 4) + 3
 
     if excluded:
         row += 2
@@ -427,6 +481,7 @@ def _build_dashboard(
             reason_cell = sheet.cell(row=row, column=1, value=name)
             reason_cell.alignment = WRAP_TOP
             sheet.cell(row=row, column=2, value=count)
+            _border_row(sheet, row, 2)
 
     row += 2
     row = _dashboard_section(sheet, row, "Топ горячих")
@@ -448,6 +503,8 @@ def _build_dashboard(
         deadline_cell.number_format = DATE_FORMAT
         days = _days_left(tender.deadline, now)
         sheet.cell(row=row, column=5, value=days if days is not None else "")
+        _border_row(sheet, row, 5)
+        sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * min(ceil(len(tender.title) / 53), 4) + 3
 
     if source_health:
         row += 2
@@ -467,6 +524,7 @@ def _build_dashboard(
             sheet.cell(row=row, column=4, value=item.elapsed_seconds)
             detail_cell = sheet.cell(row=row, column=5, value=item.detail)
             detail_cell.alignment = WRAP_TOP
+            _border_row(sheet, row, 5)
 
 
 def export_excel(
@@ -528,5 +586,14 @@ def export_excel(
         if name in workbook.sheetnames:
             workbook[name].sheet_properties.tabColor = color
 
-    workbook.save(output_path)
-    return output_path
+    try:
+        workbook.save(output_path)
+        return output_path
+    except PermissionError:
+        # Файл открыт в Excel — сохраняем рядом с меткой времени, чтобы прогон не падал.
+        fallback = output_path.with_name(
+            f"{output_path.stem}_{datetime.now():%H%M%S}{output_path.suffix}"
+        )
+        workbook.save(fallback)
+        print(f"Файл {output_path.name} занят (открыт в Excel) — отчет сохранен как {fallback.name}")
+        return fallback

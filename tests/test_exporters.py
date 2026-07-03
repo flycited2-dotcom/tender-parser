@@ -102,6 +102,43 @@ def test_export_excel_builds_dashboard_with_kpi_and_sources(tmp_path: Path) -> N
     assert "rts-cabinet" in column_a
 
 
+def test_data_sheets_have_grid_borders_and_computed_row_heights(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    long_title = "Поставка МФУ, принтеров, сканеров и расходных материалов " * 3
+    export_excel([replace(make_tender("matched"), title=long_title)], [], [], [], output, now=NOW)
+
+    sheet = load_workbook(output)["Горячие"]
+    assert sheet["A1"].border.bottom.style == "thin"
+    assert sheet["D2"].border.bottom.style == "thin"
+    assert sheet.row_dimensions[2].height is not None
+    assert sheet.row_dimensions[2].height > 20
+
+
+def test_dashboard_tables_have_borders_and_wide_title_column(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    export_excel([make_tender("matched")], [], [], [make_tender("excluded")], output, now=NOW)
+
+    dashboard = load_workbook(output)["Дашборд"]
+    assert dashboard.column_dimensions["A"].width >= 50
+    header_row = next(
+        cell.row for cell in dashboard["A"] if cell.value == "Источник"
+    )
+    assert dashboard.cell(row=header_row, column=1).border.bottom.style == "thin"
+    assert dashboard.cell(row=header_row + 1, column=1).border.bottom.style == "thin"
+
+
+def test_export_excel_falls_back_when_target_is_locked(tmp_path: Path) -> None:
+    locked = tmp_path / "tenders_2026-07-03.xlsx"
+    locked.mkdir()  # каталог с именем файла даёт PermissionError при записи, как открытый Excel
+
+    result = export_excel([make_tender("matched")], [], [], [], locked, now=NOW)
+
+    assert result != locked
+    assert result.parent == tmp_path
+    assert result.name.startswith("tenders_2026-07-03_")
+    assert result.exists()
+
+
 def test_new_tenders_are_marked_on_all_sheets(tmp_path: Path) -> None:
     output = tmp_path / "tenders.xlsx"
     tender = make_tender("matched")
