@@ -21,11 +21,12 @@ def normalize_text(value: str | None) -> str:
 
 
 def word_term_matches(text: str, term: str) -> bool:
+    # (?<!-) — часть составного слова после дефиса не считается словом («шприц-ручка» не «ручка»).
     if not term:
         return False
     blocked = TERM_SUFFIX_EXCEPTIONS.get(term)
     suffix_guard = f"(?!{blocked})" if blocked else ""
-    return re.search(rf"(?<![\w]){re.escape(term)}{suffix_guard}[\w-]*(?![\w])", text) is not None
+    return re.search(rf"(?<![\w])(?<!-){re.escape(term)}{suffix_guard}[\w-]*(?![\w])", text) is not None
 
 
 def parse_price_rub(value: str | None, *, require_currency: bool = True) -> float | None:

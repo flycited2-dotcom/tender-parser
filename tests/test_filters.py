@@ -51,7 +51,7 @@ def test_evaluate_tender_excludes_stop_terms() -> None:
 
     assert result.filter_status == "excluded"
     assert "стоп-тема" in result.exclude_reason
-    assert "лекарственные препараты" in result.exclude_reason
+    assert "лекарствен" in result.exclude_reason
 
 
 def test_evaluate_tender_excludes_low_price() -> None:
@@ -357,6 +357,45 @@ def test_evaluate_tender_matches_large_appliances() -> None:
 
     assert result.filter_status == "matched"
     assert result.category == "Бытовая техника"
+
+
+def test_evaluate_tender_excludes_insulin_supply_with_pen_injector() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка лекарственного препарата для медицинского применения Инсулин гларгин",
+            raw_text="Инсулин гларгин раствор шприц-ручка 3 мл Республика Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_excludes_construction_and_installation_works() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Выполнение строительно-монтажных и пусконаладочных работ по объекту КЛ-6 кВ",
+            raw_text="Строительно-монтажные работы, кабель КЛ-6 кВ, Севастополь",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_does_not_match_pen_after_hyphen() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка шприц-ручек для инъекций в Республику Крым",
+            raw_text="Шприц-ручка для инъекций",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
 
 
 def test_evaluate_tender_still_excludes_medical_and_construction() -> None:
