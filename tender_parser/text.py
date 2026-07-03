@@ -25,16 +25,20 @@ def stem(word: str) -> str:
 
 
 def phrase_stems_match(text: str, term: str) -> bool:
-    """Матчит многословный термин по стемам слов по порядку — покрывает падежи."""
+    """Матчит многословный термин по стемам слов по порядку — покрывает падежи.
+
+    Каждый стем должен начинаться на границе слова (и не после дефиса), чтобы
+    «административно-хозяйственный» не считался словом «хозяйственный».
+    """
     stems = [stem(word) for word in term.split() if len(stem(word)) >= 4]
     if not stems:
         return False
     position = 0
     for part in stems:
-        found_at = text.find(part, position)
-        if found_at < 0:
+        match = re.compile(rf"(?<![\w])(?<!-){re.escape(part)}").search(text, position)
+        if match is None:
             return False
-        position = found_at + len(part)
+        position = match.start() + len(part)
     return True
 
 

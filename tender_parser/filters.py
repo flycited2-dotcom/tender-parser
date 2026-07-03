@@ -104,7 +104,8 @@ def _include_reason(
     return "; ".join(parts)
 
 
-def _stop_searchable(tender: TenderRecord) -> str:
+def _subject_searchable(tender: TenderRecord) -> str:
+    """Предмет закупки без имени заказчика — для стоп-тем и категорий."""
     raw_text = tender.raw_text
     if tender.customer:
         raw_text = raw_text.replace(tender.customer, " ")
@@ -114,15 +115,16 @@ def _stop_searchable(tender: TenderRecord) -> str:
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
+    subject = _subject_searchable(tender)
 
-    stop_term = _first_matching_term(_stop_searchable(tender), STOP_TERMS)
+    stop_term = _first_matching_term(subject, STOP_TERMS)
     if stop_term:
         return _exclude(tender, f"стоп-тема: {stop_term}")
 
     if tender.deadline is not None and tender.deadline <= current:
         return _exclude(tender, "срок подачи истек")
 
-    category, terms = matching_category(searchable)
+    category, terms = matching_category(subject)
     if not category:
         return _exclude(tender, "категория интереса не найдена")
 

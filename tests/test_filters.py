@@ -420,6 +420,21 @@ def test_evaluate_tender_matches_measuring_devices_and_batteries() -> None:
     assert result.category == "Электротехника и оборудование"
 
 
+def test_evaluate_tender_ignores_category_words_in_customer_name() -> None:
+    customer = "Департамент административно-хозяйственного обеспечения города Севастополя"
+    result = evaluate_tender(
+        make_tender(
+            title="На поставку щебня",
+            customer=customer,
+            raw_text=f"На поставку щебня Севастополь {customer} электронный аукцион",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
+
+
 def test_evaluate_tender_excludes_insulin_supply_with_pen_injector() -> None:
     result = evaluate_tender(
         make_tender(

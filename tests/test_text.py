@@ -1,6 +1,12 @@
 from datetime import datetime
 
-from tender_parser.text import normalize_text, parse_deadline, parse_price_rub, word_term_matches
+from tender_parser.text import (
+    normalize_text,
+    parse_deadline,
+    parse_price_rub,
+    phrase_stems_match,
+    word_term_matches,
+)
 
 
 def test_normalize_text_lowercases_and_collapses_spaces() -> None:
@@ -45,6 +51,16 @@ def test_parse_price_rub_returns_none_for_missing_price() -> None:
 
 def test_parse_price_rub_returns_none_for_malformed_price() -> None:
     assert parse_price_rub("Цена: руб.") is None
+
+
+def test_phrase_stems_match_covers_grammatical_cases() -> None:
+    assert phrase_stems_match("поставка хозяйственных товаров", "хозяйственные товары") is True
+    assert phrase_stems_match("поставка сетевого оборудования", "сетевое оборудование") is True
+
+
+def test_phrase_stems_match_requires_word_boundaries() -> None:
+    text = "департамент административно-хозяйственного обеспечения закупает товары"
+    assert phrase_stems_match(text, "хозяйственные товары") is False
 
 
 def test_parse_deadline_reads_russian_datetime() -> None:
