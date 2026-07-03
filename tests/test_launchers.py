@@ -29,6 +29,15 @@ def test_eat_setup_helper_writes_ignored_env_file() -> None:
     assert "check-env" in text
 
 
+def test_rts_accumulator_launchers_call_expected_commands() -> None:
+    add_text = (ROOT / "Добавить_страницу_RTS.bat").read_text(encoding="utf-8")
+    report_text = (ROOT / "Отчет_по_накопленному_RTS.bat").read_text(encoding="utf-8")
+
+    assert "python -m tender_parser rts-add-page" in add_text
+    assert "python -m tender_parser run --profile rts-accumulated" in report_text
+    assert "exports\\latest.html" in report_text
+
+
 def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:
     open_text = (ROOT / "Открыть_RTS_кабинет_Chrome.bat").read_text(encoding="utf-8")
     collect_text = (ROOT / "Собрать_RTS_кабинет.bat").read_text(encoding="utf-8")

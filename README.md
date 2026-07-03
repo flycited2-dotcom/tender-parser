@@ -18,6 +18,8 @@
 - `Диагностика_RTS.bat` - проверить только RTS-Tender и записать его health/report.
 - `Открыть_RTS_кабинет_Chrome.bat` - открыть отдельный Chrome-профиль для ручного входа в RTS.
 - `Собрать_RTS_кабинет.bat` - собрать текущую видимую выдачу RTS-кабинета через `--profile rts-cabinet`.
+- `Добавить_страницу_RTS.bat` - добавить текущую видимую страницу RTS-кабинета в накопитель (жмите на каждой странице, листая выдачу вручную; дубли по номеру закупки не создаются).
+- `Отчет_по_накопленному_RTS.bat` - прогнать все накопленные страницы RTS через общий отчет (`--profile rts-accumulated`).
 
 ## Ручные выгрузки и документы
 
@@ -98,6 +100,8 @@ python -m tender_parser run --profile fast   # без текущих timeout/cap
 python -m tender_parser run --profile local  # только imports/ и documents/
 python -m tender_parser run --profile rts    # только RTS-Tender для диагностики
 python -m tender_parser run --profile rts-cabinet  # текущая выдача RTS из открытого Chrome-профиля
+python -m tender_parser rts-add-page               # добавить текущую страницу RTS в накопитель
+python -m tender_parser run --profile rts-accumulated  # отчет по всем накопленным страницам RTS
 ```
 
 ## ЕАТ / Березка

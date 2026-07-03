@@ -23,6 +23,7 @@ from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
 from tender_parser.sources.etp_gpb import EtpGpbRssSource
 from tender_parser.sources.imports import ImportFolderSource
+from tender_parser.rts_accumulator import RtsAccumulator, RtsAccumulatorSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
@@ -37,20 +38,23 @@ class TenderSource(Protocol):
 
 
 EAT_REQUIRED_ENV_KEYS = ["EAT_API_TOKEN", "EAT_EXT_SYSTEM"]
-RunProfile = Literal["full", "fast", "local", "rts", "rts-cabinet"]
+RunProfile = Literal["full", "fast", "local", "rts", "rts-cabinet", "rts-accumulated"]
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tender_parser")
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "check-env"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "check-env", "rts-add-page"])
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
     parser.add_argument("--dry-run", action="store_true", help="Create directories and exit")
     parser.add_argument("--now", default="", help="Override current datetime for tests, ISO format")
     parser.add_argument(
         "--profile",
         default="full",
-        choices=["full", "fast", "local", "rts", "rts-cabinet"],
-        help="Source profile: full, fast, local imports/documents only, RTS diagnostics, or RTS cabinet browser mode",
+        choices=["full", "fast", "local", "rts", "rts-cabinet", "rts-accumulated"],
+        help=(
+            "Source profile: full, fast, local imports/documents only, RTS diagnostics, "
+            "RTS cabinet browser mode, or accumulated RTS cabinet pages"
+        ),
     )
     return parser
 
@@ -148,6 +152,22 @@ def _fetch_with_report(
     )
 
 
+def _rts_add_page_command(data_dir: Path, source: TenderSource | None) -> int:
+    cabinet = source or RtsCabinetBrowserSource()
+    result = cabinet.fetch_with_report([])  # type: ignore[attr-defined]
+    if result.errors:
+        print(f"RTS кабинет недоступен: {'; '.join(result.errors)}")
+        print("Накопитель не изменен.")
+        return 2
+    accumulator = RtsAccumulator(data_dir / "tenders.db")
+    added, total = accumulator.add_many(result.tenders)
+    print(f"Прочитано строк со страницы: {len(result.tenders)}")
+    print(f"Новых в накопителе: {added}")
+    print(f"Всего в накопителе RTS: {total}")
+    print("Дальше: листайте выдачу и повторяйте, затем запустите профиль rts-accumulated.")
+    return 0
+
+
 def _check_env_command(base_dir: Path) -> int:
     status = get_env_status(EAT_REQUIRED_ENV_KEYS)
     print(f"Config file: {base_dir / '.env'}")
@@ -164,11 +184,18 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     load_env_file(base_dir / ".env")
     if args.command == "check-env":
         return _check_env_command(base_dir)
+    if args.command == "rts-add-page":
+        return _rts_add_page_command(data_dir, source)
     if args.dry_run:
         return 0
 
     current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
-    active_source = source or build_source_for_profile(args.profile)
+    if source is not None:
+        active_source = source
+    elif args.profile == "rts-accumulated":
+        active_source = RtsAccumulatorSource(data_dir / "tenders.db")
+    else:
+        active_source = build_source_for_profile(args.profile)
     try:
         source_result = _fetch_with_report(
             active_source,
