@@ -5,7 +5,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from tender_parser.exporters.excel import export_excel, sort_for_review
+from tender_parser.exporters.excel import export_excel, load_manual_selections, sort_for_review
 from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.models import TenderRecord
@@ -99,6 +99,59 @@ def test_export_excel_builds_dashboard_with_kpi_and_sources(tmp_path: Path) -> N
     assert "Здоровье источников" in column_a
     assert "test" in column_a
     assert "rts-cabinet" in column_a
+
+
+def test_manual_selections_survive_reexport(tmp_path: Path) -> None:
+    first_path = tmp_path / "tenders_2026-07-03.xlsx"
+    export_excel([make_tender("matched")], [], [], [], first_path, now=NOW)
+
+    workbook = load_workbook(first_path)
+    sheet = workbook["Горячие"]
+    headers = [cell.value for cell in sheet[1]]
+    choice_col = headers.index("мой_выбор") + 1
+    comment_col = headers.index("комментарий") + 1
+    sheet.cell(row=2, column=choice_col, value="✅ Беру")
+    sheet.cell(row=2, column=comment_col, value="перезвонить заказчику")
+    workbook.save(first_path)
+
+    selections = load_manual_selections(tmp_path)
+    assert selections[("test", "1")] == ("✅ Беру", "перезвонить заказчику")
+
+    second_path = tmp_path / "tenders_2026-07-04.xlsx"
+    export_excel(
+        [make_tender("matched")], [], [], [], second_path, now=NOW, manual_selections=selections
+    )
+
+    second = load_workbook(second_path)
+    hot = second["Горячие"]
+    assert hot.cell(row=2, column=choice_col).value == "✅ Беру"
+    assert hot.cell(row=2, column=comment_col).value == "перезвонить заказчику"
+    assert "Мой отбор" in second.sheetnames
+    picked = second["Мой отбор"]
+    assert picked.cell(row=2, column=headers.index("название") + 1).value == "Поставка МФУ"
+
+
+def test_load_manual_selections_handles_missing_dir(tmp_path: Path) -> None:
+    assert load_manual_selections(tmp_path / "missing") == {}
+
+
+def test_dashboard_lists_exclusion_reasons_and_closing_soon(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    closing = replace(make_tender("matched"), deadline=datetime(2026, 5, 21, 10, 0))
+    export_excel(
+        [closing],
+        [],
+        [],
+        [make_tender("excluded")],
+        output,
+        now=NOW,
+    )
+
+    dashboard = load_workbook(output)["Дашборд"]
+    column_a = [cell.value for cell in dashboard["A"] if cell.value]
+    assert "Топ причин отсева" in column_a
+    assert any("регион не найден" in str(value) for value in column_a)
+    assert "Скоро закрываются" in column_a
 
 
 def test_export_excel_adds_new_sheet_when_new_tenders_are_given(tmp_path: Path) -> None:

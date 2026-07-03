@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Mapping
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
@@ -88,12 +89,19 @@ HEALTH_BAD_FILL = "FFF5CECE"
 
 TAB_COLORS = {
     "Дашборд": "2A78D6",
+    "Мой отбор": "104281",
     "Новые": "0CA30C",
     "Горячие": "EC835A",
     "На проверку": "FAB219",
     "Широкий хвост": "86B6EF",
     "Отсеянные": "9AA0A6",
 }
+
+DATA_SHEETS = {"Мой отбор", "Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"}
+PICKED_CHOICES = ("✅", "🤔")
+
+SelectionKey = tuple[str, str]
+SelectionValue = tuple[str, str]
 
 CHOICE_VALIDATION = '"✅ Беру,🤔 Думаю,❌ Мимо"'
 PRICE_FORMAT = '#,##0.00 "₽"'
@@ -130,6 +138,60 @@ def sort_for_review(tenders: list[TenderRecord]) -> list[TenderRecord]:
     )
 
 
+def load_manual_selections(exports_dir: Path) -> dict[SelectionKey, SelectionValue]:
+    """Читает отметки мой_выбор/комментарий из последнего выгруженного Excel.
+
+    Отметки пользователя переживают перегенерацию отчета: ключ — (источник, номер).
+    """
+    if not exports_dir.exists():
+        return {}
+    candidates = sorted(exports_dir.glob("tenders_*.xlsx"))
+    if not candidates:
+        return {}
+    from openpyxl import load_workbook
+
+    try:
+        workbook = load_workbook(candidates[-1], read_only=True, data_only=True)
+    except Exception:
+        return {}
+    selections: dict[SelectionKey, SelectionValue] = {}
+    try:
+        for name in workbook.sheetnames:
+            if name not in DATA_SHEETS:
+                continue
+            sheet = workbook[name]
+            rows = sheet.iter_rows(values_only=True)
+            headers = [str(value or "").strip() for value in next(rows, [])]
+            try:
+                source_col = headers.index("источник")
+                number_col = headers.index("номер")
+                choice_col = headers.index("мой_выбор")
+                comment_col = headers.index("комментарий")
+            except ValueError:
+                continue
+            for row in rows:
+                if len(row) <= max(source_col, number_col, choice_col, comment_col):
+                    continue
+                choice = str(row[choice_col] or "").strip()
+                comment = str(row[comment_col] or "").strip()
+                if not choice and not comment:
+                    continue
+                key = (str(row[source_col] or ""), str(row[number_col] or ""))
+                if key not in selections:
+                    selections[key] = (choice, comment)
+    finally:
+        workbook.close()
+    return selections
+
+
+def _selection_for(
+    tender: TenderRecord, selections: Mapping[SelectionKey, SelectionValue] | None
+) -> SelectionValue:
+    if not selections:
+        return "", ""
+    return selections.get((tender.source, tender.tender_number or ""), ("", ""))
+
+
 def _style_header(sheet: Worksheet, columns: int, row: int = 1) -> None:
     fill = PatternFill("solid", start_color=HEADER_FILL)
     for index in range(1, columns + 1):
@@ -139,7 +201,12 @@ def _style_header(sheet: Worksheet, columns: int, row: int = 1) -> None:
         cell.alignment = Alignment(vertical="center", wrap_text=True)
 
 
-def _append_rows(sheet: Worksheet, tenders: list[TenderRecord], now: datetime) -> None:
+def _append_rows(
+    sheet: Worksheet,
+    tenders: list[TenderRecord],
+    now: datetime,
+    selections: Mapping[SelectionKey, SelectionValue] | None = None,
+) -> None:
     sheet.append(HEADERS)
     _style_header(sheet, len(HEADERS))
     for header, width in COLUMN_WIDTHS.items():
@@ -152,6 +219,7 @@ def _append_rows(sheet: Worksheet, tenders: list[TenderRecord], now: datetime) -
 
     for tender in tenders:
         days = _days_left(tender.deadline, now)
+        choice, comment = _selection_for(tender, selections)
         sheet.append(
             [
                 PRIORITY_LABELS.get(tender.review_priority or "", tender.review_priority or ""),
@@ -163,8 +231,8 @@ def _append_rows(sheet: Worksheet, tenders: list[TenderRecord], now: datetime) -
                 tender.customer or "",
                 tender.category or "",
                 tender.match_confidence or "",
-                "",
-                "",
+                choice,
+                comment,
                 tender.tender_number or "",
                 tender.source,
                 tender.status or "",
@@ -312,6 +380,50 @@ def _build_dashboard(
     if categories:
         _add_bar_chart(sheet, "Actionable по категориям", header_row + 1, row, "D" + str(header_row))
 
+    closing_soon = [
+        tender
+        for tender in sort_for_review(actionable)
+        if (days := _days_left(tender.deadline, now)) is not None and 0 <= days <= 3
+    ][:10]
+    if closing_soon:
+        row += 2
+        row = _dashboard_section(sheet, row, "Скоро закрываются")
+        soon_headers = ["Название", "Приоритет", "Сумма", "Срок подачи", "Дней"]
+        for index, header in enumerate(soon_headers, start=1):
+            sheet.cell(row=row, column=index, value=header)
+        _style_header(sheet, len(soon_headers), row=row)
+        for tender in closing_soon:
+            row += 1
+            title_cell = sheet.cell(row=row, column=1, value=tender.title)
+            title_cell.alignment = WRAP_TOP
+            if tender.url:
+                title_cell.hyperlink = tender.url
+                title_cell.font = LINK_FONT
+            sheet.cell(
+                row=row,
+                column=2,
+                value=PRIORITY_LABELS.get(tender.review_priority or "", tender.review_priority or ""),
+            )
+            price_cell = sheet.cell(row=row, column=3, value=tender.price)
+            price_cell.number_format = PRICE_FORMAT
+            deadline_cell = sheet.cell(row=row, column=4, value=tender.deadline)
+            deadline_cell.number_format = DATE_FORMAT
+            days_cell = sheet.cell(row=row, column=5, value=_days_left(tender.deadline, now))
+            days_cell.fill = PatternFill("solid", start_color=DEADLINE_URGENT_FILL)
+
+    if excluded:
+        row += 2
+        row = _dashboard_section(sheet, row, "Топ причин отсева")
+        sheet.cell(row=row, column=1, value="Причина")
+        sheet.cell(row=row, column=2, value="Карточек")
+        _style_header(sheet, 2, row=row)
+        reasons = _count_by(excluded, lambda tender: tender.exclude_reason or "без причины")
+        for name, count in reasons[:8]:
+            row += 1
+            reason_cell = sheet.cell(row=row, column=1, value=name)
+            reason_cell.alignment = WRAP_TOP
+            sheet.cell(row=row, column=2, value=count)
+
     row += 2
     row = _dashboard_section(sheet, row, "Топ горячих")
     top_headers = ["Название", "Регион", "Сумма", "Срок подачи", "Дней до срока"]
@@ -363,6 +475,7 @@ def export_excel(
     new_tenders: list[TenderRecord] | None = None,
     now: datetime | None = None,
     source_health: list[SourceHealth] | None = None,
+    manual_selections: Mapping[SelectionKey, SelectionValue] | None = None,
 ) -> Path:
     current = now or datetime.now()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -381,12 +494,20 @@ def export_excel(
         source_health=source_health,
     )
 
+    picked = [
+        tender
+        for tender in hot + review + wide + excluded
+        if _selection_for(tender, manual_selections)[0].startswith(PICKED_CHOICES)
+    ]
+    if picked:
+        _append_rows(workbook.create_sheet("Мой отбор"), sort_for_review(picked), current, manual_selections)
+
     if new_tenders is not None:
-        _append_rows(workbook.create_sheet("Новые"), sort_for_review(new_tenders), current)
-    _append_rows(workbook.create_sheet("Горячие"), sort_for_review(hot), current)
-    _append_rows(workbook.create_sheet("На проверку"), sort_for_review(review), current)
-    _append_rows(workbook.create_sheet("Широкий хвост"), sort_for_review(wide), current)
-    _append_rows(workbook.create_sheet("Отсеянные"), sort_for_review(excluded), current)
+        _append_rows(workbook.create_sheet("Новые"), sort_for_review(new_tenders), current, manual_selections)
+    _append_rows(workbook.create_sheet("Горячие"), sort_for_review(hot), current, manual_selections)
+    _append_rows(workbook.create_sheet("На проверку"), sort_for_review(review), current, manual_selections)
+    _append_rows(workbook.create_sheet("Широкий хвост"), sort_for_review(wide), current, manual_selections)
+    _append_rows(workbook.create_sheet("Отсеянные"), sort_for_review(excluded), current, manual_selections)
 
     for name, color in TAB_COLORS.items():
         if name in workbook.sheetnames:

@@ -11,7 +11,7 @@ from tender_parser.dedup import deduplicate_tenders
 from tender_parser.documents import DocumentAnalyzer
 from tender_parser.enrichment import TenderEnricher
 from tender_parser.env import get_env_status, load_env_file
-from tender_parser.exporters.excel import export_excel, sort_for_review
+from tender_parser.exporters.excel import export_excel, load_manual_selections, sort_for_review
 from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
@@ -255,6 +255,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         new_tenders=new_actionable,
         now=current_time,
         source_health=source_result.health,
+        manual_selections=load_manual_selections(exports_dir),
     )
     json_path = export_json(actionable, exports_dir / "latest.json")
     new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
