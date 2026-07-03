@@ -48,7 +48,12 @@ RunProfile = Literal["full", "fast", "local", "rts", "rts-cabinet", "rts-accumul
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tender_parser")
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "check-env", "rts-add-page"])
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="run",
+        choices=["run", "check-env", "rts-add-page", "rts-watch"],
+    )
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
     parser.add_argument("--dry-run", action="store_true", help="Create directories and exit")
     parser.add_argument("--now", default="", help="Override current datetime for tests, ISO format")
@@ -191,6 +196,10 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         return _check_env_command(base_dir)
     if args.command == "rts-add-page":
         return _rts_add_page_command(data_dir, source)
+    if args.command == "rts-watch":
+        from tender_parser.browser.rts_watcher import RtsCabinetWatcher
+
+        return RtsCabinetWatcher(data_dir / "tenders.db").run_forever()
     if args.dry_run:
         return 0
 

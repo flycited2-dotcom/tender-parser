@@ -36,6 +36,8 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     assert "python -m tender_parser rts-add-page" in add_text
     assert "python -m tender_parser run --profile rts-accumulated" in report_text
     assert "exports\\latest.html" in report_text
+    watch_text = (ROOT / "Автосбор_RTS_кабинета.bat").read_text(encoding="utf-8")
+    assert "python -m tender_parser rts-watch" in watch_text
 
 
 def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:
