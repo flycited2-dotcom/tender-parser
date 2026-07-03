@@ -16,7 +16,12 @@ from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
-from tender_parser.run_report import SourceFetchResult, SourceHealth
+from tender_parser.run_report import (
+    SourceFetchResult,
+    SourceHealth,
+    flag_suspect_empty,
+    load_previous_counts,
+)
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
@@ -211,6 +216,9 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     source_result.tenders.extend(import_result.tenders)
     source_result.health.extend(import_result.health)
     source_result.errors.extend(import_result.errors)
+    source_result.health = flag_suspect_empty(
+        source_result.health, load_previous_counts(exports_dir / "run_report.json")
+    )
 
     raw_tenders = TenderEnricher(DocumentAnalyzer(base_dir / "documents")).enrich(source_result.tenders)
     deduplication = deduplicate_tenders(raw_tenders)
