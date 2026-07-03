@@ -307,6 +307,78 @@ def test_evaluate_tender_matches_region_from_title() -> None:
     assert "регион: севастополь" in result.include_reason.lower()
 
 
+def test_evaluate_tender_matches_household_chemistry_and_cleaning() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка бытовой химии и моющих средств",
+            raw_text="Поставка бытовой химии и моющих средств в Республику Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Хозяйственные товары и уборка"
+
+
+def test_evaluate_tender_matches_cleaning_supplies() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Хозяйственные товары и уборочный инвентарь",
+            raw_text="Хозяйственные товары, салфетки, мешки для мусора",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Хозяйственные товары и уборка"
+
+
+def test_evaluate_tender_matches_hotel_supplies() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка постельного белья и полотенец для гостиницы",
+            raw_text="Постельное белье, полотенца, подушки, одеяла",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Гостиничное и хозяйственное обеспечение"
+
+
+def test_evaluate_tender_matches_large_appliances() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка бойлеров и морозильных камер",
+            raw_text="Бойлер, морозильная камера, электрическая плита",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Бытовая техника"
+
+
+def test_evaluate_tender_still_excludes_medical_and_construction() -> None:
+    medical = evaluate_tender(
+        make_tender(
+            title="Поставка медицинских изделий для больницы",
+            raw_text="Поставка медицинских изделий",
+        ),
+        now=NOW,
+    )
+    construction = evaluate_tender(
+        make_tender(
+            title="Капитальный ремонт жилищного фонда",
+            raw_text="Капитальный ремонт жилищного фонда",
+        ),
+        now=NOW,
+    )
+
+    assert medical.filter_status == "excluded"
+    assert construction.filter_status == "excluded"
+
+
 def test_evaluate_tender_clears_matched_metadata_when_excluded() -> None:
     enriched = make_tender(
         price=29_999.0,

@@ -22,6 +22,9 @@ def test_word_term_matches_uses_exception_table() -> None:
     assert word_term_matches("узи щитовидной железы", "щит") is False
     assert word_term_matches("щиты распределительные", "щит") is True
     assert word_term_matches("мониторинг цен", "монитор") is False
+    assert word_term_matches("поставка фенов для гостиницы", "фен") is True
+    assert word_term_matches("реактив фенол чистый", "фен") is False
+    assert word_term_matches("препарат феназепам", "фен") is False
 
 
 def test_parse_price_rub_accepts_russian_format() -> None:
