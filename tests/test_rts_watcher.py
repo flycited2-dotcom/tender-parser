@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tender_parser.browser.rts_watcher import badge_text, collect_from_page
+from tender_parser.browser.rts_watcher import badge_text, collect_from_page, save_snapshot
 from tender_parser.rts_accumulator import RtsAccumulator
 
 FIXTURES = Path("tests/fixtures")
@@ -45,3 +45,17 @@ def test_collect_from_page_skips_login_page(tmp_path: Path) -> None:
 def test_badge_text_reports_totals() -> None:
     assert badge_text(12, 112) == "Накопитель RTS: 112 строк (+12 новых)"
     assert badge_text(0, 112) == "Накопитель RTS: 112 строк (страница уже добавлена)"
+
+
+def test_save_snapshot_writes_once_per_content(tmp_path: Path) -> None:
+    seen: set[str] = set()
+    url = "https://www.rts-tender.ru/poisk/search?id=abc"
+
+    first = save_snapshot("<html>результаты</html>", url, tmp_path / "diagnostics", seen)
+    second = save_snapshot("<html>результаты</html>", url, tmp_path / "diagnostics", seen)
+    other = save_snapshot("<html>другая страница</html>", url, tmp_path / "diagnostics", seen)
+
+    assert first is not None and first.exists()
+    assert url in first.read_text(encoding="utf-8")
+    assert second is None
+    assert other is not None and other.name != first.name

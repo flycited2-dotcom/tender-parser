@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime
 from pathlib import Path
 from time import sleep
 
@@ -42,6 +44,18 @@ def badge_text(added: int, total: int) -> str:
     return f"Накопитель RTS: {total} строк (страница уже добавлена)"
 
 
+def save_snapshot(html: str, url: str, diagnostics_dir: Path, seen_hashes: set[str]) -> Path | None:
+    """Сохраняет вёрстку нераспознанной страницы один раз на содержимое — для настройки парсера."""
+    digest = hashlib.sha1(html.encode("utf-8", "ignore")).hexdigest()[:12]
+    if digest in seen_hashes:
+        return None
+    seen_hashes.add(digest)
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    path = diagnostics_dir / f"rts_poisk_{datetime.now():%Y%m%d_%H%M%S}_{digest}.html"
+    path.write_text(f"<!-- {url} -->\n{html}", encoding="utf-8")
+    return path
+
+
 class RtsCabinetWatcher:
     """Следит за открытой выдачей RTS в Chrome и сам добавляет каждую страницу в накопитель."""
 
@@ -50,10 +64,13 @@ class RtsCabinetWatcher:
         db_path: Path,
         debug_url: str = "http://127.0.0.1:9222",
         poll_seconds: float = 2.0,
+        diagnostics_dir: Path | None = None,
     ) -> None:
         self.db_path = db_path
         self.debug_url = debug_url
         self.poll_seconds = poll_seconds
+        self.diagnostics_dir = diagnostics_dir or db_path.parent.parent / "diagnostics"
+        self._snapshot_hashes: set[str] = set()
 
     def run_forever(self) -> int:
         from playwright.sync_api import sync_playwright
@@ -101,13 +118,23 @@ class RtsCabinetWatcher:
 
     def _poll_page(self, page, accumulator: RtsAccumulator) -> None:
         try:
-            result = collect_from_page(page.content(), page.url, accumulator)
-            if result is None:
+            html = page.content()
+            url = page.url
+            result = collect_from_page(html, url, accumulator)
+            if result is not None:
+                added, total = result
+                if added:
+                    print(f"+{added} новых строк, всего в накопителе: {total}", flush=True)
+                page.evaluate(BADGE_JS, badge_text(added, total))
                 return
-            added, total = result
-            if added:
-                print(f"+{added} новых строк, всего в накопителе: {total}", flush=True)
-            page.evaluate(BADGE_JS, badge_text(added, total))
+            if "/poisk" in url and detect_cabinet_state(html, url) not in {"login", "blocked"}:
+                saved = save_snapshot(html, url, self.diagnostics_dir, self._snapshot_hashes)
+                if saved:
+                    print(
+                        f"Поиск RTS пока не распознается; вёрстка сохранена: diagnostics/{saved.name}",
+                        flush=True,
+                    )
+                page.evaluate(BADGE_JS, "Поиск RTS: вёрстка сохранена для настройки парсера")
         except Exception:
             # Страница перегружается или закрыта — попробуем на следующем проходе.
             return
