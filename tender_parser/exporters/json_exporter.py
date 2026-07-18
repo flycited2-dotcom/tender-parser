@@ -59,10 +59,12 @@ def export_run_report(
     raw_count: int,
     unique_count: int,
     new_count: int,
+    profile: str | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "profile": profile,
         "summary": {
             "raw_count": raw_count,
             "unique_count": unique_count,

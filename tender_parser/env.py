@@ -9,7 +9,7 @@ def load_env_file(path: Path) -> list[str]:
         return []
 
     loaded: list[str] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue

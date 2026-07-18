@@ -260,6 +260,29 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert "Поставка МФУ" in (tmp_path / "exports" / "latest.html").read_text(encoding="utf-8")
 
 
+def test_run_preserves_new_queue_when_export_fails(tmp_path: Path) -> None:
+    import pytest
+
+    (tmp_path / "exports").mkdir(parents=True)
+    (tmp_path / "exports" / "latest.json").mkdir()  # каталог вместо файла блокирует запись
+
+    with pytest.raises(OSError):
+        run(["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"], source=FakeSource())
+
+    (tmp_path / "exports" / "latest.json").rmdir()
+    result = run(["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"], source=FakeSource())
+
+    assert result == 0
+    data = json.loads((tmp_path / "exports" / "new_tenders.json").read_text(encoding="utf-8"))
+    assert data["count"] == 1  # тендер не потерян из CRM-очереди после упавшего экспорта
+
+
+def test_run_rejects_invalid_now(tmp_path: Path, capsys) -> None:
+    result = run(["--base-dir", str(tmp_path), "--now", "вчера"], source=FakeSource())
+
+    assert result == 2
+
+
 def test_run_exports_only_current_run_matches(tmp_path: Path) -> None:
     first_result = run(
         ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],

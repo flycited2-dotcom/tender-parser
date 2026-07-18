@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 import json
 from pathlib import Path
 
 from tender_parser.models import TenderRecord
+
+SQLITE_TIMEOUT_SECONDS = 30.0
 
 
 def _dt_to_str(value: datetime | None) -> str | None:
@@ -26,12 +29,15 @@ class TenderStorage:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        # timeout против «database is locked» при параллельном watcher'е;
+        # соединения закрываются явно (closing) — иначе Windows держит файл.
+        conn = sqlite3.connect(self.db_path, timeout=SQLITE_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tenders (
@@ -87,19 +93,10 @@ class TenderStorage:
         """
         now = datetime.now().isoformat(timespec="seconds")
         first_seen: list[TenderRecord] = []
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             for tender in tenders:
                 discovered = _dt_to_str(tender.discovered_at) or now
-                exists = conn.execute(
-                    "SELECT review_priority FROM tenders WHERE unique_key = ?",
-                    (tender.unique_key,),
-                ).fetchone()
-                if exists is None:
-                    first_seen.append(tender)
-                elif (
-                    exists["review_priority"] not in ACTIONABLE_PRIORITIES
-                    and tender.review_priority in ACTIONABLE_PRIORITIES
-                ):
+                if self._is_new(conn, tender):
                     first_seen.append(tender)
                 conn.execute(
                     """
@@ -162,8 +159,25 @@ class TenderStorage:
                 )
         return first_seen
 
+    def preview_new(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
+        """Как upsert_many, но только чтение: ничего не фиксирует в БД."""
+        with closing(self._connect()) as conn:
+            return [tender for tender in tenders if self._is_new(conn, tender)]
+
+    def _is_new(self, conn: sqlite3.Connection, tender: TenderRecord) -> bool:
+        exists = conn.execute(
+            "SELECT review_priority FROM tenders WHERE unique_key = ?",
+            (tender.unique_key,),
+        ).fetchone()
+        if exists is None:
+            return True
+        return (
+            exists["review_priority"] not in ACTIONABLE_PRIORITIES
+            and tender.review_priority in ACTIONABLE_PRIORITIES
+        )
+
     def fetch_by_status(self, status: str) -> list[TenderRecord]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(
                 "SELECT * FROM tenders WHERE filter_status = ? ORDER BY deadline ASC, title ASC",
                 (status,),

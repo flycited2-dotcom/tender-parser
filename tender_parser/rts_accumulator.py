@@ -4,8 +4,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from contextlib import closing
+
 from tender_parser.models import TenderRecord
-from tender_parser.storage import _dt_to_str, _str_to_dt
+from tender_parser.storage import SQLITE_TIMEOUT_SECONDS, _dt_to_str, _str_to_dt
 
 
 class RtsAccumulator:
@@ -21,12 +23,13 @@ class RtsAccumulator:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=SQLITE_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS rts_cabinet_raw (
@@ -53,7 +56,7 @@ class RtsAccumulator:
     def add_many(self, tenders: list[TenderRecord]) -> tuple[int, int]:
         now = datetime.now().isoformat(timespec="seconds")
         added = 0
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             for tender in tenders:
                 exists = conn.execute(
                     "SELECT 1 FROM rts_cabinet_raw WHERE unique_key = ?",
@@ -106,7 +109,7 @@ class RtsAccumulator:
         return added, total
 
     def load_all(self) -> list[TenderRecord]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(
                 "SELECT * FROM rts_cabinet_raw ORDER BY deadline ASC, title ASC"
             ).fetchall()

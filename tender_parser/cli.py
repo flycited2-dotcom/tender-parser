@@ -21,6 +21,7 @@ from tender_parser.run_report import (
     SourceHealth,
     flag_suspect_empty,
     load_previous_counts,
+    load_previous_profile,
 )
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
@@ -203,7 +204,11 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     if args.dry_run:
         return 0
 
-    current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
+    try:
+        current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
+    except ValueError:
+        print(f"Неверный формат --now: {args.now!r}; нужен ISO, например 2026-07-04T08:00:00")
+        return 2
     if source is not None:
         active_source = source
     elif args.profile == "rts-accumulated":
@@ -225,16 +230,21 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     source_result.tenders.extend(import_result.tenders)
     source_result.health.extend(import_result.health)
     source_result.errors.extend(import_result.errors)
-    source_result.health = flag_suspect_empty(
-        source_result.health, load_previous_counts(exports_dir / "run_report.json")
-    )
+    # Baseline suspect_empty сравним только с прогоном того же профиля:
+    # локальный прогон не должен ни ложно флагать, ни стирать baseline full-прогона.
+    if load_previous_profile(exports_dir / "run_report.json") == args.profile:
+        source_result.health = flag_suspect_empty(
+            source_result.health, load_previous_counts(exports_dir / "run_report.json")
+        )
 
     raw_tenders = TenderEnricher(DocumentAnalyzer(base_dir / "documents")).enrich(source_result.tenders)
     deduplication = deduplicate_tenders(raw_tenders)
     evaluated = [evaluate_tender(tender, now=current_time) for tender in deduplication.tenders]
 
+    # Только предпросмотр «новых»: фиксация в БД — после успешных экспортов,
+    # иначе упавший экспорт навсегда теряет карточки из CRM-очереди.
     storage = TenderStorage(data_dir / "tenders.db")
-    first_seen = storage.upsert_many(evaluated)
+    first_seen = storage.preview_new(evaluated)
 
     hot = [tender for tender in evaluated if tender.review_priority == "hot"]
     review = [tender for tender in evaluated if tender.review_priority == "review"]
@@ -274,7 +284,9 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         raw_count=len(raw_tenders),
         unique_count=len(deduplication.tenders),
         new_count=len(new_actionable),
+        profile=args.profile,
     )
+    storage.upsert_many(evaluated)
 
     print(f"Найдено: {len(raw_tenders)}")
     print(f"После дедупликации: {len(deduplication.tenders)}")

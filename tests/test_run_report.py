@@ -35,6 +35,16 @@ def test_load_previous_counts_reads_run_report(tmp_path: Path) -> None:
     assert load_previous_counts(path) == {"rostender": 37, "eis-zakupki": 0}
 
 
+def test_load_previous_profile_reads_profile_field(tmp_path: Path) -> None:
+    from tender_parser.run_report import load_previous_profile
+
+    path = tmp_path / "run_report.json"
+    path.write_text(json.dumps({"profile": "full", "sources": []}), encoding="utf-8")
+
+    assert load_previous_profile(path) == "full"
+    assert load_previous_profile(tmp_path / "missing.json") is None
+
+
 def test_load_previous_counts_tolerates_missing_or_broken_file(tmp_path: Path) -> None:
     assert load_previous_counts(tmp_path / "missing.json") == {}
 

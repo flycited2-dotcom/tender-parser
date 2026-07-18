@@ -111,6 +111,48 @@ def test_storage_reports_promotion_to_actionable(tmp_path: Path) -> None:
     assert storage.upsert_many([promoted]) == []
 
 
+def test_preview_new_does_not_write(tmp_path: Path) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    tender = TenderRecord(
+        title="Поставка МФУ",
+        url="https://example.test/tender-1/",
+        source="test",
+        tender_number="1",
+        filter_status="matched",
+        review_priority="hot",
+    )
+
+    first = storage.preview_new([tender])
+    second = storage.preview_new([tender])
+
+    assert first == [tender]
+    assert second == [tender]
+    assert storage.fetch_by_status("matched") == []
+
+    storage.upsert_many([tender])
+    assert storage.preview_new([tender]) == []
+
+
+def test_storage_uses_wal_and_closes_connections(tmp_path: Path) -> None:
+    import gc
+    import sqlite3
+
+    db_path = tmp_path / "tenders.db"
+    storage = TenderStorage(db_path)
+    storage.upsert_many([])
+    gc.disable()
+    try:
+        renamed = db_path.with_name("moved.db")
+        db_path.rename(renamed)  # упадёт WinError 32, если соединение не закрыто
+        renamed.rename(db_path)
+    finally:
+        gc.enable()
+    with sqlite3.connect(db_path) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    conn.close()
+    assert mode == "wal"
+
+
 def test_storage_migrates_legacy_database_for_match_confidence(tmp_path: Path) -> None:
     db_path = tmp_path / "tenders.db"
     with sqlite3.connect(db_path) as conn:

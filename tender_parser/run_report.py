@@ -29,6 +29,18 @@ class SourceFetchResult:
     errors: list[str] = field(default_factory=list)
 
 
+def load_previous_profile(path: Path) -> str | None:
+    """Профиль прошлого запуска: baseline suspect_empty сравним только внутри профиля."""
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    profile = payload.get("profile") if isinstance(payload, dict) else None
+    return profile if isinstance(profile, str) else None
+
+
 def load_previous_counts(path: Path) -> dict[str, int]:
     """Читает число карточек по источникам из прошлого run_report.json."""
     if not path.exists():

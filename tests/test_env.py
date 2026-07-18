@@ -4,6 +4,19 @@ from pathlib import Path
 from tender_parser.env import get_env_status, load_env_file
 
 
+def test_load_env_file_tolerates_utf8_bom(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("BOM_TEST_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_bytes("BOM_TEST_KEY=value\n".encode("utf-8-sig"))
+
+    loaded = load_env_file(env_file)
+
+    assert loaded == ["BOM_TEST_KEY"]
+    import os
+
+    assert os.environ.pop("BOM_TEST_KEY") == "value"
+
+
 def test_load_env_file_reads_simple_values_comments_and_quotes(tmp_path: Path, monkeypatch) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
