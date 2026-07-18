@@ -53,6 +53,39 @@ def test_parse_price_rub_returns_none_for_malformed_price() -> None:
     assert parse_price_rub("Цена: руб.") is None
 
 
+def test_word_term_matches_does_not_treat_provoditsya_as_wire() -> None:
+    assert word_term_matches("аукцион проводится в электронной форме", "провод") is False
+    assert word_term_matches("работы проводились в мае", "провод") is False
+    assert word_term_matches("поставка проводов и кабеля", "провод") is True
+    assert word_term_matches("монтаж электропроводки, проводник медный", "проводник") is True
+
+
+def test_word_term_matches_covers_oblique_cases_via_stem() -> None:
+    assert word_term_matches("поставка бумаги офисной формата а4", "бумага") is True
+    assert word_term_matches("закупка посуды столовой", "посуда") is True
+    assert word_term_matches("поставка ламп светодиодных", "лампа") is True
+    assert word_term_matches("установка розетки двойной", "розетка") is True
+    # Беглая гласная («розеток») стем-fallback не покрывает — известное ограничение.
+    assert word_term_matches("замена розеток", "розетка") is False
+
+
+def test_word_term_matches_blocks_fentanyl_and_fennel() -> None:
+    assert word_term_matches("поставка фентанила", "фен") is False
+    assert word_term_matches("фенхель сушеный", "фен") is False
+    assert word_term_matches("поставка фенов для гостиницы", "фен") is True
+
+
+def test_word_term_matches_blocks_uso_false_stems() -> None:
+    assert word_term_matches("услуги по погребению усопших", "усо") is False
+    assert word_term_matches("работы по усовершенствованию системы", "усо") is False
+    assert word_term_matches("стойка усо в комплекте", "усо") is True
+
+
+def test_parse_price_rub_understands_millions_and_thousands() -> None:
+    assert parse_price_rub("1,2 млн руб") == 1_200_000.0
+    assert parse_price_rub("450 тыс. руб") == 450_000.0
+
+
 def test_phrase_stems_match_covers_grammatical_cases() -> None:
     assert phrase_stems_match("поставка хозяйственных товаров", "хозяйственные товары") is True
     assert phrase_stems_match("поставка сетевого оборудования", "сетевое оборудование") is True
@@ -61,6 +94,13 @@ def test_phrase_stems_match_covers_grammatical_cases() -> None:
 def test_phrase_stems_match_requires_word_boundaries() -> None:
     text = "департамент административно-хозяйственного обеспечения закупает товары"
     assert phrase_stems_match(text, "хозяйственные товары") is False
+
+
+def test_phrase_stems_match_limits_gap_between_words() -> None:
+    scattered = "поставка и монтаж кондиционеров, ремонт декоративных кронштейнов на фасаде здания"
+    assert phrase_stems_match(scattered, "ремонт здания") is False
+    close = "выполнение капитального ремонта здания школы"
+    assert phrase_stems_match(close, "ремонт здания") is True
 
 
 def test_parse_deadline_reads_russian_datetime() -> None:

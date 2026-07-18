@@ -2,10 +2,39 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from datetime import datetime
+
 from tender_parser.enrichment import TenderEnricher
-from tender_parser.documents import DocumentAnalyzer
+from tender_parser.documents import DocumentAnalyzer, DocumentEvidence
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
+
+
+def test_enrich_surfaces_document_stop_terms_for_filter() -> None:
+    class FakeAnalyzer:
+        def analyze(self) -> DocumentEvidence:
+            return DocumentEvidence(
+                matched_terms=["холодильник"],
+                regions=["Республика Крым"],
+                stop_terms=["инсулин"],
+                summary="doc.txt: stop=инсулин",
+                searchable_text="холодильник фармацевтический инсулин республика крым",
+            )
+
+    tender = TenderRecord(
+        title="Поставка оборудования для больницы",
+        url="https://example.test/1",
+        source="import-x",
+        price=500_000.0,
+        deadline=datetime(2026, 8, 1),
+        raw_text="Поставка оборудования",
+    )
+
+    enriched = TenderEnricher(FakeAnalyzer()).enrich([tender])[0]
+    result = evaluate_tender(enriched, now=datetime(2026, 7, 4))
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
 
 
 def test_tender_enricher_promotes_document_region_evidence(tmp_path: Path) -> None:

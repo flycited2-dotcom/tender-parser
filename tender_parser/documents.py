@@ -44,7 +44,12 @@ class DocumentAnalyzer:
         for path in sorted(self.documents_dir.rglob("*")):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
-            text = _read_document_text(path)
+            try:
+                text = _read_document_text(path)
+            except Exception as exc:
+                # Один битый документ не должен ронять весь прогон.
+                summaries.append(f"{path.name}: не прочитан ({exc.__class__.__name__})")
+                continue
             if not text.strip():
                 continue
             all_text.append(text)

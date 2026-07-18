@@ -3,6 +3,23 @@ from __future__ import annotations
 from zipfile import ZIP_DEFLATED, ZipFile
 from pathlib import Path
 
+
+def test_analyze_survives_broken_files(tmp_path: Path) -> None:
+    from tender_parser.documents import DocumentAnalyzer
+
+    docs = tmp_path / "documents"
+    docs.mkdir()
+    (docs / "broken.pdf").write_bytes(b"%PDF-1.4 truncated")
+    (docs / "broken.xml").write_text("<unclosed", encoding="utf-8")
+    (docs / "broken.docx").write_bytes(b"not a zip")
+    (docs / "good.txt").write_text("Поставка МФУ, Республика Крым", encoding="utf-8")
+
+    evidence = DocumentAnalyzer(docs).analyze()
+
+    assert "мфу" in evidence.matched_terms
+    assert "республика крым" in evidence.regions
+    assert any("broken" in line for line in evidence.summary.split(" | "))
+
 from openpyxl import Workbook
 from pypdf import PdfWriter
 from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, TextStringObject

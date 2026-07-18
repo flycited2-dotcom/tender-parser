@@ -51,7 +51,7 @@ def test_evaluate_tender_excludes_stop_terms() -> None:
 
     assert result.filter_status == "excluded"
     assert "стоп-тема" in result.exclude_reason
-    assert "лекарствен" in result.exclude_reason
+    assert "лекарств" in result.exclude_reason
 
 
 def test_evaluate_tender_excludes_low_price() -> None:
@@ -418,6 +418,70 @@ def test_evaluate_tender_matches_measuring_devices_and_batteries() -> None:
 
     assert result.filter_status == "matched"
     assert result.category == "Электротехника и оборудование"
+
+
+def test_evaluate_tender_ignores_boilerplate_provoditsya() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка щебня фракции 20-40",
+            raw_text="Аукцион проводится в электронной форме. Место поставки: г. Симферополь",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
+
+
+def test_evaluate_tender_matches_paper_in_genitive() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка бумаги офисной формата А4",
+            raw_text="Поставка бумаги офисной, Республика Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert result.category == "Канцелярия и офис"
+
+
+def test_evaluate_tender_removes_customer_case_insensitively() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка мониторов",
+            customer='ГБУЗ "Клинико-диагностическая лаборатория"',
+            raw_text='Заказчик: ГБУЗ "КЛИНИКО-ДИАГНОСТИЧЕСКАЯ ЛАБОРАТОРИЯ". Поставка мониторов, Симферополь',
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+
+
+def test_evaluate_tender_does_not_stop_realizuetsya() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Закупка мониторов",
+            raw_text="Закупка мониторов. Закупка реализуется в соответствии с 44-ФЗ, Республика Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+
+
+def test_evaluate_tender_stops_laboratory_in_genitive() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка реагентов для лаборатории",
+            raw_text="Поставка реагентов для лаборатории, холодильник фармацевтический",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
 
 
 def test_evaluate_tender_ignores_category_words_in_customer_name() -> None:

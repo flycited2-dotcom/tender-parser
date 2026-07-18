@@ -22,11 +22,16 @@ class TenderEnricher:
             return tender
 
         matches = _unique([*tender.document_matches, *evidence.matched_terms, *evidence.regions])
-        if not matches:
+        if not matches and not evidence.stop_terms:
             return replace(tender, detail_status="documents_checked")
 
         region = tender.region or (evidence.regions[0] if evidence.regions else None)
-        raw_text = " ".join(part for part in [tender.raw_text, *evidence.matched_terms, *evidence.regions] if part)
+        # Стоп-темы из документов дописываются в raw_text, чтобы фильтр их увидел.
+        raw_text = " ".join(
+            part
+            for part in [tender.raw_text, *evidence.matched_terms, *evidence.regions, *evidence.stop_terms]
+            if part
+        )
         return replace(
             tender,
             region=region,

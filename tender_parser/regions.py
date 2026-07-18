@@ -51,6 +51,20 @@ REGION_VARIANTS: dict[str, list[str]] = {
     ],
 }
 
+# Топонимы-двойники и адресные ложные сигналы: вырезаются из текста до сканирования.
+NEGATIVE_PATTERNS = [
+    r"крымск(?:ого|ий)\s+вал[а-я]*",          # улица Крымский Вал (Москва)
+    r"крымск(?:ий|ого|ому)\s+мост[а-я]*",     # Крымский мост (Москва)
+    r"(?<![\w])крымск[аеи]?(?![\w])",          # г. Крымск (Краснодарский край), но не «крымская»
+    r"(?<![\w])херсонес[\w-]*",                # Херсонес (Севастополь, не Херсонская область)
+    r"белогорск[а-я]*[^а-я]{0,4}амурск[а-я]*",  # Белогорск Амурской области
+]
+
+# Вариант матчится, только если сразу после него нет запрещённого продолжения.
+VARIANT_SUFFIX_GUARDS = {
+    "армянск": "и",  # «армянский коньяк» — не город Армянск
+}
+
 REGION_BUCKETS: dict[str, str] = {
     "Симферополь": "crimea",
     "Севастополь": "sevastopol",
@@ -65,9 +79,13 @@ def detect_region(text: str | None) -> str | None:
     normalized = normalize_text(text)
     if not normalized:
         return None
+    for pattern in NEGATIVE_PATTERNS:
+        normalized = re.sub(pattern, " ", normalized)
     for canonical, variants in REGION_VARIANTS.items():
         for variant in variants:
-            if re.search(rf"(?<![\w]){re.escape(variant)}", normalized):
+            guard = VARIANT_SUFFIX_GUARDS.get(variant)
+            suffix = f"(?!{guard})" if guard else ""
+            if re.search(rf"(?<![\w]){re.escape(variant)}{suffix}", normalized):
                 return canonical
     return None
 

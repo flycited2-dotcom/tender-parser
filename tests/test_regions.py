@@ -27,6 +27,23 @@ def test_detect_region_returns_none_for_non_target() -> None:
     assert detect_region(None) is None
 
 
+def test_detect_region_ignores_lookalike_places() -> None:
+    assert detect_region("г. Москва, ул. Крымский Вал, д. 9") is None
+    assert detect_region("г. Крымск Краснодарского края") is None
+    assert detect_region("поставка в Крымске") is None
+    assert detect_region("коньяк армянский пятилетний") is None
+    assert detect_region("музей-заповедник Херсонес Таврический") is None
+    assert detect_region("г. Белогорск, Амурская область") is None
+
+
+def test_detect_region_keeps_real_crimean_adjectives() -> None:
+    assert detect_region("КРЫМСКАЯ ТАМОЖНЯ") == "Крым"
+    assert detect_region("ГУП РК Крымэнерго") == "Крым"
+    assert detect_region("г. Армянск, ул. Мира") == "Крым"
+    assert detect_region("г. Херсон, склад №2") == "Херсонская область"
+    assert detect_region("г. Белогорск, Республика Крым") == "Республика Крым"
+
+
 def test_region_bucket_groups_simferopol_with_crimea() -> None:
     assert region_bucket("г. Симферополь") == "crimea"
     assert region_bucket("Республика Крым") == "crimea"

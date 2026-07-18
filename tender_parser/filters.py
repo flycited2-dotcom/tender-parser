@@ -19,9 +19,10 @@ def _first_matching_term(text: str, terms: list[str]) -> str | None:
         normalized = normalize_text(term)
         if not normalized:
             continue
-        if normalized in text:
-            return normalized
-        if " " in normalized and phrase_stems_match(text, normalized):
+        if " " in normalized:
+            if normalized in text or phrase_stems_match(text, normalized):
+                return normalized
+        elif word_term_matches(text, normalized):
             return normalized
         for variant in STOP_TERM_VARIANTS.get(normalized, []):
             if normalize_text(variant) in text:
@@ -105,11 +106,16 @@ def _include_reason(
 
 
 def _subject_searchable(tender: TenderRecord) -> str:
-    """Предмет закупки без имени заказчика — для стоп-тем и категорий."""
-    raw_text = tender.raw_text
-    if tender.customer:
-        raw_text = raw_text.replace(tender.customer, " ")
-    return normalize_text(" ".join([tender.title, raw_text]))
+    """Предмет закупки без имени заказчика — для стоп-тем и категорий.
+
+    Вырезаем заказчика по нормализованному тексту: иначе другой регистр или ё
+    в написании имени ломает replace, и стоп-тема из имени убивает тендер.
+    """
+    subject = normalize_text(" ".join([tender.title, tender.raw_text]))
+    customer = normalize_text(tender.customer)
+    if customer:
+        subject = subject.replace(customer, " ")
+    return subject
 
 
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
