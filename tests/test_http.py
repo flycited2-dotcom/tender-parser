@@ -52,6 +52,23 @@ def test_get_with_retry_raises_after_budget() -> None:
     assert session.calls == 2
 
 
+def test_get_with_retry_does_not_retry_ssl_errors() -> None:
+    class SslFailSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get(self, url: str, timeout: int) -> object:
+            self.calls += 1
+            raise requests.exceptions.SSLError("handshake failed")
+
+    session = SslFailSession()
+
+    with pytest.raises(requests.exceptions.SSLError):
+        get_with_retry(session, "https://example.test", timeout=5, sleeper=lambda _: None)
+
+    assert session.calls == 1
+
+
 def test_get_with_retry_does_not_retry_http_errors() -> None:
     session = FlakySession(failures=0, response=ErrorResponse())
 

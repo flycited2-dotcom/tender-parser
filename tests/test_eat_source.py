@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from tender_parser.sources.eat import (
+    _parse_xml,
     EatIntegrationSource,
     build_order_list_request_xml,
     parse_order_notification_payload,
@@ -54,6 +55,14 @@ ORDER_NOTIFICATION_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+def test_parse_xml_respects_declared_encoding_in_bytes() -> None:
+    payload = '<?xml version="1.0" encoding="windows-1251"?><a>привет</a>'.encode("cp1251")
+
+    root = _parse_xml(payload)
+
+    assert root.text == "привет"
+
+
 def test_build_order_list_request_xml_contains_ext_system_and_request_id() -> None:
     xml = build_order_list_request_xml("EXT-CRM", request_uid="fixed-uid")
 
@@ -82,6 +91,7 @@ def test_parse_order_notification_payload_extracts_tender() -> None:
 class Response:
     def __init__(self, text: str, status_code: int = 200) -> None:
         self.text = text
+        self.content = text.encode("utf-8")
         self.status_code = status_code
 
     def raise_for_status(self) -> None:

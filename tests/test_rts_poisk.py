@@ -43,6 +43,19 @@ def test_parse_poisk_page_returns_empty_for_other_pages() -> None:
     assert parse_poisk_page("<html><body>ничего</body></html>", POISK_URL) == []
 
 
+def test_parse_poisk_page_skips_cards_without_number_and_link() -> None:
+    html = (
+        '<div class="cards">'
+        '<div class="card-item"><div class="card-item__title">Поставка бумаги офисной</div></div>'
+        '<div class="card-item"><div class="card-item__title">Поставка картриджей</div></div>'
+        "</div>"
+    )
+
+    tenders = parse_poisk_page(html, POISK_URL)
+
+    assert tenders == []
+
+
 def test_collect_from_page_accumulates_poisk_results(tmp_path: Path) -> None:
     accumulator = RtsAccumulator(tmp_path / "tenders.db")
 

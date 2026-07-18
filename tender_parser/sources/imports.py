@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import csv
+import io
 import re
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
 from xml.etree import ElementTree
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
 
@@ -57,7 +59,7 @@ class ImportFolderSource:
                 continue
             try:
                 tenders.extend(_read_file(path, errors))
-            except (OSError, ValueError, ElementTree.ParseError) as exc:
+            except (OSError, ValueError, ElementTree.ParseError, BadZipFile) as exc:
                 errors.append(f"{path.name}: {exc}")
 
         status = "ok" if tenders else "empty"
@@ -100,9 +102,10 @@ def _append_row(result: list[TenderRecord], row: dict[str, str], path: Path, err
 
 def _read_csv(path: Path, errors: list[str]) -> list[TenderRecord]:
     text = path.read_text(encoding="utf-8-sig")
-    sample = text[:2048]
-    delimiter = ";" if sample.count(";") >= sample.count(",") else ","
-    rows = csv.DictReader(text.splitlines(), delimiter=delimiter)
+    # Разделитель определяется по строке заголовка: текст полей не должен влиять.
+    header = text.splitlines()[0] if text.splitlines() else ""
+    delimiter = ";" if header.count(";") >= header.count(",") else ","
+    rows = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
     result: list[TenderRecord] = []
     for row in rows:
         normalized = _normalize_row(row)
@@ -113,8 +116,11 @@ def _read_csv(path: Path, errors: list[str]) -> list[TenderRecord]:
 
 def _read_xlsx(path: Path, errors: list[str]) -> list[TenderRecord]:
     workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet = workbook.active
-    rows = list(sheet.iter_rows(values_only=True))
+    try:
+        sheet = workbook.active
+        rows = list(sheet.iter_rows(values_only=True))
+    finally:
+        workbook.close()
     if not rows:
         return []
     headers = [str(value or "").strip() for value in rows[0]]
@@ -240,6 +246,6 @@ def _parse_datetime(value: str | None) -> datetime | None:
         except ValueError:
             continue
     try:
-        return datetime.fromisoformat(text)
+        return datetime.fromisoformat(text).replace(tzinfo=None)
     except ValueError:
         return None

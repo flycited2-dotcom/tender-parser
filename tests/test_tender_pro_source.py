@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from tender_parser.models import TenderRecord
 from tender_parser.sources.tender_pro import (
     TenderProSource,
     build_list_url,
@@ -54,6 +55,30 @@ class ListSession:
     def get(self, url: str, timeout: int) -> ListResponse:
         self.requested_urls.append(url)
         return ListResponse()
+
+
+def test_parse_list_payload_hides_api_key_from_record_urls() -> None:
+    tenders = parse_list_payload(SAMPLE_PAYLOAD, source_url="https://www.tender.pro/api/test")
+
+    assert all("_key=" not in tender.url for tender in tenders)
+
+
+def test_fetch_keywords_accepts_boolean_success() -> None:
+    payload = dict(SAMPLE_PAYLOAD)
+    payload["success"] = True
+
+    class BoolResponse(ListResponse):
+        def json(self) -> dict[str, object]:
+            return payload
+
+    class BoolSession(ListSession):
+        def get(self, url: str, timeout: int) -> ListResponse:
+            self.requested_urls.append(url)
+            return BoolResponse()
+
+    tenders = TenderProSource(session=BoolSession()).fetch_keywords([])
+
+    assert len(tenders) == 2
 
 
 def test_fetch_keywords_requests_api_once() -> None:

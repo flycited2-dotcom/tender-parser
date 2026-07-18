@@ -7,6 +7,8 @@ import requests
 
 
 RETRYABLE_EXCEPTIONS = (requests.Timeout, requests.ConnectionError)
+# SSL-ошибки детерминированы: повтор лишь удваивает ожидание таймаута.
+NON_RETRYABLE_EXCEPTIONS = (requests.exceptions.SSLError,)
 
 
 def get_with_retry(
@@ -26,6 +28,8 @@ def get_with_retry(
             response = session.get(url, timeout=timeout)
             response.raise_for_status()
             return response
+        except NON_RETRYABLE_EXCEPTIONS:
+            raise
         except RETRYABLE_EXCEPTIONS:
             if attempt >= retries:
                 raise

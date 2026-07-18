@@ -48,7 +48,8 @@ class B2BDetail:
     delivery_address: str | None = None
 
 
-def parse_detail_page(html: str) -> B2BDetail:
+def parse_detail_page(html: str) -> B2BDetail | None:
+    """Разбирает карточку закупки; None, если ни одно поле не распознано."""
     soup = BeautifulSoup(html, "html.parser")
     values: dict[str, str] = {}
     for row in soup.find_all("tr"):
@@ -62,13 +63,16 @@ def parse_detail_page(html: str) -> B2BDetail:
         for field, needle in DETAIL_LABELS.items():
             if label.startswith(needle) and field not in values:
                 values[field] = value
-    return B2BDetail(
+    detail = B2BDetail(
         price=parse_price_rub(values.get("price")),
         deadline=parse_deadline(values.get("deadline")),
         published_at=parse_deadline(values.get("published_at")),
         customer=values.get("customer") or values.get("organizer"),
         delivery_address=values.get("delivery_address"),
     )
+    if detail == B2BDetail():
+        return None
+    return detail
 
 
 def is_detail_candidate(tender: TenderRecord) -> bool:
@@ -79,9 +83,10 @@ def is_detail_candidate(tender: TenderRecord) -> bool:
 
 
 def _merge_detail(tender: TenderRecord, detail: B2BDetail) -> TenderRecord:
+    # Канонический регион из адреса важнее; сырой адрес пишем только если региона не было.
     region = tender.region
     if detail.delivery_address:
-        region = detect_region(detail.delivery_address) or detail.delivery_address[:100]
+        region = detect_region(detail.delivery_address) or tender.region or detail.delivery_address[:100]
     raw_text = " ".join(
         part for part in [tender.raw_text, detail.delivery_address or "", detail.customer or ""] if part
     )

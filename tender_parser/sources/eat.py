@@ -186,7 +186,7 @@ class EatIntegrationSource:
             raise SourceFetchError(f"ЕАТ Березка не вернул карточки закупок: {'; '.join(detail_errors[:3])}")
         return records or [_reference_to_record(reference) for reference in references[: self.max_details]]
 
-    def _post_xml(self, url: str, payload: str) -> str:
+    def _post_xml(self, url: str, payload: str) -> bytes:
         headers = {"Content-Type": "application/xml; charset=utf-8", **self._auth_headers()}
         try:
             response = self.session.post(url, data=payload, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
@@ -195,7 +195,8 @@ class EatIntegrationSource:
             response.raise_for_status()
         except requests.RequestException as exc:
             raise SourceFetchError(f"ЕАТ Березка API недоступен: {exc}") from exc
-        return response.text
+        # Байты, не text: XML-декларация encoding должна решать сама.
+        return response.content
 
     def _auth_headers(self) -> dict[str, str]:
         token_value = self.api_token
@@ -220,8 +221,10 @@ def _reference_to_record(reference: EatOrderReference) -> TenderRecord:
     )
 
 
-def _parse_xml(payload: str) -> ET.Element:
+def _parse_xml(payload: str | bytes) -> ET.Element:
     try:
+        if isinstance(payload, bytes):
+            return ET.fromstring(payload)
         return ET.fromstring(payload.encode("utf-8"))
     except ET.ParseError as exc:
         raise SourceFetchError(f"ЕАТ Березка вернул невалидный XML: {exc}") from exc

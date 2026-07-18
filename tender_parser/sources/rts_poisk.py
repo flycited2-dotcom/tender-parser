@@ -30,7 +30,9 @@ def parse_poisk_page(html: str, source_url: str) -> list[TenderRecord]:
         about_link = card.select_one(".card-item__about a[href]")
         number = _extract_number(_text(about_link))
         url = _card_url(card, about_link, source_url)
-        if not number and not url:
+        # Без номера, без CardId и без собственной ссылки карточки неразличимы —
+        # они бы схлопнулись в одну запись по unique_key.
+        if not number and not _card_id(card) and url == source_url:
             continue
 
         customer = _customer(card)

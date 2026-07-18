@@ -105,7 +105,7 @@ class TenderProSource:
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
             raise SourceFetchError(f"Tender.Pro API недоступен: {exc}") from exc
-        if not isinstance(payload, dict) or payload.get("success") != "true":
+        if not isinstance(payload, dict) or payload.get("success") not in ("true", True):
             raise SourceFetchError("Tender.Pro API вернул неуспешный ответ")
         return parse_list_payload(payload, source_url=url)
 
@@ -117,10 +117,8 @@ def _as_text(value: object) -> str:
 
 
 def _build_detail_url(tender_id: object, company_id: object) -> str:
-    params = {
-        "_key": _api_key(),
-        "id": str(tender_id),
-    }
+    # Без API-ключа: ссылка попадает в Excel/JSON/HTML-отчеты, секрет там не нужен.
+    params = {"id": str(tender_id)}
     if company_id is not None:
         params["company_id"] = str(company_id)
     return f"{TENDER_PRO_DETAIL_URL}?{urlencode(params)}"

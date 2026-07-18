@@ -97,6 +97,49 @@ def test_import_folder_source_skips_bad_row_and_keeps_good_ones(tmp_path: Path) 
     assert "mix.csv" in result.health[0].detail
 
 
+def test_import_folder_source_survives_broken_xlsx(tmp_path: Path) -> None:
+    imports_dir = tmp_path / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "broken.xlsx").write_text("not a zip at all", encoding="utf-8")
+    (imports_dir / "good.csv").write_text(
+        "Название;Ссылка\nПоставка МФУ;https://example.test/1\n", encoding="utf-8"
+    )
+
+    result = ImportFolderSource(imports_dir).fetch_with_report([])
+
+    assert len(result.tenders) == 1
+    assert result.health[0].status == "partial"
+    assert "broken.xlsx" in result.health[0].detail
+
+
+def test_import_folder_source_strips_timezone_from_iso_deadline(tmp_path: Path) -> None:
+    imports_dir = tmp_path / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "tz.csv").write_text(
+        "Название;Ссылка;Срок подачи\nПоставка МФУ;https://example.test/1;2026-07-20T10:00:00+03:00\n",
+        encoding="utf-8",
+    )
+
+    result = ImportFolderSource(imports_dir).fetch_with_report([])
+
+    assert result.tenders[0].deadline is not None
+    assert result.tenders[0].deadline.tzinfo is None
+
+
+def test_import_folder_source_detects_delimiter_by_header(tmp_path: Path) -> None:
+    imports_dir = tmp_path / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "commas.csv").write_text(
+        'Название,Ссылка\n"Перчатки; маски; халаты; бахилы; колпаки",https://example.test/1\n',
+        encoding="utf-8",
+    )
+
+    result = ImportFolderSource(imports_dir).fetch_with_report([])
+
+    assert len(result.tenders) == 1
+    assert result.tenders[0].title.startswith("Перчатки")
+
+
 def test_import_folder_source_reports_empty_when_folder_missing(tmp_path: Path) -> None:
     result = ImportFolderSource(tmp_path / "missing").fetch_with_report([])
 

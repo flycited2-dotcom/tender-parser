@@ -127,6 +127,30 @@ def test_fetch_keywords_enriches_candidates_with_detail_pages() -> None:
     assert "Симферополь" in mfu.raw_text
 
 
+def test_merge_detail_keeps_known_region_when_address_is_unrecognized() -> None:
+    from tender_parser.sources.b2b_center import B2BDetail, _merge_detail
+
+    tender = TenderRecord(
+        title="Поставка МФУ",
+        url="https://example.test/1",
+        source="b2b-center",
+        region="Республика Крым",
+        raw_text="Поставка МФУ",
+    )
+
+    merged = _merge_detail(tender, B2BDetail(delivery_address="ул. Ленина, д. 5, стр. 2"))
+
+    assert merged.region == "Республика Крым"
+
+
+def test_empty_detail_page_does_not_mark_enriched() -> None:
+    from tender_parser.sources.b2b_center import parse_detail_page
+
+    detail = parse_detail_page("<html>Технические работы</html>")
+
+    assert detail is None
+
+
 def test_fetch_keywords_limits_detail_requests() -> None:
     session = DetailSession()
     source = B2BCenterSource(session=session, queries=["мфу"], max_details=1, detail_delay_seconds=0)
