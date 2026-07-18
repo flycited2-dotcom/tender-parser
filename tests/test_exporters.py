@@ -127,6 +127,104 @@ def test_dashboard_tables_have_borders_and_wide_title_column(tmp_path: Path) -> 
     assert dashboard.cell(row=header_row + 1, column=1).border.bottom.style == "thin"
 
 
+def test_export_excel_strips_illegal_characters(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    dirty = replace(
+        make_tender("matched"),
+        title="Поставка\x0bМФУ\x01",
+        include_reason="ok\x00",
+    )
+
+    export_excel([dirty], [], [], [], output, now=NOW)
+
+    sheet = load_workbook(output)["Горячие"]
+    assert sheet["D2"].value == "ПоставкаМФУ"
+
+
+def test_manual_selections_read_by_mtime_across_fallback_files(tmp_path: Path) -> None:
+    import os
+
+    old_fallback = tmp_path / "tenders_2026-07-03_090000.xlsx"
+    export_excel([make_tender("matched")], [], [], [], old_fallback, now=NOW)
+    os.utime(old_fallback, (1_000_000, 1_000_000))
+
+    main_file = tmp_path / "tenders_2026-07-03.xlsx"
+    export_excel([make_tender("matched")], [], [], [], main_file, now=NOW)
+    workbook = load_workbook(main_file)
+    sheet = workbook["Горячие"]
+    headers = [cell.value for cell in sheet[1]]
+    sheet.cell(row=2, column=headers.index("мой_выбор") + 1, value="✅ Беру")
+    workbook.save(main_file)
+
+    selections = load_manual_selections(tmp_path)
+
+    assert selections[("test", "1")] == ("✅ Беру", "")
+
+
+def test_manual_selections_prefer_data_sheets_over_my_pick(tmp_path: Path) -> None:
+    path = tmp_path / "tenders_2026-07-03.xlsx"
+    export_excel(
+        [make_tender("matched")],
+        [],
+        [],
+        [],
+        path,
+        now=NOW,
+        manual_selections={("test", "1"): ("✅ Беру", "")},
+    )
+    workbook = load_workbook(path)
+    hot = workbook["Горячие"]
+    headers = [cell.value for cell in hot[1]]
+    hot.cell(row=2, column=headers.index("мой_выбор") + 1, value="❌ Мимо")
+    workbook.save(path)  # «Мой отбор» сохранил старую ✅, пользователь правил «Горячие»
+
+    selections = load_manual_selections(tmp_path)
+
+    assert selections[("test", "1")][0] == "❌ Мимо"
+
+
+def test_manual_selections_normalize_numeric_numbers(tmp_path: Path) -> None:
+    path = tmp_path / "tenders_2026-07-03.xlsx"
+    export_excel([make_tender("matched")], [], [], [], path, now=NOW)
+    workbook = load_workbook(path)
+    sheet = workbook["Горячие"]
+    headers = [cell.value for cell in sheet[1]]
+    sheet.cell(row=2, column=headers.index("номер") + 1, value=123.0)
+    sheet.cell(row=2, column=headers.index("мой_выбор") + 1, value="✅ Беру")
+    workbook.save(path)
+
+    selections = load_manual_selections(tmp_path)
+
+    assert ("test", "123") in selections
+
+
+def test_html_report_neutralizes_javascript_urls(tmp_path: Path) -> None:
+    output = tmp_path / "latest.html"
+    evil = replace(make_tender("matched"), url="javascript:alert(document.cookie)")
+    export_html_report(
+        [evil],
+        output,
+        source_report=SourceFetchResult(),
+        raw_count=1,
+        unique_count=1,
+        new_count=0,
+    )
+
+    html = output.read_text(encoding="utf-8")
+    assert "javascript:" not in html
+
+
+def test_export_json_sanitizes_non_finite_prices(tmp_path: Path) -> None:
+    output = tmp_path / "latest.json"
+    weird = replace(make_tender("matched"), price=float("nan"))
+
+    export_json([weird], output)
+
+    text = output.read_text(encoding="utf-8")
+    assert "NaN" not in text
+    assert json.loads(text)["items"][0]["price"] is None
+
+
 def test_export_excel_falls_back_when_target_is_locked(tmp_path: Path) -> None:
     locked = tmp_path / "tenders_2026-07-03.xlsx"
     locked.mkdir()  # каталог с именем файла даёт PermissionError при записи, как открытый Excel

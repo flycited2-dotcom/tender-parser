@@ -4,9 +4,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
-from math import ceil
+from math import ceil, isfinite
+from uuid import uuid4
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -102,7 +104,30 @@ TAB_COLORS = {
 }
 
 DATA_SHEETS = {"Мой отбор", "Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"}
+# Порядок чтения отметок: листы данных раньше агрегата «Мой отбор»,
+# чтобы правка пользователя на «Горячих» побеждала устаревшую копию.
+DATA_SHEET_READ_ORDER = ["Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные", "Мой отбор"]
 PICKED_CHOICES = ("✅", "🤔")
+
+
+def _safe(value: object) -> object:
+    """Excel запрещает управляющие символы — они приходят из вёрстки площадок."""
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
+    return value
+
+
+def _safe_price(price: float | None) -> float | None:
+    if price is None or not isfinite(price):
+        return None
+    return price
+
+
+def _normalize_number(value: object) -> str:
+    # Excel хранит перевбитые номера как float: 123.0 должен совпасть с "123".
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value or "").strip()
 
 SelectionKey = tuple[str, str]
 SelectionValue = tuple[str, str]
@@ -177,42 +202,46 @@ def load_manual_selections(exports_dir: Path) -> dict[SelectionKey, SelectionVal
     """
     if not exports_dir.exists():
         return {}
-    candidates = sorted(exports_dir.glob("tenders_*.xlsx"))
-    if not candidates:
-        return {}
+    # По mtime (не по имени): fallback-файлы вида _HHMMSS не должны затенять
+    # более свежий основной файл. Читаем до трёх последних, свежайший побеждает.
+    candidates = sorted(
+        exports_dir.glob("tenders_*.xlsx"), key=lambda path: path.stat().st_mtime, reverse=True
+    )[:3]
     from openpyxl import load_workbook
 
-    try:
-        workbook = load_workbook(candidates[-1], read_only=True, data_only=True)
-    except Exception:
-        return {}
     selections: dict[SelectionKey, SelectionValue] = {}
-    try:
-        for name in workbook.sheetnames:
-            if name not in DATA_SHEETS:
-                continue
-            sheet = workbook[name]
-            rows = sheet.iter_rows(values_only=True)
-            headers = [str(value or "").strip() for value in next(rows, [])]
-            try:
-                source_col = headers.index("источник")
-                number_col = headers.index("номер")
-                choice_col = headers.index("мой_выбор")
-                comment_col = headers.index("комментарий")
-            except ValueError:
-                continue
-            for row in rows:
-                if len(row) <= max(source_col, number_col, choice_col, comment_col):
+    for candidate in candidates:
+        try:
+            workbook = load_workbook(candidate, read_only=True, data_only=True)
+        except Exception:
+            print(f"Не удалось прочитать отметки из {candidate.name} — файл пропущен")
+            continue
+        try:
+            for name in DATA_SHEET_READ_ORDER:
+                if name not in workbook.sheetnames:
                     continue
-                choice = str(row[choice_col] or "").strip()
-                comment = str(row[comment_col] or "").strip()
-                if not choice and not comment:
+                sheet = workbook[name]
+                rows = sheet.iter_rows(values_only=True)
+                headers = [str(value or "").strip() for value in next(rows, [])]
+                try:
+                    source_col = headers.index("источник")
+                    number_col = headers.index("номер")
+                    choice_col = headers.index("мой_выбор")
+                    comment_col = headers.index("комментарий")
+                except ValueError:
                     continue
-                key = (str(row[source_col] or ""), str(row[number_col] or ""))
-                if key not in selections:
-                    selections[key] = (choice, comment)
-    finally:
-        workbook.close()
+                for row in rows:
+                    if len(row) <= max(source_col, number_col, choice_col, comment_col):
+                        continue
+                    choice = str(row[choice_col] or "").strip()
+                    comment = str(row[comment_col] or "").strip()
+                    if not choice and not comment:
+                        continue
+                    key = (str(row[source_col] or ""), _normalize_number(row[number_col]))
+                    if key not in selections:
+                        selections[key] = (choice, comment)
+        finally:
+            workbook.close()
     return selections
 
 
@@ -261,28 +290,31 @@ def _append_rows(
         choice, comment = _selection_for(tender, selections)
         sheet.append(
             [
-                PRIORITY_LABELS.get(tender.review_priority or "", tender.review_priority or ""),
-                "🆕" if new_keys and tender.unique_key in new_keys else "",
-                days if days is not None else "",
-                tender.title,
-                tender.region or "",
-                tender.price,
-                tender.deadline,
-                tender.customer or "",
-                tender.category or "",
-                tender.match_confidence or "",
-                choice,
-                comment,
-                tender.tender_number or "",
-                tender.source,
-                tender.status or "",
-                _format_dt(tender.discovered_at),
-                tender.include_reason,
-                tender.exclude_reason,
-                tender.detail_status,
-                "; ".join(tender.document_matches),
-                tender.delivery_region_evidence,
-                tender.source_confidence,
+                _safe(value)
+                for value in [
+                    PRIORITY_LABELS.get(tender.review_priority or "", tender.review_priority or ""),
+                    "🆕" if new_keys and tender.unique_key in new_keys else "",
+                    days if days is not None else "",
+                    tender.title,
+                    tender.region or "",
+                    _safe_price(tender.price),
+                    tender.deadline,
+                    tender.customer or "",
+                    tender.category or "",
+                    tender.match_confidence or "",
+                    choice,
+                    comment,
+                    tender.tender_number or "",
+                    tender.source,
+                    tender.status or "",
+                    _format_dt(tender.discovered_at),
+                    tender.include_reason,
+                    tender.exclude_reason,
+                    tender.detail_status,
+                    "; ".join(tender.document_matches),
+                    tender.delivery_region_evidence,
+                    tender.source_confidence,
+                ]
             ]
         )
         row = sheet.max_row
@@ -316,6 +348,8 @@ def _append_rows(
         price_cell.number_format = PRICE_FORMAT
         deadline_cell = sheet.cell(row=row, column=HEADERS.index("срок_подачи") + 1)
         deadline_cell.number_format = DATE_FORMAT
+        # Номер как текст: Excel не должен превращать 19-значные номера в float.
+        sheet.cell(row=row, column=HEADERS.index("номер") + 1).number_format = "@"
         for header in ("причина_включения", "причина_исключения", "delivery_region_evidence"):
             sheet.cell(row=row, column=HEADERS.index(header) + 1).alignment = WRAP_TOP
 
@@ -450,7 +484,7 @@ def _build_dashboard(
         _style_header(sheet, len(soon_headers), row=row)
         for tender in closing_soon:
             row += 1
-            title_cell = sheet.cell(row=row, column=1, value=tender.title)
+            title_cell = sheet.cell(row=row, column=1, value=_safe(tender.title))
             title_cell.alignment = WRAP_TOP
             if tender.url:
                 title_cell.hyperlink = tender.url
@@ -467,7 +501,7 @@ def _build_dashboard(
             days_cell = sheet.cell(row=row, column=5, value=_days_left(tender.deadline, now))
             days_cell.fill = PatternFill("solid", start_color=DEADLINE_URGENT_FILL)
             _border_row(sheet, row, 5)
-            sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * min(ceil(len(tender.title) / 53), 4) + 3
+            sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * max(1, min(ceil(len(tender.title) / 53), 4)) + 3
 
     if excluded:
         row += 2
@@ -478,7 +512,7 @@ def _build_dashboard(
         reasons = _count_by(excluded, lambda tender: tender.exclude_reason or "без причины")
         for name, count in reasons[:8]:
             row += 1
-            reason_cell = sheet.cell(row=row, column=1, value=name)
+            reason_cell = sheet.cell(row=row, column=1, value=_safe(name))
             reason_cell.alignment = WRAP_TOP
             sheet.cell(row=row, column=2, value=count)
             _border_row(sheet, row, 2)
@@ -491,7 +525,7 @@ def _build_dashboard(
     _style_header(sheet, len(top_headers), row=row)
     for tender in sort_for_review(hot)[:10]:
         row += 1
-        title_cell = sheet.cell(row=row, column=1, value=tender.title)
+        title_cell = sheet.cell(row=row, column=1, value=_safe(tender.title))
         title_cell.alignment = WRAP_TOP
         if tender.url:
             title_cell.hyperlink = tender.url
@@ -504,7 +538,7 @@ def _build_dashboard(
         days = _days_left(tender.deadline, now)
         sheet.cell(row=row, column=5, value=days if days is not None else "")
         _border_row(sheet, row, 5)
-        sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * min(ceil(len(tender.title) / 53), 4) + 3
+        sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * max(1, min(ceil(len(tender.title) / 53), 4)) + 3
 
     if source_health:
         row += 2
@@ -522,7 +556,7 @@ def _build_dashboard(
             )
             sheet.cell(row=row, column=3, value=item.found)
             sheet.cell(row=row, column=4, value=item.elapsed_seconds)
-            detail_cell = sheet.cell(row=row, column=5, value=item.detail)
+            detail_cell = sheet.cell(row=row, column=5, value=_safe(item.detail))
             detail_cell.alignment = WRAP_TOP
             _border_row(sheet, row, 5)
 
@@ -594,6 +628,10 @@ def export_excel(
         fallback = output_path.with_name(
             f"{output_path.stem}_{datetime.now():%H%M%S}{output_path.suffix}"
         )
-        workbook.save(fallback)
+        try:
+            workbook.save(fallback)
+        except PermissionError:
+            fallback = output_path.with_name(f"{output_path.stem}_{uuid4().hex[:8]}{output_path.suffix}")
+            workbook.save(fallback)
         print(f"Файл {output_path.name} занят (открыт в Excel) — отчет сохранен как {fallback.name}")
         return fallback

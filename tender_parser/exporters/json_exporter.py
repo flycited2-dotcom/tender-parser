@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 
 from tender_parser.models import TenderRecord
@@ -20,7 +21,7 @@ def _to_dict(tender: TenderRecord) -> dict[str, object]:
         "tender_number": tender.tender_number,
         "customer": tender.customer,
         "region": tender.region,
-        "price": tender.price,
+        "price": tender.price if tender.price is not None and isfinite(tender.price) else None,
         "deadline": _format_dt(tender.deadline),
         "status": tender.status,
         "published_at": _format_dt(tender.published_at),

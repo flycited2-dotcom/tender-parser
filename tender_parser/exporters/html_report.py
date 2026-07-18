@@ -15,6 +15,11 @@ PRIORITY_LABELS = {
 }
 
 
+def _safe_url(url: str) -> str:
+    # Только http/https: javascript:-схемы из недоверенной вёрстки не должны стать кликабельными.
+    return url if url.startswith(("http://", "https://")) else "#"
+
+
 def export_html_report(
     tenders: list[TenderRecord],
     output_path: Path,
@@ -133,7 +138,7 @@ def _tender_row(tender: TenderRecord) -> str:
     terms = f'<div class="muted">{escape(", ".join(tender.matched_terms))}</div>' if tender.matched_terms else ""
     return f"""<tr>
   <td><span class="badge {css_class}">{escape(PRIORITY_LABELS.get(priority, priority))}</span></td>
-  <td><a href="{escape(tender.url)}" target="_blank" rel="noopener">{escape(tender.title)}</a>{terms}<div class="muted">{escape(tender.customer or "")}</div></td>
+  <td><a href="{escape(_safe_url(tender.url))}" target="_blank" rel="noopener">{escape(tender.title)}</a>{terms}<div class="muted">{escape(tender.customer or "")}</div></td>
   <td>{escape(tender.region or "")}<br>{escape(_money(tender.price))}<br>{escape(_date(tender.deadline))}</td>
   <td>{escape(tender.source)}<br><span class="muted">{escape(tender.tender_number or "")}</span><br><span class="muted">confidence {tender.source_confidence:.2f}</span></td>
   <td>{evidence}</td>
