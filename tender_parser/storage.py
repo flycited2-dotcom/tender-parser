@@ -125,10 +125,18 @@ class TenderStorage:
                         filter_status=excluded.filter_status,
                         match_confidence=excluded.match_confidence,
                         review_priority=excluded.review_priority,
-                        detail_status=excluded.detail_status,
-                        document_matches=excluded.document_matches,
-                        delivery_region_evidence=excluded.delivery_region_evidence,
-                        source_confidence=excluded.source_confidence
+                        detail_status=CASE
+                            WHEN excluded.detail_status='not_checked' THEN detail_status
+                            ELSE excluded.detail_status
+                        END,
+                        document_matches=CASE
+                            WHEN excluded.document_matches='[]' THEN document_matches
+                            ELSE excluded.document_matches
+                        END,
+                        delivery_region_evidence=COALESCE(
+                            NULLIF(excluded.delivery_region_evidence, ''), delivery_region_evidence
+                        ),
+                        source_confidence=MAX(source_confidence, excluded.source_confidence)
                     """,
                     (
                         tender.unique_key,

@@ -66,10 +66,18 @@ class RtsCabinetBrowserSource:
 def detect_cabinet_state(html: str, url: str) -> CabinetState:
     normalized = normalize_text(f"{url} {html}")
     lower_html = html.lower()
-    if "captcha" in normalized or "проверка безопасности" in normalized or "/captcha" in url.lower():
-        return "blocked"
     url_lower = url.lower()
-    logged_in = "выход" in normalized
+    if "/captcha" in url_lower:
+        return "blocked"
+    # Результаты проверяются раньше поиска слова captcha: тендер с названием
+    # «Проверка безопасности...» не должен превращать выдачу в blocked.
+    if "jqgrow" in lower_html and "номер закупки" in normalized:
+        return "results"
+    if "номер процедуры" in normalized and ("наименование" in normalized or "нмцк" in normalized):
+        return "results"
+    if "captcha" in normalized or "проверка безопасности" in normalized:
+        return "blocked"
+    logged_in = re.search(r"(?<![\w])выход(?![\w])", normalized) is not None
     login_page = (
         "/login" in url_lower
         or "login.aspx" in url_lower
@@ -79,10 +87,6 @@ def detect_cabinet_state(html: str, url: str) -> CabinetState:
     )
     if login_page:
         return "login"
-    if "jqgrow" in lower_html and "номер закупки" in normalized:
-        return "results"
-    if "номер процедуры" in normalized and ("наименование" in normalized or "нмцк" in normalized):
-        return "results"
     return "unknown"
 
 
@@ -99,6 +103,10 @@ def parse_cabinet_page(html: str, source_url: str) -> list[TenderRecord]:
                 continue
             values = [_clean(cell.get_text(" ", strip=True)) for cell in cells]
             link = row.find("a", href=True)
+            if link is None:
+                # Строка результата всегда ссылается на карточку; виджеты без
+                # ссылок дают мусорные записи с коллизией unique_key.
+                continue
             link_text = link.get_text(" ", strip=True) if link else ""
             title = _title_from_row(values, link_text)
             if not title:

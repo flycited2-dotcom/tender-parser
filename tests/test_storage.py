@@ -111,6 +111,38 @@ def test_storage_reports_promotion_to_actionable(tmp_path: Path) -> None:
     assert storage.upsert_many([promoted]) == []
 
 
+def test_storage_keeps_document_evidence_on_degraded_rerun(tmp_path: Path) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    checked = TenderRecord(
+        title="Поставка МФУ",
+        url="https://example.test/tender-1/",
+        source="test",
+        tender_number="1",
+        filter_status="matched",
+        review_priority="hot",
+        detail_status="documents_checked",
+        document_matches=["мфу", "симферополь"],
+        delivery_region_evidence="notice.pdf: regions=симферополь",
+        source_confidence=0.9,
+    )
+    degraded = replace(
+        checked,
+        detail_status="not_checked",
+        document_matches=[],
+        delivery_region_evidence="",
+        source_confidence=0.0,
+    )
+
+    storage.upsert_many([checked])
+    storage.upsert_many([degraded])
+
+    row = storage.fetch_by_status("matched")[0]
+    assert row.detail_status == "documents_checked"
+    assert row.document_matches == ["мфу", "симферополь"]
+    assert row.delivery_region_evidence == "notice.pdf: regions=симферополь"
+    assert row.source_confidence == 0.9
+
+
 def test_preview_new_does_not_write(tmp_path: Path) -> None:
     storage = TenderStorage(tmp_path / "tenders.db")
     tender = TenderRecord(

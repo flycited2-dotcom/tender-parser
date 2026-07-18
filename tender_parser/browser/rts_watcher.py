@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from time import sleep
@@ -11,6 +12,9 @@ from tender_parser.sources.rts_poisk import parse_poisk_page
 
 
 RECONNECT_DELAY_SECONDS = 5.0
+# Динамические страницы поиска меняются каждый poll: без лимитов снапшоты
+# съедают гигабайты за ночь. Один снапшот на URL, немного на сессию.
+MAX_SNAPSHOTS_PER_SESSION = 5
 
 # Бейдж-статус в углу страницы RTS: только чтение DOM плюс один div, сайт не трогаем.
 BADGE_JS = """
@@ -77,6 +81,7 @@ class RtsCabinetWatcher:
         self.poll_seconds = poll_seconds
         self.diagnostics_dir = diagnostics_dir or db_path.parent.parent / "diagnostics"
         self._snapshot_hashes: set[str] = set()
+        self._snapshot_urls: set[str] = set()
 
     def run_forever(self) -> int:
         from playwright.sync_api import sync_playwright
@@ -99,6 +104,7 @@ class RtsCabinetWatcher:
                         sleep(RECONNECT_DELAY_SECONDS)
                         continue
                     self._watch_browser(browser, accumulator)
+                    sleep(RECONNECT_DELAY_SECONDS)
         except KeyboardInterrupt:
             total = len(accumulator.load_all())
             print(f"Автосбор остановлен. Всего в накопителе RTS: {total}.", flush=True)
@@ -108,6 +114,11 @@ class RtsCabinetWatcher:
     def _watch_browser(self, browser, accumulator: RtsAccumulator) -> None:
         while True:
             try:
+                # Обрыв CDP не бросает исключений в этот поток — connected надо
+                # спрашивать явно, иначе цикл молча крутится по пустым вкладкам.
+                if not browser.is_connected():
+                    print("Chrome отключился — переподключаюсь...", flush=True)
+                    return
                 pages = [
                     page
                     for context in browser.contexts
@@ -116,7 +127,6 @@ class RtsCabinetWatcher:
                 ]
             except Exception:
                 print(f"Связь с Chrome потеряна; повтор через {RECONNECT_DELAY_SECONDS:.0f} сек.", flush=True)
-                sleep(RECONNECT_DELAY_SECONDS)
                 return
             for page in pages:
                 self._poll_page(page, accumulator)
@@ -124,9 +134,24 @@ class RtsCabinetWatcher:
 
     def _poll_page(self, page, accumulator: RtsAccumulator) -> None:
         try:
-            html = page.content()
             url = page.url
+            html = page.content()
+            if page.url != url:
+                return  # пользователь перешёл на другую страницу между чтениями
+        except Exception:
+            # Страница перегружается или закрыта — попробуем на следующем проходе.
+            return
+        try:
             result = collect_from_page(html, url, accumulator)
+        except sqlite3.Error as exc:
+            # Молчать нельзя: пользователь часами листает, думая что сбор идёт.
+            print(
+                f"Не удалось сохранить страницу в накопитель ({exc}). "
+                "Возможно, идет отчет по этой же базе — повторю на следующем проходе.",
+                flush=True,
+            )
+            return
+        try:
             if result is not None:
                 added, total = result
                 if added:
@@ -134,13 +159,14 @@ class RtsCabinetWatcher:
                 page.evaluate(BADGE_JS, badge_text(added, total))
                 return
             if "/poisk" in url and detect_cabinet_state(html, url) not in {"login", "blocked"}:
-                saved = save_snapshot(html, url, self.diagnostics_dir, self._snapshot_hashes)
-                if saved:
-                    print(
-                        f"Поиск RTS пока не распознается; вёрстка сохранена: diagnostics/{saved.name}",
-                        flush=True,
-                    )
+                if url not in self._snapshot_urls and len(self._snapshot_urls) < MAX_SNAPSHOTS_PER_SESSION:
+                    saved = save_snapshot(html, url, self.diagnostics_dir, self._snapshot_hashes)
+                    if saved:
+                        self._snapshot_urls.add(url)
+                        print(
+                            f"Поиск RTS пока не распознается; вёрстка сохранена: diagnostics/{saved.name}",
+                            flush=True,
+                        )
                 page.evaluate(BADGE_JS, "Поиск RTS: вёрстка сохранена для настройки парсера")
         except Exception:
-            # Страница перегружается или закрыта — попробуем на следующем проходе.
             return

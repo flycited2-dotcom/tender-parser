@@ -153,6 +153,54 @@ def test_parse_cabinet_page_extracts_jqgrid_results() -> None:
     assert tender.status == "\u041f\u0440\u0438\u0435\u043c \u0437\u0430\u044f\u0432\u043e\u043a"
 
 
+def test_detect_cabinet_state_results_beat_captcha_word_in_content() -> None:
+    from tender_parser.sources.rts_cabinet import detect_cabinet_state
+
+    results = (FIXTURES / "rts_cabinet_results_sample.html").read_text(encoding="utf-8")
+    with_word = results.replace(
+        "Оказание услуг по физической охране",
+        "Проверка безопасности зданий и сооружений (captcha)",
+    )
+
+    state = detect_cabinet_state(with_word, "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx")
+
+    assert state == "results"
+
+
+def test_detect_cabinet_state_vyhod_needs_word_boundary() -> None:
+    from tender_parser.sources.rts_cabinet import detect_cabinet_state
+
+    login_html = """
+    <html><body>
+      <form><input type="password" name="pw"></form>
+      <footer>Поддержка работает без выходных</footer>
+    </body></html>
+    """
+
+    state = detect_cabinet_state(login_html, "https://www.rts-tender.ru/account")
+
+    assert state == "login"
+
+
+def test_parse_cabinet_page_skips_rows_without_number_and_link() -> None:
+    from tender_parser.sources.rts_cabinet import parse_cabinet_page
+
+    html = """
+    <html><body>
+      <table>
+        <tr><th>Номер</th><th>Наименование</th><th>Заказчик</th></tr>
+        <tbody>
+          <tr><td>04.08.2026 10:00</td><td>строка виджета без номера и ссылки</td><td>АО Василек</td></tr>
+        </tbody>
+      </table>
+    </body></html>
+    """
+
+    tenders = parse_cabinet_page(html, "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx")
+
+    assert tenders == []
+
+
 def test_detect_cabinet_state_identifies_results_login_and_blocked() -> None:
     results = (FIXTURES / "rts_cabinet_results_sample.html").read_text(encoding="utf-8")
     login = (FIXTURES / "rts_cabinet_login_sample.html").read_text(encoding="utf-8")

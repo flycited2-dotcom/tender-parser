@@ -123,10 +123,15 @@ def _time_value(card, itemprop: str) -> datetime | None:
     node = card.select_one(f'time[itemprop="{itemprop}"]')
     if node is None or not node.get("datetime"):
         return None
-    raw = str(node["datetime"]).strip()[:19].strip()
+    raw_full = str(node["datetime"]).strip()
+    raw = raw_full[:19].strip()
     for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M"):
         try:
             return datetime.strptime(raw, fmt)
         except ValueError:
             continue
-    return None
+    # schema.org допускает ISO 8601 — если сайт сменит формат, даты не должны обнулиться.
+    try:
+        return datetime.fromisoformat(raw_full).replace(tzinfo=None)
+    except ValueError:
+        return None

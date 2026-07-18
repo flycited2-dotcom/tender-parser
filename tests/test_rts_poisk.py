@@ -56,6 +56,17 @@ def test_parse_poisk_page_skips_cards_without_number_and_link() -> None:
     assert tenders == []
 
 
+def test_time_value_understands_iso_datetimes() -> None:
+    html = SAMPLE_HTML.replace(
+        'datetime="06.07.2026 12:36:00 +03:00"', 'datetime="2026-07-20T10:00:00+03:00"'
+    )
+
+    tenders = parse_poisk_page(html, POISK_URL)
+
+    assert tenders[0].deadline == datetime(2026, 7, 20, 10, 0)
+    assert tenders[0].deadline.tzinfo is None
+
+
 def test_collect_from_page_accumulates_poisk_results(tmp_path: Path) -> None:
     accumulator = RtsAccumulator(tmp_path / "tenders.db")
 

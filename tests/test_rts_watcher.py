@@ -47,6 +47,53 @@ def test_badge_text_reports_totals() -> None:
     assert badge_text(0, 112) == "Накопитель RTS: 112 строк (страница уже добавлена)"
 
 
+class FakePage:
+    def __init__(self, url: str, html: str) -> None:
+        self.url = url
+        self._html = html
+        self.badges: list[str] = []
+
+    def content(self) -> str:
+        return self._html
+
+    def evaluate(self, script: str, arg: str) -> None:
+        self.badges.append(arg)
+
+
+def test_poll_page_reports_sqlite_errors(tmp_path: Path, capsys) -> None:
+    import sqlite3
+
+    from tender_parser.browser.rts_watcher import RtsCabinetWatcher
+
+    class LockedAccumulator:
+        def add_many(self, tenders):  # noqa: ANN001
+            raise sqlite3.OperationalError("database is locked")
+
+    html = (FIXTURES / "rts_cabinet_results_sample.html").read_text(encoding="utf-8")
+    watcher = RtsCabinetWatcher(tmp_path / "tenders.db")
+    page = FakePage(RESULTS_URL, html)
+
+    watcher._poll_page(page, LockedAccumulator())
+
+    output = capsys.readouterr().out
+    assert "база данных" in output or "database is locked" in output
+
+
+def test_poll_page_snapshots_poisk_once_per_url(tmp_path: Path) -> None:
+    from tender_parser.browser.rts_watcher import RtsCabinetWatcher
+
+    watcher = RtsCabinetWatcher(tmp_path / "tenders.db", diagnostics_dir=tmp_path / "diag")
+    accumulator = RtsAccumulator(tmp_path / "tenders.db")
+    url = "https://www.rts-tender.ru/poisk/search?id=abc"
+
+    watcher._poll_page(FakePage(url, "<html>вариант 1 счетчик 10:01</html>"), accumulator)
+    watcher._poll_page(FakePage(url, "<html>вариант 2 счетчик 10:02</html>"), accumulator)
+    watcher._poll_page(FakePage(url, "<html>вариант 3 счетчик 10:03</html>"), accumulator)
+
+    snapshots = list((tmp_path / "diag").glob("*.html"))
+    assert len(snapshots) == 1
+
+
 def test_save_snapshot_writes_once_per_content(tmp_path: Path) -> None:
     seen: set[str] = set()
     url = "https://www.rts-tender.ru/poisk/search?id=abc"
