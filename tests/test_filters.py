@@ -538,6 +538,19 @@ def test_evaluate_tender_does_not_match_pen_after_hyphen() -> None:
     assert "категория интереса не найдена" in result.exclude_reason
 
 
+def test_evaluate_tender_excludes_medical_equipment() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка медицинского оборудования в рамках федерального проекта",
+            raw_text="Поставка медицинского оборудования, холодильник фармацевтический, мониторы пациента",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "стоп-тема" in result.exclude_reason
+
+
 def test_evaluate_tender_still_excludes_medical_and_construction() -> None:
     medical = evaluate_tender(
         make_tender(
