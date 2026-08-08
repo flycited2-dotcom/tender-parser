@@ -8,6 +8,7 @@ from typing import Literal, Protocol, Sequence
 
 from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
 from tender_parser.dedup import deduplicate_tenders
+from tender_parser.document_downloader import DocumentDownloadConfig, EisDocumentDownloader
 from tender_parser.documents import DocumentAnalyzer
 from tender_parser.enrichment import TenderEnricher
 from tender_parser.env import get_env_status, load_env_file
@@ -16,6 +17,11 @@ from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
+from tender_parser.notifications import (
+    NotificationConfig,
+    TelegramNotifier,
+    export_notification_digest,
+)
 from tender_parser.run_report import (
     SourceFetchResult,
     SourceHealth,
@@ -111,6 +117,7 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
                         Torgi82Source(),
                         B2BCenterSource(),
                         EatIntegrationSource(),
+                        EisZakupkiSource(),
                         RostenderSource(),
                     ]
                 ),
@@ -237,13 +244,16 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
             source_result.health, load_previous_counts(exports_dir / "run_report.json")
         )
 
-    raw_tenders = TenderEnricher(DocumentAnalyzer(base_dir / "documents")).enrich(source_result.tenders)
+    storage = TenderStorage(data_dir / "tenders.db")
+    enriched_tenders = TenderEnricher(DocumentAnalyzer(base_dir / "documents")).enrich(
+        source_result.tenders
+    )
+    raw_tenders = storage.merge_with_history(enriched_tenders)
     deduplication = deduplicate_tenders(raw_tenders)
     evaluated = [evaluate_tender(tender, now=current_time) for tender in deduplication.tenders]
 
     # Только предпросмотр «новых»: фиксация в БД — после успешных экспортов,
     # иначе упавший экспорт навсегда теряет карточки из CRM-очереди.
-    storage = TenderStorage(data_dir / "tenders.db")
     first_seen = storage.preview_new(evaluated)
 
     hot = [tender for tender in evaluated if tender.review_priority == "hot"]
@@ -253,6 +263,11 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     actionable = sort_for_review(hot + review + wide)
     new_actionable = sort_for_review(
         [tender for tender in first_seen if tender.review_priority in {"hot", "review", "wide"}]
+    )
+
+    download_report = EisDocumentDownloader(DocumentDownloadConfig.from_env()).download(
+        new_actionable,
+        base_dir / "downloads",
     )
 
     date_stamp = current_time.strftime("%Y-%m-%d")
@@ -270,6 +285,9 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     )
     json_path = export_json(actionable, exports_dir / "latest.json")
     new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
+    notification_path = export_notification_digest(
+        new_actionable, exports_dir / "notification.txt"
+    )
     html_path = export_html_report(
         actionable,
         exports_dir / "latest.html",
@@ -286,7 +304,22 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         new_count=len(new_actionable),
         profile=args.profile,
     )
-    storage.upsert_many(evaluated)
+    notification_config = NotificationConfig.from_env()
+    storage.upsert_many(
+        evaluated,
+        notification_candidates=new_actionable if notification_config.enabled else None,
+    )
+    notification_result = TelegramNotifier(notification_config).notify(
+        storage.fetch_pending_notifications()
+    )
+    if notification_result.status == "sent":
+        pending = storage.fetch_pending_notifications()
+        storage.mark_notifications_sent([tender.unique_key for tender in pending])
+    elif notification_result.status == "error":
+        pending = storage.fetch_pending_notifications()
+        storage.mark_notification_error(
+            [tender.unique_key for tender in pending], notification_result.detail
+        )
 
     print(f"Найдено: {len(raw_tenders)}")
     print(f"После дедупликации: {len(deduplication.tenders)}")
@@ -305,6 +338,20 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     print(f"JSON: {json_path}")
     print(f"HTML: {html_path}")
     print(f"Новые JSON: {new_json_path}")
+    print(f"Текст уведомления: {notification_path}")
+    if notification_result.status == "sent":
+        print(f"Telegram: отправлено {notification_result.sent_count}")
+    elif notification_result.status == "error":
+        print(f"Telegram: ошибка {notification_result.detail}; очередь сохранена")
+    elif notification_result.status == "disabled":
+        print("Telegram: не настроен")
+    if download_report.status == "disabled":
+        print("Документы ЕИС: автозагрузка отключена")
+    else:
+        print(
+            f"Документы ЕИС: скачано {download_report.downloaded_count}, "
+            f"уже было {download_report.skipped_count}, ошибок {len(download_report.errors)}"
+        )
     print(f"Отчет источников: {report_path}")
     return 0
 

@@ -10,6 +10,7 @@ data/
 exports/
 imports/
 documents/
+downloads/
 logs/
 browser_profiles/
 .worktrees/

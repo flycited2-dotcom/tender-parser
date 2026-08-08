@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 from datetime import datetime
 import json
 from pathlib import Path
@@ -68,6 +69,18 @@ class TenderStorage:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_outbox (
+                    unique_key TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    sent_at TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    FOREIGN KEY(unique_key) REFERENCES tenders(unique_key)
+                )
+                """
+            )
             columns = {
                 str(row["name"])
                 for row in conn.execute("PRAGMA table_info(tenders)").fetchall()
@@ -85,7 +98,12 @@ class TenderStorage:
             if "source_confidence" not in columns:
                 conn.execute("ALTER TABLE tenders ADD COLUMN source_confidence REAL")
 
-    def upsert_many(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
+    def upsert_many(
+        self,
+        tenders: list[TenderRecord],
+        *,
+        notification_candidates: list[TenderRecord] | None = None,
+    ) -> list[TenderRecord]:
         """Сохраняет карточки и возвращает новые для CRM-очереди.
 
         Новыми считаются впервые увиденные карточки и карточки, впервые
@@ -165,12 +183,69 @@ class TenderStorage:
                         tender.source_confidence,
                     ),
                 )
+            for candidate in notification_candidates or []:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO notification_outbox (unique_key, created_at)
+                    VALUES (?, ?)
+                    """,
+                    (candidate.unique_key, now),
+                )
         return first_seen
 
     def preview_new(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
         """Как upsert_many, но только чтение: ничего не фиксирует в БД."""
         with closing(self._connect()) as conn:
             return [tender for tender in tenders if self._is_new(conn, tender)]
+
+    def merge_with_history(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
+        """Возвращает карточки, дополненные уже известными непустыми полями.
+
+        Площадки иногда отдают неполную карточку при повторном запуске. Без этого
+        шага текущий отчёт теряет цену, срок или регион, хотя SQLite их помнит.
+        Свежие непустые значения всегда имеют приоритет над историческими.
+        """
+        if not tenders:
+            return []
+
+        historical: dict[str, TenderRecord] = {}
+        keys = list(dict.fromkeys(tender.unique_key for tender in tenders))
+        with closing(self._connect()) as conn:
+            for start in range(0, len(keys), 500):
+                chunk = keys[start : start + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"SELECT * FROM tenders WHERE unique_key IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    historical[str(row["unique_key"])] = self._row_to_record(row)
+
+        return [self._merge_record(tender, historical.get(tender.unique_key)) for tender in tenders]
+
+    @staticmethod
+    def _merge_record(current: TenderRecord, previous: TenderRecord | None) -> TenderRecord:
+        if previous is None:
+            return current
+        detail_status = current.detail_status
+        if detail_status == "not_checked" and previous.detail_status != "not_checked":
+            detail_status = previous.detail_status
+        return replace(
+            current,
+            customer=current.customer or previous.customer,
+            region=current.region or previous.region,
+            price=current.price if current.price is not None else previous.price,
+            deadline=current.deadline or previous.deadline,
+            status=current.status or previous.status,
+            published_at=current.published_at or previous.published_at,
+            raw_text=current.raw_text or previous.raw_text,
+            detail_status=detail_status,
+            document_matches=current.document_matches or previous.document_matches,
+            delivery_region_evidence=(
+                current.delivery_region_evidence or previous.delivery_region_evidence
+            ),
+            source_confidence=max(current.source_confidence, previous.source_confidence),
+        )
 
     def _is_new(self, conn: sqlite3.Connection, tender: TenderRecord) -> bool:
         exists = conn.execute(
@@ -191,6 +266,49 @@ class TenderStorage:
                 (status,),
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def fetch_pending_notifications(self, limit: int = 50) -> list[TenderRecord]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT tenders.*
+                FROM notification_outbox
+                JOIN tenders USING (unique_key)
+                WHERE notification_outbox.sent_at IS NULL
+                ORDER BY notification_outbox.created_at ASC
+                LIMIT ?
+                """,
+                (max(1, limit),),
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def mark_notifications_sent(self, unique_keys: list[str]) -> None:
+        if not unique_keys:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        with closing(self._connect()) as conn, conn:
+            conn.executemany(
+                """
+                UPDATE notification_outbox
+                SET sent_at = ?, attempt_count = attempt_count + 1, last_error = NULL
+                WHERE unique_key = ? AND sent_at IS NULL
+                """,
+                [(now, key) for key in unique_keys],
+            )
+
+    def mark_notification_error(self, unique_keys: list[str], error: str) -> None:
+        if not unique_keys:
+            return
+        safe_error = error[:500]
+        with closing(self._connect()) as conn, conn:
+            conn.executemany(
+                """
+                UPDATE notification_outbox
+                SET attempt_count = attempt_count + 1, last_error = ?
+                WHERE unique_key = ? AND sent_at IS NULL
+                """,
+                [(safe_error, key) for key in unique_keys],
+            )
 
     def _row_to_record(self, row: sqlite3.Row) -> TenderRecord:
         return TenderRecord(

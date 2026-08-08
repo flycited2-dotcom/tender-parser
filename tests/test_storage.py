@@ -165,6 +165,127 @@ def test_preview_new_does_not_write(tmp_path: Path) -> None:
     assert storage.preview_new([tender]) == []
 
 
+def test_merge_with_history_restores_known_fields_without_overwriting_fresh_values(
+    tmp_path: Path,
+) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    historical = TenderRecord(
+        title="Поставка МФУ",
+        url="https://example.test/tender-1/",
+        source="test",
+        tender_number="1",
+        customer="Старый заказчик",
+        region="Республика Крым",
+        price=45_000.0,
+        deadline=datetime(2026, 5, 25, 10, 0),
+        published_at=datetime(2026, 5, 19, 9, 0),
+        raw_text="Полная историческая карточка",
+        filter_status="matched",
+        review_priority="hot",
+        detail_status="documents_checked",
+        document_matches=["мфу"],
+        delivery_region_evidence="notice.pdf: Республика Крым",
+        source_confidence=0.9,
+    )
+    storage.upsert_many([historical])
+
+    partial = replace(
+        historical,
+        customer="Новый заказчик",
+        region=None,
+        price=None,
+        deadline=None,
+        published_at=None,
+        raw_text="Свежая карточка",
+        filter_status="excluded",
+        review_priority=None,
+        detail_status="not_checked",
+        document_matches=[],
+        delivery_region_evidence="",
+        source_confidence=0.0,
+    )
+
+    merged = storage.merge_with_history([partial])[0]
+
+    assert merged.customer == "Новый заказчик"
+    assert merged.region == "Республика Крым"
+    assert merged.price == 45_000.0
+    assert merged.deadline == datetime(2026, 5, 25, 10, 0)
+    assert merged.published_at == datetime(2026, 5, 19, 9, 0)
+    assert merged.raw_text == "Свежая карточка"
+    assert merged.detail_status == "documents_checked"
+    assert merged.document_matches == ["мфу"]
+    assert merged.delivery_region_evidence == "notice.pdf: Республика Крым"
+    assert merged.source_confidence == 0.9
+
+
+def test_merge_with_history_preserves_order_and_unknown_records(tmp_path: Path) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    known = TenderRecord(
+        title="Поставка принтеров",
+        url="https://example.test/known",
+        source="test",
+        tender_number="KNOWN",
+        price=80_000.0,
+    )
+    unknown = TenderRecord(
+        title="Поставка бумаги",
+        url="https://example.test/unknown",
+        source="test",
+        tender_number="UNKNOWN",
+    )
+    storage.upsert_many([known])
+
+    result = storage.merge_with_history([unknown, replace(known, price=None)])
+
+    assert result[0] == unknown
+    assert result[1].price == 80_000.0
+
+
+def test_notification_outbox_retries_until_marked_sent(tmp_path: Path) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    tender = TenderRecord(
+        title="Поставка МФУ",
+        url="https://example.test/tender-1/",
+        source="test",
+        tender_number="1",
+        filter_status="matched",
+        review_priority="hot",
+    )
+
+    storage.upsert_many([tender], notification_candidates=[tender])
+    assert [item.unique_key for item in storage.fetch_pending_notifications()] == [
+        tender.unique_key
+    ]
+
+    storage.mark_notification_error([tender.unique_key], "temporary failure")
+    assert [item.unique_key for item in storage.fetch_pending_notifications()] == [
+        tender.unique_key
+    ]
+
+    storage.mark_notifications_sent([tender.unique_key])
+    assert storage.fetch_pending_notifications() == []
+
+
+def test_notification_outbox_does_not_enqueue_same_tender_twice(tmp_path: Path) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    tender = TenderRecord(
+        title="Поставка принтеров",
+        url="https://example.test/tender-2/",
+        source="test",
+        tender_number="2",
+        filter_status="matched",
+        review_priority="hot",
+    )
+
+    storage.upsert_many([tender], notification_candidates=[tender])
+    storage.upsert_many([tender], notification_candidates=[tender])
+
+    assert [item.unique_key for item in storage.fetch_pending_notifications()] == [
+        tender.unique_key
+    ]
+
+
 def test_storage_uses_wal_and_closes_connections(tmp_path: Path) -> None:
     import gc
     import sqlite3

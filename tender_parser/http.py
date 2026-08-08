@@ -5,6 +5,15 @@ from typing import Any, Callable
 
 import requests
 
+try:
+    import truststore
+except ImportError:  # pragma: no cover - старое окружение до обновления requirements
+    truststore = None
+else:
+    # ЕИС использует цепочку, доступную системному хранилищу Windows, но не
+    # всегда входящую в certifi. Проверку TLS не отключаем: используем CryptoAPI.
+    truststore.inject_into_ssl()
+
 
 RETRYABLE_EXCEPTIONS = (requests.Timeout, requests.ConnectionError)
 # SSL-ошибки детерминированы: повтор лишь удваивает ожидание таймаута.

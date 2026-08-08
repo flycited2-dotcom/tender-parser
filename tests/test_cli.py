@@ -176,7 +176,7 @@ def test_build_default_source_uses_composite_source() -> None:
     assert len(source.sources) == 1
 
 
-def test_build_fast_profile_excludes_currently_slow_sources() -> None:
+def test_build_fast_profile_includes_eis_after_native_tls_fix() -> None:
     source = build_source_for_profile("fast")
 
     assert isinstance(source, CompositeSource)
@@ -186,6 +186,7 @@ def test_build_fast_profile_excludes_currently_slow_sources() -> None:
         "Torgi82Source",
         "B2BCenterSource",
         "EatIntegrationSource",
+        "EisZakupkiSource",
         "RostenderSource",
     ]
 
@@ -253,11 +254,15 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert (tmp_path / "exports" / "latest.json").exists()
     assert (tmp_path / "exports" / "latest.html").exists()
     assert (tmp_path / "exports" / "new_tenders.json").exists()
+    assert (tmp_path / "exports" / "notification.txt").exists()
     assert (tmp_path / "exports" / "run_report.json").exists()
     excel_path = next((tmp_path / "exports").glob("tenders_*.xlsx"))
     workbook = load_workbook(excel_path)
     assert workbook.sheetnames == ["Дашборд", "Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
     assert "Поставка МФУ" in (tmp_path / "exports" / "latest.html").read_text(encoding="utf-8")
+    assert "Поставка МФУ" in (tmp_path / "exports" / "notification.txt").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_run_preserves_new_queue_when_export_fails(tmp_path: Path) -> None:
@@ -315,6 +320,42 @@ def test_run_exports_only_first_seen_actionable_tenders(tmp_path: Path) -> None:
     assert second_result == 0
     assert '"count": 1' in first_new
     assert '"count": 0' in second_new
+
+
+def test_run_restores_known_price_and_deadline_before_filtering(tmp_path: Path) -> None:
+    first_result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=FakeSource(),
+    )
+
+    class PartialRepeatSource:
+        def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+            original = FakeSource().fetch_keywords(keywords)[0]
+            return [
+                TenderRecord(
+                    title=original.title,
+                    url=original.url,
+                    source=original.source,
+                    tender_number=original.tender_number,
+                    customer=original.customer,
+                    region=original.region,
+                    price=None,
+                    deadline=None,
+                    raw_text=original.raw_text,
+                )
+            ]
+
+    second_result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-20T12:00:00"],
+        source=PartialRepeatSource(),
+    )
+    latest = json.loads((tmp_path / "exports" / "latest.json").read_text(encoding="utf-8"))
+
+    assert first_result == 0
+    assert second_result == 0
+    assert latest["count"] == 1
+    assert latest["items"][0]["price"] == 45_000.0
+    assert latest["items"][0]["deadline"] == "2026-05-25T10:00:00"
 
 
 def test_run_keeps_existing_exports_when_source_is_blocked(tmp_path: Path) -> None:

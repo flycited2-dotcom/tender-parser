@@ -481,6 +481,42 @@ def test_evaluate_tender_stops_laboratory_in_genitive() -> None:
     )
 
     assert result.filter_status == "excluded"
+
+
+def test_evaluate_tender_stops_laboratory_adjectives() -> None:
+    result = evaluate_tender(
+        TenderRecord(
+            title="Мебель специализированная лабораторная",
+            url="https://example.test/lab-furniture",
+            source="test",
+            region="Республика Крым",
+            price=250_000,
+            deadline=datetime(2026, 6, 1),
+            raw_text="Поставка шкафов и лабораторной мебели",
+        ),
+        now=datetime(2026, 5, 19),
+    )
+
+    assert result.filter_status == "excluded"
+    assert "лабораторн" in result.exclude_reason
+
+
+def test_evaluate_tender_stops_neurosurgery_consumables_matching_wire() -> None:
+    result = evaluate_tender(
+        TenderRecord(
+            title="Расходные материалы для отделения нейрохирургии: проводник ручной",
+            url="https://example.test/neurosurgery",
+            source="test",
+            region="Севастополь",
+            price=1_228_000,
+            deadline=datetime(2026, 6, 1),
+            raw_text="Проводник для доступа к периферическим сосудам",
+        ),
+        now=datetime(2026, 5, 19),
+    )
+
+    assert result.filter_status == "excluded"
+    assert "нейрохирург" in result.exclude_reason
     assert "стоп-тема" in result.exclude_reason
 
 
