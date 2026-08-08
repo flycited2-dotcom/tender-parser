@@ -345,6 +345,8 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         source_result,
         generated_at=current_time,
         profile=args.profile,
+        raw_count=len(raw_tenders),
+        unique_count=len(deduplication.tenders),
     )
     notification_config = NotificationConfig.from_env()
     storage.upsert_many(

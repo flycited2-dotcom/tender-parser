@@ -108,6 +108,8 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
         report,
         generated_at=datetime(2026, 8, 8, 12, 0),
         profile="fast",
+        raw_count=3,
+        unique_count=2,
     )
 
     assert result.status == "synced"
@@ -121,5 +123,7 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
     assert archive[2] == "Не найдена в последнем запуске"
     selected = ranges["'Мой отбор'!A2:T2"][0]
     assert selected[0] == "fake:1"
+    history = ranges["'История запусков'!A2:L2"][0]
+    assert history[2:4] == [3, 2]
     table_payload = session.posts[-1][1]
     assert table_payload["requests"][0]["updateTable"]["table"]["range"]["endRowIndex"] == 2

@@ -106,6 +106,8 @@ class GoogleSheetsRegistry:
         *,
         generated_at: datetime,
         profile: str,
+        raw_count: int | None = None,
+        unique_count: int | None = None,
     ) -> GoogleSheetsSyncResult:
         if not self.config.enabled:
             return GoogleSheetsSyncResult(
@@ -160,6 +162,8 @@ class GoogleSheetsRegistry:
                         source_result,
                         generated_at=generated_at,
                         profile=profile,
+                        raw_count=raw_count,
+                        unique_count=unique_count,
                         active_count=len(current_rows),
                         new_count=len(fresh_rows),
                     )
@@ -422,6 +426,8 @@ def _history_row(
     *,
     generated_at: datetime,
     profile: str,
+    raw_count: int | None,
+    unique_count: int | None,
     active_count: int,
     new_count: int,
 ) -> list[object]:
@@ -435,8 +441,12 @@ def _history_row(
     return [
         _format_dt(generated_at),
         profile,
-        len(source_result.tenders),
-        len({tender.unique_key for tender in source_result.tenders}),
+        len(source_result.tenders) if raw_count is None else raw_count,
+        (
+            len({tender.unique_key for tender in source_result.tenders})
+            if unique_count is None
+            else unique_count
+        ),
         active_count,
         new_count,
         len(source_result.health),
