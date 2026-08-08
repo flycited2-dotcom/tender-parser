@@ -10,7 +10,7 @@ from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
-from tender_parser.sources.etp_gpb import EtpGpbRssSource
+from tender_parser.sources.etp_gpb import EtpGpbApiSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
@@ -165,7 +165,7 @@ def test_build_default_source_uses_composite_source() -> None:
     assert isinstance(source, CompositeSource)
     first_layer = source.sources[0]
     assert isinstance(first_layer, CompositeSource)
-    assert isinstance(first_layer.sources[0], EtpGpbRssSource)
+    assert isinstance(first_layer.sources[0], EtpGpbApiSource)
     assert isinstance(first_layer.sources[1], TenderProSource)
     assert isinstance(first_layer.sources[2], Torgi82Source)
     assert isinstance(first_layer.sources[3], B2BCenterSource)
@@ -182,6 +182,7 @@ def test_build_fast_profile_includes_eis_after_native_tls_fix() -> None:
     assert isinstance(source, CompositeSource)
     names = [item.__class__.__name__ for item in source.sources[0].sources]
     assert names == [
+        "EtpGpbApiSource",
         "TenderProSource",
         "Torgi82Source",
         "B2BCenterSource",

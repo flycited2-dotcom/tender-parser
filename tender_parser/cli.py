@@ -35,7 +35,7 @@ from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
-from tender_parser.sources.etp_gpb import EtpGpbRssSource
+from tender_parser.sources.etp_gpb import EtpGpbApiSource
 from tender_parser.sources.imports import ImportFolderSource
 from tender_parser.rts_accumulator import RtsAccumulator, RtsAccumulatorSource
 from tender_parser.sources.rostender import RostenderSource
@@ -119,6 +119,7 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
             [
                 CompositeSource(
                     [
+                        EtpGpbApiSource(),
                         TenderProSource(),
                         Torgi82Source(),
                         B2BCenterSource(),
@@ -134,7 +135,7 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
         [
             CompositeSource(
                 [
-                    EtpGpbRssSource(),
+                    EtpGpbApiSource(),
                     TenderProSource(),
                     Torgi82Source(),
                     B2BCenterSource(),

@@ -70,7 +70,7 @@ TELEGRAM_MAX_ITEMS=10
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_ежедневный_запуск.ps1
 ```
 
-По умолчанию ежедневный запуск использует профиль `fast`: он включает ЕИС и быстрые публичные источники, но не ждёт текущие timeout/captcha-источники ГПБ/RTS. Полный режим можно включить явно:
+По умолчанию ежедневный запуск использует профиль `fast`: он включает ЕИС, текущий JSON API ГПБ и другие быстрые публичные источники, но не ждёт captcha-источники RTS. Полный режим можно включить явно:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_ежедневный_запуск.ps1 -Profile full
@@ -106,7 +106,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_еже�
 - `exports/notification.txt` - краткая человекочитаемая сводка новых закупок для уведомления.
 - `exports/run_report.json` - здоровье источников: статус, число карточек, время запроса, ошибка или причина пропуска.
 - JSON и Excel содержат enrichment-поля: `detail_status`, `document_matches`, `delivery_region_evidence`, `source_confidence`.
-- Публичные источники: ЕИС `zakupki.gov.ru`, ЭТП ГПБ RSS, Tender.Pro API, Торги82 JSON, B2B-Center, `rostender.info` и RTS-market с диагностикой по каждому endpoint.
+- Публичные источники: ЕИС `zakupki.gov.ru`, актуальный JSON API ЭТП ГПБ (223-ФЗ, 44-ФЗ и Торговый портал), Tender.Pro API, Торги82 JSON, B2B-Center, `rostender.info` и RTS-market с диагностикой по каждому endpoint.
 - ЕАТ/Березка подключается как интеграционный API-источник при наличии токена из личного кабинета.
 - Исследование следующих ЭТП для подключения: `docs/etp_source_research_2026-05-29.md`.
 
@@ -138,7 +138,7 @@ python -m tender_parser run
 
 ```powershell
 python -m tender_parser run --profile full   # все источники, режим по умолчанию
-python -m tender_parser run --profile fast   # ЕИС + быстрые источники, без ГПБ/RTS
+python -m tender_parser run --profile fast   # ЕИС + ГПБ API + быстрые источники, без RTS
 python -m tender_parser run --profile local  # только imports/ и documents/
 python -m tender_parser run --profile rts    # только RTS-Tender для диагностики
 python -m tender_parser run --profile rts-cabinet  # текущая выдача RTS из открытого Chrome-профиля
@@ -179,11 +179,11 @@ RTS-Tender выделен как отдельный стратегический
 ## Ограничения первой версии
 
 - Основной автоматический режим работает с публичными страницами без авторизации; RTS-кабинет работает отдельно через ручной вход в Chrome.
-- Публичный режим проверяет ЭТП ГПБ RSS, Tender.Pro API, Торги82 JSON, B2B-Center, ЕАТ при наличии токена, ЕИС `zakupki.gov.ru`, Rostender и несколько RTS-market источников: Rosatom, общий RTS-market, Симферополь и Ялта.
+- Публичный режим проверяет JSON API ЭТП ГПБ по разделам 223-ФЗ, 44-ФЗ и Торговый портал, Tender.Pro API, Торги82 JSON, B2B-Center, ЕАТ при наличии токена, ЕИС `zakupki.gov.ru`, Rostender и несколько RTS-market источников: Rosatom, общий RTS-market, Симферополь и Ялта.
 - ЕИС подключен через публичную HTML-выдачу и дает основной прирост по 44-ФЗ/223-ФЗ; Python использует системное хранилище сертификатов Windows, а системные proxy-настройки для ЕИС отключены из-за прежних долгих таймаутов.
 - Перед фильтрацией высокоуверенные дубли между ЕИС и агрегаторами объединяются, с приоритетом официальной карточки ЕИС.
 - Торги82 подключен через публичный JSON endpoint последних процедур; поиск/пагинация требуют дальнейшего разбора GWT-запросов.
-- ЭТП ГПБ в текущей сети может таймаутиться; этот источник ограничен коротким ожиданием и не мешает Rostender/Tender.Pro.
+- ЭТП ГПБ читается через текущий публичный JSON API; отключённая площадкой RSS-лента больше не используется.
 - Не подает заявки автоматически.
 - Не обходит капчу и закрытые разделы; если RTS блокирует публичные или кабинетные страницы, старый отчет не перезаписывается ошибочной пустотой.
 - RTS cabinet mode читает только уже открытую пользователем выдачу в авторизованном Chrome-профиле.
