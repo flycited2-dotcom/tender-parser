@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ class EatOrderReference:
     deadline: datetime | None
     category: str | None
     region: str | None
+    search_text: str | None = None
 
 
 def build_order_list_request_xml(ext_system: str, request_uid: str | None = None) -> str:
@@ -66,7 +69,11 @@ def build_processing_result_request_xml(ext_system: str, request_uid: str) -> st
     )
 
 
-def parse_order_list_payload(payload: str) -> list[EatOrderReference]:
+def parse_order_list_payload(payload: str | bytes) -> list[EatOrderReference]:
+    json_payload = _try_parse_json(payload)
+    if json_payload is not None:
+        return _parse_json_order_list(json_payload)
+
     root = _parse_xml(payload)
     references: list[EatOrderReference] = []
     for order in _iter_elements(root, "orders"):
@@ -81,12 +88,17 @@ def parse_order_list_payload(payload: str) -> list[EatOrderReference]:
                 deadline=_parse_datetime(_child_text(order, "expireTime")),
                 category=category,
                 region=delivery_place or None,
+                search_text=_joined_text([order_number, category, delivery_place]),
             )
         )
     return references
 
 
-def parse_order_notification_payload(payload: str) -> list[TenderRecord]:
+def parse_order_notification_payload(payload: str | bytes) -> list[TenderRecord]:
+    json_payload = _try_parse_json(payload)
+    if json_payload is not None:
+        return _parse_json_order_notifications(json_payload)
+
     root = _parse_xml(payload)
     records: list[TenderRecord] = []
     notifications = list(_iter_elements(root, "responseOrderNotification"))
@@ -134,6 +146,173 @@ def parse_order_notification_payload(payload: str) -> list[TenderRecord]:
     return records
 
 
+def _try_parse_json(payload: str | bytes):
+    if isinstance(payload, bytes):
+        text = payload.decode("utf-8-sig", errors="replace")
+    else:
+        text = payload.lstrip("\ufeff")
+    if not text.lstrip().startswith(("{", "[")):
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_json_order_list(payload) -> list[EatOrderReference]:
+    orders: list[dict] = []
+    if isinstance(payload, dict):
+        if isinstance(payload.get("orders"), list):
+            orders.extend(item for item in payload["orders"] if isinstance(item, dict))
+        for item in payload.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            orders.extend(order for order in item.get("orders") or [] if isinstance(order, dict))
+
+    references: list[EatOrderReference] = []
+    for order in orders:
+        order_number = _json_text(order.get("regNumber"))
+        if not order_number:
+            continue
+        category_node = order.get("catalogCategoryRef")
+        category = _json_first(category_node, ["fullName", "shortName", "name", "code"])
+        delivery_places = order.get("deliveryPlace") or []
+        if isinstance(delivery_places, dict):
+            delivery_places = [delivery_places]
+        place_parts = []
+        for place in delivery_places:
+            if isinstance(place, dict):
+                place_parts.append(_json_first(place, ["addressString", "address", "region", "deliveryRegion"]))
+        references.append(
+            EatOrderReference(
+                order_number=order_number,
+                deadline=_parse_datetime(_json_text(order.get("expireTime"))),
+                category=_json_text(order.get("regName")) or category or None,
+                region=_joined_text(place_parts) or None,
+                search_text=_joined_text(
+                    [order_number, _json_text(order.get("regName")), category, _joined_text(place_parts)]
+                ),
+            )
+        )
+    return references
+
+
+def _parse_json_order_notifications(payload) -> list[TenderRecord]:
+    if not isinstance(payload, dict):
+        return []
+    notifications = [item for item in payload.get("items") or [] if isinstance(item, dict)]
+    if payload.get("orderNumber"):
+        notifications.append(payload)
+
+    records: list[TenderRecord] = []
+    for notification in notifications:
+        order_number = _json_text(notification.get("orderNumber"))
+        if not order_number:
+            continue
+
+        products = notification.get("product") or notification.get("Product") or []
+        if isinstance(products, dict):
+            products = [products]
+        products = [product for product in products if isinstance(product, dict)]
+        product_names = [
+            _json_first(product, ["name", "productName", "fullName", "shortName"])
+            for product in products
+        ]
+        product_names = [name for name in product_names if name]
+        title = product_names[0] if product_names else f"Закупочная сессия ЕАТ {order_number}"
+
+        customer_node = notification.get("customer") or notification.get("Customer") or {}
+        customer = _json_first(customer_node, ["customerName", "fullName", "shortName", "name"])
+        if not customer and isinstance(customer_node, dict):
+            customer = _json_first(customer_node.get("sellerRef"), ["fullName", "shortName", "name"])
+
+        delivery_nodes = notification.get("deliveryAddress") or notification.get("DeliveryAddress") or []
+        if isinstance(delivery_nodes, dict):
+            delivery_nodes = [delivery_nodes]
+        delivery_parts = []
+        for address in delivery_nodes:
+            if isinstance(address, dict):
+                delivery_parts.append(
+                    _json_first(address, ["addressString", "address", "fullAddress", "region"])
+                )
+        delivery_address = _joined_text(delivery_parts)
+
+        requirement_parts = []
+        for product in products:
+            requirement_parts.extend(
+                _json_text(product.get(key))
+                for key in ("requirements", "description", "characteristics", "specifications")
+            )
+
+        type_purchase = _json_text(notification.get("typePurchase"))
+        state = _json_text(notification.get("stateDescription")) or type_purchase or "Закупочная сессия"
+        raw_text = _joined_text(
+            [title, " ".join(product_names), _joined_text(requirement_parts), customer, delivery_address, state]
+        )
+        records.append(
+            TenderRecord(
+                title=title,
+                url=_json_text(notification.get("wwwReference"))
+                or f"https://agregatoreat.ru/purchase/{order_number}",
+                source=EAT_SOURCE_NAME,
+                tender_number=order_number,
+                customer=customer or None,
+                region=delivery_address or None,
+                price=_parse_float(_json_text(notification.get("maxOrderCost"))),
+                deadline=_parse_datetime(_json_text(notification.get("orderExpireDate"))),
+                status=state,
+                published_at=_parse_datetime(_json_text(notification.get("startDate"))),
+                discovered_at=datetime.now(),
+                raw_text=raw_text,
+            )
+        )
+    return records
+
+
+def _json_first(node, keys: list[str]) -> str:
+    if not isinstance(node, dict):
+        return _json_text(node)
+    for key in keys:
+        value = _json_text(node.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _json_text(value) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return _joined_text(_json_text(item) for item in value)
+    if isinstance(value, dict):
+        return _joined_text(_json_text(item) for item in value.values())
+    return ""
+
+
+def _json_processing_finished(payload: str | bytes) -> bool:
+    parsed = _try_parse_json(payload)
+    return isinstance(parsed, dict) and isinstance(parsed.get("items"), list)
+
+
+def _json_violation_messages(payload: str | bytes) -> list[str]:
+    parsed = _try_parse_json(payload)
+    if not isinstance(parsed, dict) or not parsed.get("violations"):
+        return []
+    messages: list[str] = []
+    for violation in parsed["violations"] if isinstance(parsed["violations"], list) else [parsed["violations"]]:
+        if isinstance(violation, dict):
+            message = _json_first(violation, ["message", "description", "text", "code"])
+        else:
+            message = _json_text(violation)
+        if message:
+            messages.append(message)
+    return messages
+
+
 class EatIntegrationSource:
     def __init__(
         self,
@@ -143,6 +322,8 @@ class EatIntegrationSource:
         auth_header: str | None = None,
         auth_scheme: str | None = None,
         max_details: int | None = None,
+        poll_attempts: int | None = None,
+        poll_delay_seconds: float | None = None,
     ) -> None:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/xml,text/xml,*/*"})
@@ -151,6 +332,12 @@ class EatIntegrationSource:
         self.auth_header = auth_header if auth_header is not None else os.getenv("EAT_AUTH_HEADER", "Authorization")
         self.auth_scheme = auth_scheme if auth_scheme is not None else os.getenv("EAT_AUTH_SCHEME", "Bearer")
         self.max_details = max_details if max_details is not None else int(os.getenv("EAT_MAX_DETAILS", "100"))
+        self.poll_attempts = poll_attempts if poll_attempts is not None else int(os.getenv("EAT_POLL_ATTEMPTS", "5"))
+        self.poll_delay_seconds = (
+            poll_delay_seconds
+            if poll_delay_seconds is not None
+            else float(os.getenv("EAT_POLL_DELAY_SECONDS", "3"))
+        )
 
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
         if not self.api_token or not self.ext_system:
@@ -163,38 +350,91 @@ class EatIntegrationSource:
         )
         references = parse_order_list_payload(list_payload)
         if not references:
+            references = self._poll_processing_result(
+                request_uid,
+                parse_order_list_payload,
+            )
+
+        keyword_values = [keyword.strip().casefold() for keyword in keywords if keyword.strip()]
+        selected_references = references
+        if keyword_values:
+            selected_references = [
+                reference
+                for reference in references
+                if any(
+                    keyword in (reference.search_text or "").casefold()
+                    for keyword in keyword_values
+                )
+            ]
+
+        records: list[TenderRecord] = []
+        detail_errors: list[str] = []
+        for reference in selected_references[: self.max_details]:
+            try:
+                detail_request_uid = str(uuid.uuid4())
+                detail_payload = self._post_xml(
+                    EAT_ORDER_NOTIFICATION_URL,
+                    build_order_notification_request_xml(
+                        reference.order_number,
+                        self.ext_system,
+                        request_uid=detail_request_uid,
+                    ),
+                )
+                detail_records = parse_order_notification_payload(detail_payload)
+                if not detail_records:
+                    detail_records = self._poll_processing_result(
+                        detail_request_uid,
+                        parse_order_notification_payload,
+                    )
+            except SourceFetchError as exc:
+                detail_errors.append(str(exc))
+                continue
+            records.extend(detail_records)
+
+        if selected_references and not records and detail_errors:
+            raise SourceFetchError(f"ЕАТ Березка не вернул карточки закупок: {'; '.join(detail_errors[:3])}")
+        return records or [_reference_to_record(reference) for reference in selected_references[: self.max_details]]
+
+    def _poll_processing_result(self, request_uid: str, parser):
+        for _ in range(max(1, self.poll_attempts)):
+            if self.poll_delay_seconds > 0:
+                time.sleep(self.poll_delay_seconds)
             processing_payload = self._post_xml(
                 EAT_PROCESSING_RESULT_URL,
                 build_processing_result_request_xml(self.ext_system, request_uid=request_uid),
             )
-            references = parse_order_list_payload(processing_payload)
-
-        records: list[TenderRecord] = []
-        detail_errors: list[str] = []
-        for reference in references[: self.max_details]:
-            try:
-                detail_payload = self._post_xml(
-                    EAT_ORDER_NOTIFICATION_URL,
-                    build_order_notification_request_xml(reference.order_number, self.ext_system),
-                )
-            except SourceFetchError as exc:
-                detail_errors.append(str(exc))
-                continue
-            records.extend(parse_order_notification_payload(detail_payload))
-
-        if references and not records and detail_errors:
-            raise SourceFetchError(f"ЕАТ Березка не вернул карточки закупок: {'; '.join(detail_errors[:3])}")
-        return records or [_reference_to_record(reference) for reference in references[: self.max_details]]
+            parsed = parser(processing_payload)
+            if parsed:
+                return parsed
+            if _json_processing_finished(processing_payload):
+                return parsed
+        return []
 
     def _post_xml(self, url: str, payload: str) -> bytes:
         headers = {"Content-Type": "text/xml; charset=utf-8", **self._auth_headers()}
-        try:
-            response = self.session.post(url, data=payload, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
-            if response.status_code in {401, 403}:
-                raise SourceFetchError(f"ЕАТ Березка API отклонил доступ: HTTP {response.status_code}")
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise SourceFetchError(f"ЕАТ Березка API недоступен: {exc}") from exc
+        response = None
+        for attempt in range(3):
+            try:
+                response = self.session.post(url, data=payload, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
+                if response.status_code in {401, 403}:
+                    raise SourceFetchError(f"ЕАТ Березка API отклонил доступ: HTTP {response.status_code}")
+                if response.status_code == 429 and attempt < 2:
+                    retry_after = getattr(response, "headers", {}).get("Retry-After", "")
+                    try:
+                        delay = max(3.0, min(float(retry_after), 60.0))
+                    except (TypeError, ValueError):
+                        delay = 3.0 * (attempt + 1)
+                    time.sleep(delay)
+                    continue
+                response.raise_for_status()
+                break
+            except requests.RequestException as exc:
+                raise SourceFetchError(f"ЕАТ Березка API недоступен: {exc}") from exc
+        if response is None:
+            raise SourceFetchError("ЕАТ Березка API не вернул ответ")
+        violations = _json_violation_messages(response.content)
+        if violations:
+            raise SourceFetchError(f"ЕАТ Березка отклонил запрос: {'; '.join(violations[:3])}")
         # Байты, не text: XML-декларация encoding должна решать сама.
         return response.content
 
@@ -207,7 +447,7 @@ class EatIntegrationSource:
 
 def _reference_to_record(reference: EatOrderReference) -> TenderRecord:
     title = reference.category or f"Закупочная сессия ЕАТ {reference.order_number}"
-    raw_text = _joined_text([title, reference.region, reference.order_number])
+    raw_text = _joined_text([reference.search_text, title, reference.region, reference.order_number])
     return TenderRecord(
         title=title,
         url=f"https://agregatoreat.ru/purchase/{reference.order_number}",
