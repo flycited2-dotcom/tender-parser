@@ -24,8 +24,9 @@ def test_daily_scheduler_accepts_profile_argument() -> None:
 def test_eat_setup_helper_writes_ignored_env_file() -> None:
     text = (ROOT / "Настроить_EAT_env.ps1").read_text(encoding="utf-8")
 
-    assert "EAT_API_TOKEN=$ApiToken" in text
-    assert "EAT_EXT_SYSTEM=$ExtSystem" in text
+    assert "Set-EnvValue -Key 'EAT_API_TOKEN' -Value $ApiToken" in text
+    assert "Set-EnvValue -Key 'EAT_EXT_SYSTEM' -Value $ExtSystem" in text
+    assert "without changing other settings" in text
     assert "check-env" in text
 
 

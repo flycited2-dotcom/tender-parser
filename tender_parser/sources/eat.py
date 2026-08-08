@@ -17,7 +17,7 @@ from tender_parser.sources.rts import SourceFetchError
 EAT_ORDER_LIST_URL = "https://agregatoreat.ru/integration/ecom/rest/api/order/requestOrderList"
 EAT_ORDER_NOTIFICATION_URL = "https://agregatoreat.ru/integration/ecom/rest/api/order/orderNotification"
 EAT_PROCESSING_RESULT_URL = "https://agregatoreat.ru/integration/ecom/rest/api/processingResult"
-EAT_SCHEMA_VERSION = "1.11.0"
+EAT_SCHEMA_VERSION = "2.0.0"
 EAT_SOURCE_NAME = "eat-berezka"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.2"
 
@@ -34,10 +34,10 @@ def build_order_list_request_xml(ext_system: str, request_uid: str | None = None
     request_id = request_uid or str(uuid.uuid4())
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<requestOrderList xmlns="http://agregatoreat.ru/eat/object-types/" '
-        f'xmlns:eat="http://agregatoreat.ru/eat/" Version="{EAT_SCHEMA_VERSION}" '
-        f'RequestUID="{request_id}"><extSystem>{_xml_escape(ext_system)}</extSystem>'
-        f"</requestOrderList>"
+        f'<obj:requestOrderList xmlns:obj="http://agregatoreat.ru/eat/object-types/" '
+        f'xmlns:eat="http://agregatoreat.ru/eat/" eat:Version="{EAT_SCHEMA_VERSION}" '
+        f'eat:RequestUID="{request_id}"><extSystem>{_xml_escape(ext_system)}</extSystem>'
+        f"</obj:requestOrderList>"
     )
 
 
@@ -49,20 +49,20 @@ def build_order_notification_request_xml(
     request_id = request_uid or str(uuid.uuid4())
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<requestOrderNotification xmlns="http://agregatoreat.ru/eat/object-types/" '
-        f'xmlns:eat="http://agregatoreat.ru/eat/" Version="{EAT_SCHEMA_VERSION}" '
-        f'RequestUID="{request_id}"><OrderNumber>{_xml_escape(order_number)}</OrderNumber>'
-        f"<extSystem>{_xml_escape(ext_system)}</extSystem></requestOrderNotification>"
+        f'<obj:requestOrderNotification xmlns:obj="http://agregatoreat.ru/eat/object-types/" '
+        f'xmlns:eat="http://agregatoreat.ru/eat/" eat:Version="{EAT_SCHEMA_VERSION}" '
+        f'eat:RequestUID="{request_id}"><eat:OrderNumber>{_xml_escape(order_number)}</eat:OrderNumber>'
+        f"<extSystem>{_xml_escape(ext_system)}</extSystem></obj:requestOrderNotification>"
     )
 
 
 def build_processing_result_request_xml(ext_system: str, request_uid: str) -> str:
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<requestProcessingResult xmlns="http://agregatoreat.ru/eat/object-types/" '
-        f'xmlns:eat="http://agregatoreat.ru/eat/" Version="{EAT_SCHEMA_VERSION}" '
-        f'RequestUID="{_xml_escape(request_uid)}"><extSystem>{_xml_escape(ext_system)}</extSystem>'
-        f"</requestProcessingResult>"
+        f'<obj:requestProcessingResult xmlns:obj="http://agregatoreat.ru/eat/object-types/" '
+        f'xmlns:eat="http://agregatoreat.ru/eat/" eat:Version="{EAT_SCHEMA_VERSION}" '
+        f'eat:RequestUID="{_xml_escape(request_uid)}"><extSystem>{_xml_escape(ext_system)}</extSystem>'
+        f"</obj:requestProcessingResult>"
     )
 
 
@@ -187,7 +187,7 @@ class EatIntegrationSource:
         return records or [_reference_to_record(reference) for reference in references[: self.max_details]]
 
     def _post_xml(self, url: str, payload: str) -> bytes:
-        headers = {"Content-Type": "application/xml; charset=utf-8", **self._auth_headers()}
+        headers = {"Content-Type": "text/xml; charset=utf-8", **self._auth_headers()}
         try:
             response = self.session.post(url, data=payload, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
             if response.status_code in {401, 403}:
