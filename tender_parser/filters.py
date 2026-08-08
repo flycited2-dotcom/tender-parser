@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from tender_parser.config import CATEGORY_KEYWORDS, MIN_PRICE_RUB, STOP_TERMS
+from tender_parser import config
 from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
 from tender_parser.regions import detect_region
 from tender_parser.text import normalize_text, phrase_stems_match, word_term_matches
@@ -31,7 +31,7 @@ def _first_matching_term(text: str, terms: list[str]) -> str | None:
 
 
 def matching_category(text: str) -> tuple[str | None, list[str]]:
-    for category, terms in CATEGORY_KEYWORDS.items():
+    for category, terms in config.CATEGORY_KEYWORDS.items():
         matches = [normalize_text(term) for term in terms if _category_term_matches(text, term)]
         if matches:
             return category, matches
@@ -123,7 +123,7 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
     subject = _subject_searchable(tender)
 
-    stop_term = _first_matching_term(subject, STOP_TERMS)
+    stop_term = _first_matching_term(subject, config.STOP_TERMS)
     if stop_term:
         return _exclude(tender, f"стоп-тема: {stop_term}")
 
@@ -138,8 +138,8 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if tender.region and not region:
         return _exclude(tender, "регион не целевой")
 
-    if tender.price is not None and tender.price < MIN_PRICE_RUB:
-        return _exclude(tender, f"сумма меньше {MIN_PRICE_RUB}")
+    if tender.price is not None and tender.price < config.MIN_PRICE_RUB:
+        return _exclude(tender, f"сумма меньше {config.MIN_PRICE_RUB}")
 
     missing: list[str] = []
     if tender.deadline is None:

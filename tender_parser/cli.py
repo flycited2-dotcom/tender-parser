@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
 from typing import Literal, Protocol, Sequence
 
-from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_TERMS
+from tender_parser import config
 from tender_parser.dedup import deduplicate_tenders
 from tender_parser.document_downloader import DocumentDownloadConfig, EisDocumentDownloader
 from tender_parser.documents import DocumentAnalyzer
@@ -29,6 +30,7 @@ from tender_parser.run_report import (
     load_previous_counts,
     load_previous_profile,
 )
+from tender_parser.search_config import load_and_apply_search_config
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
@@ -87,7 +89,11 @@ def ensure_dirs(base_dir: Path) -> tuple[Path, Path]:
 def _all_keywords() -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
-    term_groups = [*CATEGORY_KEYWORDS.values(), BROAD_SEARCH_TERMS, REGION_TERMS]
+    term_groups = [
+        *config.CATEGORY_KEYWORDS.values(),
+        config.BROAD_SEARCH_TERMS,
+        config.REGION_TERMS,
+    ]
     for terms in term_groups:
         for term in terms:
             normalized = term.strip()
@@ -208,6 +214,20 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         from tender_parser.browser.rts_watcher import RtsCabinetWatcher
 
         return RtsCabinetWatcher(data_dir / "tenders.db").run_forever()
+    configured_path = os.getenv("SEARCH_CONFIG_PATH", "").strip()
+    search_config_path = Path(configured_path) if configured_path else base_dir / "config" / "Настройки_поиска.xlsx"
+    if not search_config_path.is_absolute():
+        search_config_path = base_dir / search_config_path
+    search_config_status = load_and_apply_search_config(search_config_path)
+    if search_config_status.status == "loaded":
+        print(f"Словарь Excel: загружен ({search_config_status.detail})")
+    elif search_config_status.status == "error":
+        print(
+            f"Словарь Excel: ошибка ({search_config_status.detail}); "
+            "используется встроенный словарь"
+        )
+    else:
+        print("Словарь Excel: файл не найден; используется встроенный словарь")
     if args.dry_run:
         return 0
 

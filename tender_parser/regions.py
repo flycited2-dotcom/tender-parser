@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from tender_parser import config
 from tender_parser.text import normalize_text
 
 
@@ -87,6 +88,11 @@ def detect_region(text: str | None) -> str | None:
             suffix = f"(?!{guard})" if guard else ""
             if re.search(rf"(?<![\w]){re.escape(variant)}{suffix}", normalized):
                 return canonical
+    # Пользовательские регионы из Excel поддерживаются по полному названию.
+    for configured_region in config.SEARCH_REGION_TERMS:
+        variant = normalize_text(configured_region)
+        if variant and re.search(rf"(?<![\w]){re.escape(variant)}(?![\w])", normalized):
+            return configured_region
     return None
 
 
