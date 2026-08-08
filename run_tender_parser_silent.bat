@@ -15,4 +15,6 @@ if "%TENDER_PARSER_PROFILE%"=="" set "TENDER_PARSER_PROFILE=fast"
 echo [%date% %time%] Start >> "logs\daily.log"
 echo [%date% %time%] Profile %TENDER_PARSER_PROFILE% >> "logs\daily.log"
 python -m tender_parser run --profile %TENDER_PARSER_PROFILE% >> "logs\daily.log" 2>&1
-echo [%date% %time%] Finish, exit code %errorlevel% >> "logs\daily.log"
+set "parser_exit_code=%errorlevel%"
+echo [%date% %time%] Finish, exit code %parser_exit_code% >> "logs\daily.log"
+exit /b %parser_exit_code%

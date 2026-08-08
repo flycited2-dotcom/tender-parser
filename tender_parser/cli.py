@@ -383,7 +383,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
             f"уже было {download_report.skipped_count}, ошибок {len(download_report.errors)}"
         )
     print(f"Отчет источников: {report_path}")
-    return 0
+    return 2 if notification_result.status == "error" else 0
 
 
 def main() -> int:

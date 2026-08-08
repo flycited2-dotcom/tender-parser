@@ -8,18 +8,31 @@ param(
 )
 
 $projectDirectory = Split-Path -Parent $PSCommandPath
-$launcherPath = Join-Path $projectDirectory 'run_tender_parser_silent.bat'
+$runnerPath = Join-Path $projectDirectory 'run_tender_parser_resilient.ps1'
 
-if (-not (Test-Path -LiteralPath $launcherPath)) {
-    throw "Silent launcher not found: $launcherPath"
+if (-not (Test-Path -LiteralPath $runnerPath)) {
+    throw "Resilient runner not found: $runnerPath"
 }
 
-$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\cmd.exe" -Argument "/c `"set TENDER_PARSER_PROFILE=$Profile&& `"$launcherPath`"`""
-$trigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact($Time, 'HH:mm', $null))
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RunOnlyIfNetworkAvailable
-$description = "Daily tender collection and CRM queue refresh. Profile: $Profile."
+$powershellPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+$actionArguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$runnerPath`" -Profile $Profile -ScheduleTime $Time"
+$action = New-ScheduledTaskAction -Execute $powershellPath -Argument $actionArguments
+$dailyTrigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact($Time, 'HH:mm', $null))
+$logonUser = "$env:USERDOMAIN\$env:USERNAME"
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $logonUser
+$logonTrigger.Delay = 'PT2M'
+$settings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -RunOnlyIfNetworkAvailable `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 15) `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 3) `
+    -MultipleInstances IgnoreNew `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries
+$description = "Daily tender collection with catch-up at logon and retries. Profile: $Profile."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Create or update daily task at $Time")) {
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description $description -Force | Out-Null
-    Write-Host "Task '$TaskName' is scheduled daily at $Time with profile '$Profile'."
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($dailyTrigger, $logonTrigger) -Settings $settings -Description $description -Force | Out-Null
+    Write-Host "Task '$TaskName' is scheduled daily at $Time, catches up at logon, and retries failures three times."
 }

@@ -6,6 +6,7 @@ from openpyxl import load_workbook
 
 from tender_parser.cli import _all_keywords, build_default_source, build_source_for_profile, run
 from tender_parser.models import TenderRecord
+from tender_parser.notifications import NotificationResult
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
 from tender_parser.sources.eat import EatIntegrationSource
@@ -273,6 +274,28 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert "Поставка МФУ" in (tmp_path / "exports" / "notification.txt").read_text(
         encoding="utf-8"
     )
+
+
+def test_run_returns_failure_when_telegram_delivery_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FailingNotifier:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def notify(self, tenders: list[TenderRecord]) -> NotificationResult:
+            return NotificationResult(status="error", detail="ConnectionError")
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "test-chat")
+    monkeypatch.setattr("tender_parser.cli.TelegramNotifier", FailingNotifier)
+
+    result = run(
+        ["--base-dir", str(tmp_path), "--now", "2026-05-19T12:00:00"],
+        source=FakeSource(),
+    )
+
+    assert result == 2
 
 
 def test_run_preserves_new_queue_when_export_fails(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ def test_silent_launcher_defaults_to_fast_profile() -> None:
 
     assert "set \"TENDER_PARSER_PROFILE=fast\"" in text
     assert "python -m tender_parser run --profile %TENDER_PARSER_PROFILE%" in text
+    assert "exit /b %parser_exit_code%" in text
 
 
 def test_daily_scheduler_accepts_profile_argument() -> None:
@@ -18,7 +19,18 @@ def test_daily_scheduler_accepts_profile_argument() -> None:
 
     assert "[ValidateSet('full', 'fast', 'local', 'rts')]" in text
     assert "[string]$Profile = 'fast'" in text
-    assert "TENDER_PARSER_PROFILE=$Profile" in text
+    assert "-Profile $Profile -ScheduleTime $Time" in text
+    assert "New-ScheduledTaskTrigger -AtLogOn" in text
+    assert "-RestartCount 3" in text
+
+
+def test_resilient_runner_guards_duplicate_and_tracks_success() -> None:
+    text = (ROOT / "run_tender_parser_resilient.ps1").read_text(encoding="utf-8")
+
+    assert "TenderParserDailyGuard" in text
+    assert "scheduler_state.json" in text
+    assert "Successful cycle already exists" in text
+    assert "Task Scheduler will retry" in text
 
 
 def test_eat_setup_helper_writes_ignored_env_file() -> None:
