@@ -11,6 +11,9 @@ from tender_parser.text import normalize_text
 
 SOURCE_PRIORITY = {
     "eis-zakupki": 100,
+    "roseltorg": 95,
+    "zakazrf": 95,
+    "sberbank-ast": 95,
     "eat-berezka": 90,
     "tender-pro": 80,
     "etp-gpb": 70,

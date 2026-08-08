@@ -12,10 +12,13 @@ from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
 from tender_parser.sources.etp_gpb import EtpGpbApiSource
 from tender_parser.sources.rostender import RostenderSource
+from tender_parser.sources.roseltorg import RoseltorgSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.torgi82 import Torgi82Source
+from tender_parser.sources.sberbank_ast import SberbankAstSource
+from tender_parser.sources.zakazrf import ZakazRfSource
 
 
 class FakeSource:
@@ -166,13 +169,16 @@ def test_build_default_source_uses_composite_source() -> None:
     first_layer = source.sources[0]
     assert isinstance(first_layer, CompositeSource)
     assert isinstance(first_layer.sources[0], EtpGpbApiSource)
-    assert isinstance(first_layer.sources[1], TenderProSource)
-    assert isinstance(first_layer.sources[2], Torgi82Source)
-    assert isinstance(first_layer.sources[3], B2BCenterSource)
-    assert isinstance(first_layer.sources[4], EatIntegrationSource)
-    assert isinstance(first_layer.sources[5], EisZakupkiSource)
-    assert isinstance(first_layer.sources[6], RostenderSource)
-    assert isinstance(first_layer.sources[7], RtsPublicSource)
+    assert isinstance(first_layer.sources[1], RoseltorgSource)
+    assert isinstance(first_layer.sources[2], ZakazRfSource)
+    assert isinstance(first_layer.sources[3], SberbankAstSource)
+    assert isinstance(first_layer.sources[4], TenderProSource)
+    assert isinstance(first_layer.sources[5], Torgi82Source)
+    assert isinstance(first_layer.sources[6], B2BCenterSource)
+    assert isinstance(first_layer.sources[7], EatIntegrationSource)
+    assert isinstance(first_layer.sources[8], EisZakupkiSource)
+    assert isinstance(first_layer.sources[9], RostenderSource)
+    assert isinstance(first_layer.sources[10], RtsPublicSource)
     assert len(source.sources) == 1
 
 
@@ -183,6 +189,9 @@ def test_build_fast_profile_includes_eis_after_native_tls_fix() -> None:
     names = [item.__class__.__name__ for item in source.sources[0].sources]
     assert names == [
         "EtpGpbApiSource",
+        "RoseltorgSource",
+        "ZakazRfSource",
+        "SberbankAstSource",
         "TenderProSource",
         "Torgi82Source",
         "B2BCenterSource",

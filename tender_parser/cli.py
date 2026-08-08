@@ -39,10 +39,13 @@ from tender_parser.sources.etp_gpb import EtpGpbApiSource
 from tender_parser.sources.imports import ImportFolderSource
 from tender_parser.rts_accumulator import RtsAccumulator, RtsAccumulatorSource
 from tender_parser.sources.rostender import RostenderSource
+from tender_parser.sources.roseltorg import RoseltorgSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.torgi82 import Torgi82Source
+from tender_parser.sources.sberbank_ast import SberbankAstSource
+from tender_parser.sources.zakazrf import ZakazRfSource
 from tender_parser.storage import TenderStorage
 
 
@@ -120,6 +123,9 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
                 CompositeSource(
                     [
                         EtpGpbApiSource(),
+                        RoseltorgSource(),
+                        ZakazRfSource(),
+                        SberbankAstSource(),
                         TenderProSource(),
                         Torgi82Source(),
                         B2BCenterSource(),
@@ -136,6 +142,9 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
             CompositeSource(
                 [
                     EtpGpbApiSource(),
+                    RoseltorgSource(),
+                    ZakazRfSource(),
+                    SberbankAstSource(),
                     TenderProSource(),
                     Torgi82Source(),
                     B2BCenterSource(),
