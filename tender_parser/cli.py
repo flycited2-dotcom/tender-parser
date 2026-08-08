@@ -17,10 +17,12 @@ from tender_parser.exporters.excel import export_excel, load_manual_selections, 
 from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.filters import evaluate_tender
+from tender_parser.google_sheets import GoogleSheetsConfig, GoogleSheetsRegistry
 from tender_parser.models import TenderRecord
 from tender_parser.notifications import (
     NotificationConfig,
     TelegramNotifier,
+    build_daily_run_summary,
     export_notification_digest,
 )
 from tender_parser.run_report import (
@@ -216,6 +218,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     base_dir = Path(args.base_dir).resolve()
     data_dir, exports_dir = ensure_dirs(base_dir)
     load_env_file(base_dir / ".env")
+    load_env_file(base_dir / ".env.local")
     if args.command == "check-env":
         return _check_env_command(base_dir)
     if args.command == "rts-add-page":
@@ -334,6 +337,15 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         new_count=len(new_actionable),
         profile=args.profile,
     )
+    google_result = GoogleSheetsRegistry(
+        GoogleSheetsConfig.from_env(base_dir)
+    ).sync(
+        actionable,
+        new_actionable,
+        source_result,
+        generated_at=current_time,
+        profile=args.profile,
+    )
     notification_config = NotificationConfig.from_env()
     storage.upsert_many(
         evaluated,
@@ -350,6 +362,30 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         storage.mark_notification_error(
             [tender.unique_key for tender in pending], notification_result.detail
         )
+
+    daily_result = None
+    document_result = None
+    notifier = TelegramNotifier(notification_config)
+    if notification_config.enabled and notification_config.send_daily_report:
+        source_ok = sum(
+            item.status in {"ok", "empty"} for item in source_result.health
+        )
+        summary_text = build_daily_run_summary(
+            active_count=len(actionable),
+            new_count=len(new_actionable),
+            source_ok=source_ok,
+            source_total=len(source_result.health),
+            google_status=google_result.status,
+        )
+        daily_result = notifier.send_text(summary_text, buttons=True)
+        if notification_config.send_excel:
+            document_result = notifier.send_document(
+                excel_path,
+                caption=(
+                    f"Отчёт за {current_time.strftime('%d.%m.%Y')}: "
+                    f"новых {len(new_actionable)}, актуальных {len(actionable)}"
+                ),
+            )
 
     print(f"Найдено: {len(raw_tenders)}")
     print(f"После дедупликации: {len(deduplication.tenders)}")
@@ -375,6 +411,11 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         print(f"Telegram: ошибка {notification_result.detail}; очередь сохранена")
     elif notification_result.status == "disabled":
         print("Telegram: не настроен")
+    if daily_result is not None:
+        print(f"Telegram-сводка: {daily_result.status} {daily_result.detail}")
+    if document_result is not None:
+        print(f"Telegram-Excel: {document_result.status} {document_result.detail}")
+    print(f"Google Sheets: {google_result.status} {google_result.detail}")
     if download_report.status == "disabled":
         print("Документы ЕИС: автозагрузка отключена")
     else:
@@ -383,7 +424,11 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
             f"уже было {download_report.skipped_count}, ошибок {len(download_report.errors)}"
         )
     print(f"Отчет источников: {report_path}")
-    return 2 if notification_result.status == "error" else 0
+    delivery_failed = any(
+        result is not None and result.status == "error"
+        for result in [notification_result, daily_result, document_result]
+    )
+    return 2 if delivery_failed or google_result.status == "error" else 0
 
 
 def main() -> int:

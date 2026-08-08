@@ -7,6 +7,7 @@ from tender_parser.models import TenderRecord
 from tender_parser.notifications import (
     NotificationConfig,
     TelegramNotifier,
+    build_daily_run_summary,
     build_notification_digest,
     export_notification_digest,
 )
@@ -98,3 +99,26 @@ def test_telegram_notifier_returns_sanitized_error() -> None:
     assert result.sent_count == 0
     assert "secret-token" not in result.detail
     assert "HTTPError" in result.detail
+
+
+def test_daily_summary_and_google_button_are_sent() -> None:
+    session = FakeSession()
+    config = NotificationConfig(
+        bot_token="secret-token",
+        chat_id="123",
+        spreadsheet_url="https://docs.google.com/spreadsheets/d/test/edit",
+    )
+    summary = build_daily_run_summary(
+        active_count=42,
+        new_count=3,
+        source_ok=9,
+        source_total=10,
+        google_status="synced",
+    )
+
+    result = TelegramNotifier(config, session=session).send_text(summary, buttons=True)
+
+    assert result.status == "sent"
+    payload = session.calls[0][1]
+    assert "Новых закупок: 3" in str(payload["text"])
+    assert "Открыть Google-таблицу" in str(payload["reply_markup"])

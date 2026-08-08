@@ -33,6 +33,16 @@ def test_resilient_runner_guards_duplicate_and_tracks_success() -> None:
     assert "Task Scheduler will retry" in text
 
 
+def test_google_and_telegram_setup_helpers_are_present() -> None:
+    google_text = (ROOT / "Настроить_Google_Sheets.ps1").read_text(encoding="utf-8")
+    telegram_text = (ROOT / "Настроить_Telegram_бот.ps1").read_text(encoding="utf-8")
+
+    assert "service_account" in google_text
+    assert "GOOGLE_SHEETS_ENABLED" in google_text
+    assert "New-ScheduledTaskTrigger -AtLogOn" in telegram_text
+    assert "RestartCount 10" in telegram_text
+
+
 def test_eat_setup_helper_writes_ignored_env_file() -> None:
     text = (ROOT / "Настроить_EAT_env.ps1").read_text(encoding="utf-8")
 

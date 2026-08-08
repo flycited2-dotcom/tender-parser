@@ -1,4 +1,5 @@
 beautifulsoup4==4.12.3
+google-auth==2.56.3
 openpyxl==3.1.5
 pypdf==6.14.2
 pytest==8.3.4

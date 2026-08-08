@@ -15,5 +15,6 @@ logs/
 browser_profiles/
 .worktrees/
 diagnostics/
+secrets/
 tmp/
 outputs/
