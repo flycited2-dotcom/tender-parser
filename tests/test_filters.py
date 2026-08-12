@@ -97,7 +97,7 @@ def test_evaluate_tender_marks_missing_deadline_as_review_priority() -> None:
     assert result.review_priority == "review"
 
 
-def test_evaluate_tender_marks_b2b_missing_region_and_price_as_wide() -> None:
+def test_evaluate_tender_excludes_unscoped_b2b_without_target_region() -> None:
     result = evaluate_tender(
         make_tender(
             source="b2b-center",
@@ -109,9 +109,72 @@ def test_evaluate_tender_marks_b2b_missing_region_and_price_as_wide() -> None:
         now=NOW,
     )
 
-    assert result.filter_status == "review"
-    assert result.match_confidence == "ручная проверка"
-    assert result.review_priority == "wide"
+    assert result.filter_status == "excluded"
+    assert result.exclude_reason == "целевой регион не подтвержден"
+
+
+def test_evaluate_tender_keeps_b2b_when_delivery_to_target_is_in_text() -> None:
+    result = evaluate_tender(
+        make_tender(
+            source="b2b-center",
+            title="Поставка серверного оборудования",
+            region=None,
+            raw_text="Заказчик находится в Москве. Адрес места поставки: г. Севастополь.",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert "регион: севастополь" in result.include_reason.lower()
+
+
+def test_evaluate_tender_keeps_target_delivery_over_customer_region_field() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка МФУ",
+            region="г. Москва",
+            raw_text="Заказчик: Москва. Адрес поставки: Республика Крым, г. Ялта.",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "matched"
+    assert (
+        "регион: республика крым" in result.include_reason.lower()
+        or "регион: крым" in result.include_reason.lower()
+    )
+
+
+def test_evaluate_tender_excludes_explicit_non_target_delivery_without_region_field() -> None:
+    result = evaluate_tender(
+        make_tender(
+            source="test",
+            title="Поставка офисной бумаги",
+            region=None,
+            raw_text="Доставка до склада заказчика в г. Магадан.",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert result.exclude_reason == "регион не целевой: магадан"
+
+
+def test_evaluate_tender_does_not_let_page_boilerplate_override_declared_region() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка металлических шкафов",
+            region="Амурская область",
+            raw_text=(
+                "ГАУ Амурской области. Фильтр регионов: Республика Крым, "
+                "Севастополь, Запорожская область, Херсонская область"
+            ),
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert result.exclude_reason == "регион не целевой"
 
 
 def test_evaluate_tender_excludes_known_non_target_region() -> None:

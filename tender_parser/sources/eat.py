@@ -6,8 +6,9 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Iterable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from typing import Callable, Iterable
 
 import requests
 
@@ -313,7 +314,39 @@ def _json_violation_messages(payload: str | bytes) -> list[str]:
     return messages
 
 
+def _rate_limit_delay(
+    headers: object,
+    *,
+    attempt: int,
+    backoff_seconds: float,
+    max_delay_seconds: float,
+) -> float:
+    """Retry-After (секунды или HTTP-date), иначе экспоненциальный backoff."""
+    retry_after = ""
+    if hasattr(headers, "get"):
+        retry_after = str(headers.get("Retry-After", "")).strip()  # type: ignore[attr-defined]
+
+    delay: float | None = None
+    if retry_after:
+        try:
+            delay = max(0.0, float(retry_after))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                delay = None
+
+    if delay is None:
+        delay = backoff_seconds * (2**attempt)
+    return min(delay, max_delay_seconds)
+
+
 class EatIntegrationSource:
+    source_name = EAT_SOURCE_NAME
+
     def __init__(
         self,
         session: requests.Session | None = None,
@@ -324,6 +357,10 @@ class EatIntegrationSource:
         max_details: int | None = None,
         poll_attempts: int | None = None,
         poll_delay_seconds: float | None = None,
+        rate_limit_retries: int | None = None,
+        rate_limit_backoff_seconds: float | None = None,
+        rate_limit_max_delay_seconds: float | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/xml,text/xml,*/*"})
@@ -338,6 +375,25 @@ class EatIntegrationSource:
             if poll_delay_seconds is not None
             else float(os.getenv("EAT_POLL_DELAY_SECONDS", "3"))
         )
+        self.rate_limit_retries = max(
+            0,
+            rate_limit_retries
+            if rate_limit_retries is not None
+            else int(os.getenv("EAT_RATE_LIMIT_RETRIES", "3")),
+        )
+        self.rate_limit_backoff_seconds = max(
+            0.0,
+            rate_limit_backoff_seconds
+            if rate_limit_backoff_seconds is not None
+            else float(os.getenv("EAT_RATE_LIMIT_BACKOFF_SECONDS", "5")),
+        )
+        self.rate_limit_max_delay_seconds = max(
+            0.0,
+            rate_limit_max_delay_seconds
+            if rate_limit_max_delay_seconds is not None
+            else float(os.getenv("EAT_RATE_LIMIT_MAX_DELAY_SECONDS", "60")),
+        )
+        self._sleep = sleeper or time.sleep
 
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
         if not self.api_token or not self.ext_system:
@@ -398,7 +454,7 @@ class EatIntegrationSource:
     def _poll_processing_result(self, request_uid: str, parser):
         for _ in range(max(1, self.poll_attempts)):
             if self.poll_delay_seconds > 0:
-                time.sleep(self.poll_delay_seconds)
+                self._sleep(self.poll_delay_seconds)
             processing_payload = self._post_xml(
                 EAT_PROCESSING_RESULT_URL,
                 build_processing_result_request_xml(self.ext_system, request_uid=request_uid),
@@ -413,18 +469,24 @@ class EatIntegrationSource:
     def _post_xml(self, url: str, payload: str) -> bytes:
         headers = {"Content-Type": "text/xml; charset=utf-8", **self._auth_headers()}
         response = None
-        for attempt in range(3):
+        for attempt in range(self.rate_limit_retries + 1):
             try:
                 response = self.session.post(url, data=payload, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
                 if response.status_code in {401, 403}:
                     raise SourceFetchError(f"ЕАТ Березка API отклонил доступ: HTTP {response.status_code}")
-                if response.status_code == 429 and attempt < 2:
-                    retry_after = getattr(response, "headers", {}).get("Retry-After", "")
-                    try:
-                        delay = max(3.0, min(float(retry_after), 60.0))
-                    except (TypeError, ValueError):
-                        delay = 3.0 * (attempt + 1)
-                    time.sleep(delay)
+                if response.status_code == 429:
+                    if attempt >= self.rate_limit_retries:
+                        raise SourceFetchError(
+                            "ЕАТ Березка ограничил частоту запросов: HTTP 429; "
+                            "лимит повторов исчерпан, следующий запуск повторит источник"
+                        )
+                    delay = _rate_limit_delay(
+                        getattr(response, "headers", {}),
+                        attempt=attempt,
+                        backoff_seconds=self.rate_limit_backoff_seconds,
+                        max_delay_seconds=self.rate_limit_max_delay_seconds,
+                    )
+                    self._sleep(delay)
                     continue
                 response.raise_for_status()
                 break

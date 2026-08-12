@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from typing import Iterable
+
+from tender_parser.models import TenderRecord
+
+
+CUSTOMER_HEADERS = [
+    "Ключ организации",
+    "Организация",
+    "Тип",
+    "Регион",
+    "ИНН",
+    "Юридический адрес",
+    "Фактический / почтовый адрес",
+    "Общий e-mail",
+    "Телефон",
+    "Контактное лицо / должность",
+    "Официальный сайт",
+    "Источник контактов",
+    "Закупка-основание",
+    "Дата проверки",
+    "Статус контакта",
+    "Примечание",
+]
+
+CONTACT_STATUS_DEFAULT = "Нужно проверить"
+CONTACT_STATUSES = {
+    "Новый",
+    "Нужно проверить",
+    "Проверен",
+    "Готов к обращению",
+    "Не писать",
+    "Отписка",
+}
+
+_TARGET_REGIONS = (
+    ("Республика Крым", ("республика крым", "крым", "симферопол", "керч", "ялт", "евпатори")),
+    ("Севастополь", ("севастопол",)),
+    ("Запорожская область", ("запорож", "мелитопол", "бердянск", "энергодар")),
+    ("Херсонская область", ("херсон", "геническ", "новая каховка", "скадовск")),
+)
+
+_PUBLIC_MARKERS = (
+    "государственн",
+    "муниципальн",
+    "бюджетн",
+    "казенн",
+    "автономн",
+    "администрац",
+    "правительств",
+    "министерств",
+    "департамент",
+    "управление",
+    "казначейств",
+    "верховный суд",
+    "городской суд",
+    "районный суд",
+    "фгбу",
+    "фку",
+    "фгбоу",
+    "фгаоу",
+    "фгуп",
+    "гбу",
+    "гку",
+    "гау",
+    "гуп",
+    "мбу",
+    "мку",
+    "муп",
+    "мбоу",
+    "гбоу",
+)
+
+
+def build_customer_registry(
+    tenders: Iterable[TenderRecord],
+    existing_rows: list[list[object]],
+) -> list[list[object]]:
+    """Merge public-sector tender customers into a manually enrichable CRM table."""
+
+    existing = {
+        str(row[0]): _pad(row)
+        for row in existing_rows
+        if row and str(row[0] or "").strip()
+    }
+    by_key: dict[str, TenderRecord] = {}
+    for tender in tenders:
+        if not tender.customer or not is_public_customer(tender.customer):
+            continue
+        region = customer_region(tender)
+        if not region:
+            continue
+        key = organization_key(_clean_name(tender.customer))
+        current = by_key.get(key)
+        if current is None or _candidate_score(tender) > _candidate_score(current):
+            by_key[key] = tender
+
+    result: dict[str, list[object]] = dict(existing)
+    for key, tender in by_key.items():
+        previous = existing.get(key, [""] * len(CUSTOMER_HEADERS))
+        row = _pad(previous)
+        row[0] = key
+        row[1] = _clean_name(tender.customer or "")
+        row[2] = organization_type(str(row[1]))
+        row[3] = customer_region(tender)
+        row[12] = tender.url
+        if not row[14] or str(row[14]) not in CONTACT_STATUSES:
+            row[14] = CONTACT_STATUS_DEFAULT
+        result[key] = row
+
+    return sorted(
+        result.values(),
+        key=lambda row: (str(row[3] or ""), str(row[1] or "").casefold()),
+    )
+
+
+def organization_key(name: str) -> str:
+    normalized = re.sub(r"[^0-9a-zа-яё]+", "", name.casefold())
+    return normalized[:180]
+
+
+def is_public_customer(name: str) -> bool:
+    normalized = " ".join(name.casefold().replace("ё", "е").split())
+    return bool(normalized) and any(marker in normalized for marker in _PUBLIC_MARKERS)
+
+
+def organization_type(name: str) -> str:
+    value = name.casefold().replace("ё", "е")
+    if "фгуп" in value or "гуп" in value or "муп" in value or "унитарн" in value:
+        return "Государственное / муниципальное предприятие"
+    if any(marker in value for marker in ("администрац", "правительств", "министерств", "департамент", "управление")):
+        return "Орган власти"
+    if re.search(r"\bсуд(?:а|у|ом|е)?\b", value):
+        return "Суд"
+    if any(marker in value for marker in ("фгбоу", "фгаоу", "гбоу", "мбоу", "образовательн")):
+        return "Образовательное учреждение"
+    if "казенн" in value or any(marker in value for marker in ("фку", "гку", "мку")):
+        return "Казённое учреждение"
+    if "автономн" in value or "гау" in value:
+        return "Автономное учреждение"
+    return "Бюджетное учреждение"
+
+
+def customer_region(tender: TenderRecord) -> str:
+    # Для CRM используем только явное поле региона/доказательство адреса доставки.
+    # include_reason намеренно не берём: ошибочное ключевое совпадение не должно
+    # превращать заказчика из другого субъекта в крымского.
+    evidence = " ".join(
+        part for part in (tender.region or "", tender.delivery_region_evidence or "") if part
+    ).casefold().replace("ё", "е")
+    matched = [label for label, aliases in _TARGET_REGIONS if any(alias in evidence for alias in aliases)]
+    return ", ".join(matched)
+
+
+def compact_tender_region(tender: TenderRecord) -> str:
+    region = customer_region(tender)
+    if region:
+        return region
+    raw = " ".join((tender.region or "").split())
+    return raw if len(raw) <= 120 else f"{raw[:117].rstrip()}…"
+
+
+def _candidate_score(tender: TenderRecord) -> tuple[int, datetime]:
+    return (
+        int(bool(tender.customer)) + int(bool(tender.region)) + int(bool(tender.url)),
+        tender.discovered_at or datetime.min,
+    )
+
+
+def _clean_name(value: str) -> str:
+    cleaned = " ".join(value.split())
+    # EIS highlights search matches with inline markup. Extracted text can
+    # split a geographical word immediately before its ending.
+    return re.sub(
+        r"\b(РЕСПУБЛИК|ОБЛАСТ|СЕВАСТОПОЛ|ЗАПОРОЖСК|КРЫМСК)\s+(И|Я|ОЙ|ИЙ)\b",
+        lambda match: f"{match.group(1)}{match.group(2)}",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+
+def _pad(row: list[object]) -> list[object]:
+    return [*row[: len(CUSTOMER_HEADERS)], *([""] * max(0, len(CUSTOMER_HEADERS) - len(row)))]

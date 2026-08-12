@@ -2,6 +2,8 @@ from datetime import datetime
 import json
 import xml.etree.ElementTree as ET
 
+import pytest
+
 from tender_parser.sources.eat import (
     _parse_xml,
     EatIntegrationSource,
@@ -11,6 +13,7 @@ from tender_parser.sources.eat import (
     parse_order_list_payload,
     parse_order_notification_payload,
 )
+from tender_parser.sources.rts import SourceFetchError
 
 
 ORDER_LIST_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
@@ -195,10 +198,13 @@ def test_parse_current_json_order_notification_payload() -> None:
 
 
 class Response:
-    def __init__(self, text: str, status_code: int = 200) -> None:
+    def __init__(
+        self, text: str, status_code: int = 200, headers: dict[str, str] | None = None
+    ) -> None:
         self.text = text
         self.content = text.encode("utf-8")
         self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         return None
@@ -297,3 +303,58 @@ def test_fetch_keywords_filters_json_list_before_loading_details() -> None:
         "requestOrderList",
         "processingResult",
     ]
+
+
+class RateLimitedSession:
+    def __init__(self, responses: list[Response]) -> None:
+        self.headers: dict[str, str] = {}
+        self.responses = responses
+        self.calls = 0
+
+    def post(self, url: str, data: str, headers: dict[str, str], timeout: int) -> Response:
+        self.calls += 1
+        return self.responses.pop(0)
+
+
+def test_eat_rate_limit_honors_retry_after_then_recovers() -> None:
+    sleeps: list[float] = []
+    session = RateLimitedSession(
+        [
+            Response("rate limited", 429, {"Retry-After": "9"}),
+            Response(ORDER_LIST_RESPONSE),
+        ]
+    )
+    source = EatIntegrationSource(
+        session=session,
+        api_token="secret-token",
+        ext_system="EXT-CRM",
+        rate_limit_retries=2,
+        sleeper=sleeps.append,
+    )
+
+    payload = source._post_xml("https://example.test/eat", "<request/>")
+
+    assert payload == ORDER_LIST_RESPONSE.encode("utf-8")
+    assert session.calls == 2
+    assert sleeps == [9.0]
+
+
+def test_eat_rate_limit_uses_exponential_backoff_and_fails_explicitly() -> None:
+    sleeps: list[float] = []
+    session = RateLimitedSession(
+        [Response("rate limited", 429), Response("still limited", 429), Response("no", 429)]
+    )
+    source = EatIntegrationSource(
+        session=session,
+        api_token="secret-token",
+        ext_system="EXT-CRM",
+        rate_limit_retries=2,
+        rate_limit_backoff_seconds=4,
+        sleeper=sleeps.append,
+    )
+
+    with pytest.raises(SourceFetchError, match="HTTP 429.*лимит повторов"):
+        source._post_xml("https://example.test/eat", "<request/>")
+
+    assert session.calls == 3
+    assert sleeps == [4, 8]

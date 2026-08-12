@@ -2,17 +2,22 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote_plus
 
+import pytest
+
 from tender_parser.models import TenderRecord
 from tender_parser.sources.b2b_center import (
     B2BCenterSource,
     build_search_url,
+    is_blocked_page,
     is_detail_candidate,
     parse_detail_page,
     parse_market_page,
 )
+from tender_parser.sources.rts import SourceBlockedError
 
 SAMPLE_HTML = Path("tests/fixtures/b2b_center_market_sample.html").read_text(encoding="utf-8")
 DETAIL_HTML = Path("tests/fixtures/b2b_center_detail_sample.html").read_text(encoding="utf-8")
+CAPTCHA_HTML = "<html><h1>Проверка безопасности</h1><p>Подтвердите, что вы не робот</p></html>"
 
 
 def test_build_search_url_uses_b2b_public_keyword_contract() -> None:
@@ -39,6 +44,14 @@ def test_parse_market_page_extracts_public_tenders() -> None:
     assert "Офисная техника" in tenders[0].raw_text
 
 
+def test_is_blocked_page_detects_captcha_but_prefers_real_results() -> None:
+    assert is_blocked_page("https://www.b2b-center.ru/captcha/", "") is True
+    assert is_blocked_page("https://www.b2b-center.ru/market/", CAPTCHA_HTML) is True
+    assert is_blocked_page(
+        "https://www.b2b-center.ru/market/", SAMPLE_HTML + "<!-- captcha -->"
+    ) is False
+
+
 class MarketResponse:
     text = SAMPLE_HTML
 
@@ -54,6 +67,53 @@ class MarketSession:
     def get(self, url: str, timeout: int) -> MarketResponse:
         self.requested_urls.append(url)
         return MarketResponse()
+
+
+class CaptchaResponse:
+    text = CAPTCHA_HTML
+    url = "https://www.b2b-center.ru/captcha/"
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class CaptchaSession(MarketSession):
+    def get(self, url: str, timeout: int) -> CaptchaResponse:
+        self.requested_urls.append(url)
+        return CaptchaResponse()
+
+
+def test_fetch_with_report_marks_captcha_as_blocked() -> None:
+    source = B2BCenterSource(session=CaptchaSession(), queries=["мфу"], max_details=0)
+
+    result = source.fetch_with_report([])
+
+    assert result.tenders == []
+    assert result.health[0].source == "b2b-center"
+    assert result.health[0].status == "blocked"
+    assert "CAPTCHA" in result.health[0].detail
+    with pytest.raises(SourceBlockedError, match="CAPTCHA"):
+        source.fetch_keywords([])
+
+
+class PartialCaptchaSession(MarketSession):
+    def get(self, url: str, timeout: int) -> MarketResponse | CaptchaResponse:
+        self.requested_urls.append(url)
+        if len(self.requested_urls) == 1:
+            return MarketResponse()
+        return CaptchaResponse()
+
+
+def test_fetch_with_report_keeps_listings_collected_before_captcha() -> None:
+    source = B2BCenterSource(
+        session=PartialCaptchaSession(), queries=["мфу", "принтер"], max_details=0
+    )
+
+    result = source.fetch_with_report([])
+
+    assert len(result.tenders) == 2
+    assert result.health[0].status == "partial"
+    assert result.health[0].found == 2
 
 
 def test_fetch_keywords_uses_configured_queries_and_deduplicates() -> None:
@@ -79,6 +139,14 @@ class DetailSession(MarketSession):
         self.requested_urls.append(url)
         if "/tender-" in url:
             return DetailResponse()
+        return MarketResponse()
+
+
+class DetailCaptchaSession(MarketSession):
+    def get(self, url: str, timeout: int) -> MarketResponse | CaptchaResponse:
+        self.requested_urls.append(url)
+        if "/tender-" in url:
+            return CaptchaResponse()
         return MarketResponse()
 
 
@@ -125,6 +193,18 @@ def test_fetch_keywords_enriches_candidates_with_detail_pages() -> None:
     assert mfu.customer == 'ООО "Крымский заказчик"'
     assert mfu.detail_status == "enriched"
     assert "Симферополь" in mfu.raw_text
+
+
+def test_detail_captcha_keeps_listings_and_marks_source_partial() -> None:
+    source = B2BCenterSource(
+        session=DetailCaptchaSession(), queries=["мфу"], detail_delay_seconds=0
+    )
+
+    result = source.fetch_with_report([])
+
+    assert len(result.tenders) == 2
+    assert result.health[0].status == "partial"
+    assert "детальные карточки" in result.health[0].detail
 
 
 def test_merge_detail_keeps_known_region_when_address_is_unrecognized() -> None:

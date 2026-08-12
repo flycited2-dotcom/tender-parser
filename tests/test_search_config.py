@@ -21,14 +21,22 @@ def test_generated_search_workbook_round_trips_current_dictionary() -> None:
     profile = load_search_profile(WORKBOOK_PATH)
 
     assert profile.category_keywords["Компьютерная техника и периферия"][0] == "компьютер"
+    assert "источник бесперебойного питания" in profile.category_keywords[
+        "Компьютерная техника и периферия"
+    ]
+    assert "шкаф архивный" in profile.category_keywords[
+        "Офисная, архивная и складская мебель"
+    ]
     assert "электротехническая продукция" in profile.search_terms
+    assert "кабельная продукция" in profile.search_terms
     assert "медицин" in profile.stop_terms
+    assert "продажа неликвидов" in profile.stop_terms
     assert profile.regions == [
-        "Симферополь",
+        "Республика Крым",
         "Севастополь",
-        "Крым",
         "Запорожская область",
         "Херсонская область",
+        "Симферополь",
     ]
     assert profile.min_price_rub == 30_000
 

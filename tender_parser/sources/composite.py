@@ -5,7 +5,7 @@ from typing import Protocol, runtime_checkable
 
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
-from tender_parser.sources.rts import SourceFetchError
+from tender_parser.sources.rts import SourceBlockedError, SourceFetchError
 
 
 class TenderSource(Protocol):
@@ -50,9 +50,12 @@ class CompositeSource:
                     errors.extend(source_result.errors)
                 else:
                     tenders = source.fetch_keywords(keywords)
+                    source_name = str(
+                        getattr(source, "source_name", source.__class__.__name__)
+                    )
                     health.append(
                         SourceHealth(
-                            source=source.__class__.__name__,
+                            source=source_name,
                             status="ok" if tenders else "empty",
                             found=len(tenders),
                             elapsed_seconds=round(monotonic() - started_at, 3),
@@ -61,10 +64,19 @@ class CompositeSource:
             except SourceFetchError as exc:
                 detail = str(exc)
                 errors.append(detail)
+                source_name = str(
+                    getattr(source, "source_name", source.__class__.__name__)
+                )
                 health.append(
                     SourceHealth(
-                        source=source.__class__.__name__,
-                        status="skipped" if "не настроен" in detail.lower() else "error",
+                        source=source_name,
+                        status=(
+                            "skipped"
+                            if "не настроен" in detail.lower()
+                            else "blocked"
+                            if isinstance(exc, SourceBlockedError)
+                            else "error"
+                        ),
                         found=0,
                         elapsed_seconds=round(monotonic() - started_at, 3),
                         detail=detail,

@@ -5,12 +5,19 @@ import pytest
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
 from tender_parser.sources.composite import CompositeSource
-from tender_parser.sources.rts import SourceFetchError
+from tender_parser.sources.rts import SourceBlockedError, SourceFetchError
 
 
 class FailingSource:
     def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
         raise SourceFetchError("blocked")
+
+
+class CaptchaBlockedSource:
+    source_name = "captcha-source"
+
+    def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+        raise SourceBlockedError("captcha detected")
 
 
 class GoodSource:
@@ -87,6 +94,15 @@ def test_composite_source_reports_success_and_failure_health() -> None:
         ("GoodSource", "ok", 1),
     ]
     assert "blocked" in result.health[0].detail
+
+
+def test_composite_source_reports_explicit_blocked_status_and_source_name() -> None:
+    result = CompositeSource([CaptchaBlockedSource(), GoodSource()]).fetch_with_report(["мфу"])
+
+    assert (result.health[0].source, result.health[0].status) == (
+        "captcha-source",
+        "blocked",
+    )
 
 
 def test_composite_source_can_stop_after_first_success() -> None:

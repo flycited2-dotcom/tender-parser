@@ -35,6 +35,29 @@ def test_load_previous_counts_reads_run_report(tmp_path: Path) -> None:
     assert load_previous_counts(path) == {"rostender": 37, "eis-zakupki": 0}
 
 
+def test_legacy_class_names_keep_suspect_empty_baseline(tmp_path: Path) -> None:
+    path = tmp_path / "run_report.json"
+    path.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {"source": "B2BCenterSource", "found": 300},
+                    {"source": "EatIntegrationSource", "found": 98},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    counts = load_previous_counts(path)
+    flagged = flag_suspect_empty(
+        [SourceHealth("b2b-center", "empty", 0, 1.0)], counts
+    )
+
+    assert counts == {"b2b-center": 300, "eat-berezka": 98}
+    assert flagged[0].status == "suspect_empty"
+
+
 def test_load_previous_profile_reads_profile_field(tmp_path: Path) -> None:
     from tender_parser.run_report import load_previous_profile
 

@@ -12,6 +12,24 @@ SourceStatus = Literal[
     "ok", "empty", "suspect_empty", "skipped", "partial", "blocked", "timeout", "ssl_error", "error"
 ]
 
+SOURCE_NAME_ALIASES = {
+    "EtpGpbApiSource": "etp-gpb",
+    "RoseltorgSource": "roseltorg",
+    "ZakazRfSource": "zakazrf",
+    "SberbankAstSource": "sberbank-ast",
+    "TenderProSource": "tender-pro",
+    "Torgi82Source": "torgi82",
+    "B2BCenterSource": "b2b-center",
+    "EatIntegrationSource": "eat-berezka",
+    "EisZakupkiSource": "eis-zakupki",
+    "RostenderSource": "rostender",
+}
+
+
+def canonical_source_name(source: str) -> str:
+    """Единый ID источника для health-отчёта и строк реестра."""
+    return SOURCE_NAME_ALIASES.get(source, source)
+
 
 @dataclass(frozen=True)
 class SourceHealth:
@@ -55,7 +73,8 @@ def load_previous_counts(path: Path) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in sources:
         if isinstance(item, dict) and isinstance(item.get("source"), str) and isinstance(item.get("found"), int):
-            counts[item["source"]] = max(counts.get(item["source"], 0), item["found"])
+            source = canonical_source_name(item["source"])
+            counts[source] = max(counts.get(source, 0), item["found"])
     return counts
 
 
@@ -63,7 +82,7 @@ def flag_suspect_empty(health: list[SourceHealth], previous_counts: dict[str, in
     """Источник без ошибок и без карточек после непустого прошлого запуска — кандидат на дрейф верстки."""
     flagged: list[SourceHealth] = []
     for item in health:
-        previous = previous_counts.get(item.source, 0)
+        previous = previous_counts.get(canonical_source_name(item.source), 0)
         if item.status in {"ok", "empty"} and item.found == 0 and previous > 0:
             detail = f"подозрение на дрейф верстки: прошлый запуск дал {previous} карточек"
             if item.detail:

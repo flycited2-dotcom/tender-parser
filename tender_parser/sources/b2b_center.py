@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime
-from time import sleep
+from time import monotonic, sleep
 from typing import Iterable
 from urllib.parse import urlencode, urljoin
 
@@ -20,13 +20,21 @@ from tender_parser.filters import matching_category
 from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.regions import detect_region
-from tender_parser.sources.rts import SourceFetchError
+from tender_parser.run_report import SourceFetchResult, SourceHealth, SourceStatus
+from tender_parser.sources.rts import SourceBlockedError, SourceFetchError
 from tender_parser.text import normalize_text, parse_deadline, parse_price_rub
 
 
 B2B_MARKET_URL = "https://www.b2b-center.ru/market/"
 B2B_SOURCE_NAME = "b2b-center"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.3"
+B2B_BLOCKED_MARKERS = (
+    "проверка безопасности",
+    "подтвердите, что вы не робот",
+    "введите код с картинки",
+    "g-recaptcha",
+    "hcaptcha",
+)
 
 # Метки в таблице карточки закупки B2B-Center (сверены с live-страницами 2026-07-03).
 DETAIL_LABELS = {
@@ -108,6 +116,17 @@ def build_search_url(query: str) -> str:
     return f"{B2B_MARKET_URL}?{urlencode(params)}"
 
 
+def is_blocked_page(url: str, html: str) -> bool:
+    """Распознаёт anti-bot страницу, не путая её с тендером со словом captcha."""
+    if "/captcha" in url.casefold():
+        return True
+    soup = BeautifulSoup(html, "html.parser")
+    if soup.select_one("table.search-results a.search-results-title") is not None:
+        return False
+    normalized = normalize_text(html)
+    return any(marker in normalized for marker in B2B_BLOCKED_MARKERS)
+
+
 def parse_market_page(html: str, source_url: str) -> list[TenderRecord]:
     soup = BeautifulSoup(html, "html.parser")
     tenders: list[TenderRecord] = []
@@ -141,6 +160,8 @@ def parse_market_page(html: str, source_url: str) -> list[TenderRecord]:
 
 
 class B2BCenterSource:
+    source_name = B2B_SOURCE_NAME
+
     def __init__(
         self,
         session: requests.Session | None = None,
@@ -157,9 +178,19 @@ class B2BCenterSource:
         self.detail_delay_seconds = detail_delay_seconds
 
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
+        result = self.fetch_with_report(keywords)
+        if not result.tenders and result.errors:
+            if result.health and result.health[0].status == "blocked":
+                raise SourceBlockedError(result.errors[0])
+            raise SourceFetchError(result.errors[0])
+        return result.tenders
+
+    def fetch_with_report(self, keywords: Iterable[str]) -> SourceFetchResult:
+        started_at = monotonic()
         collected: list[TenderRecord] = []
         seen: set[str] = set()
         errors: list[str] = []
+        blocked = False
         for query in self.queries or list(keywords):
             url = build_search_url(query)
             try:
@@ -170,27 +201,70 @@ class B2BCenterSource:
                     break
                 continue
 
+            response_url = str(getattr(response, "url", url))
+            if is_blocked_page(response_url, response.text):
+                errors.append(
+                    f"{query}: B2B-Center перенаправил запрос на CAPTCHA/anti-bot страницу"
+                )
+                blocked = True
+                break
+
             for tender in parse_market_page(response.text, source_url=url):
                 dedupe_key = tender.tender_number or tender.unique_key
                 if dedupe_key not in seen:
                     seen.add(dedupe_key)
                     collected.append(tender)
 
-        if not collected and errors:
-            raise SourceFetchError(f"B2B-Center недоступен: {'; '.join(errors)}")
-        return self._enrich_with_details(collected)
+        detail_error = ""
+        if collected:
+            collected, detail_error = self._enrich_with_details(collected)
+            if detail_error:
+                errors.append(detail_error)
+                blocked = True
 
-    def _enrich_with_details(self, tenders: list[TenderRecord]) -> list[TenderRecord]:
+        if errors and collected:
+            status: SourceStatus = "partial"
+        elif blocked:
+            status = "blocked"
+        elif errors:
+            status = "error"
+        elif collected:
+            status = "ok"
+        else:
+            status = "empty"
+
+        detail = "; ".join(errors[:3])
+        prefixed_errors = [f"B2B-Center: {detail}"] if errors else []
+        return SourceFetchResult(
+            tenders=collected,
+            health=[
+                SourceHealth(
+                    source=B2B_SOURCE_NAME,
+                    status=status,
+                    found=len(collected),
+                    elapsed_seconds=round(monotonic() - started_at, 3),
+                    detail=detail,
+                )
+            ],
+            errors=prefixed_errors,
+        )
+
+    def _enrich_with_details(self, tenders: list[TenderRecord]) -> tuple[list[TenderRecord], str]:
         enriched: list[TenderRecord] = []
         budget = self.max_details
-        for tender in tenders:
+        for index, tender in enumerate(tenders):
             if budget <= 0 or not is_detail_candidate(tender):
                 enriched.append(tender)
                 continue
             budget -= 1
-            detail = self._fetch_detail(tender.url)
+            try:
+                detail = self._fetch_detail(tender.url)
+            except SourceBlockedError:
+                # Уже собранные карточки не теряем: выдача частичная, а не пустая.
+                enriched.extend(tenders[index:])
+                return enriched, "детальные карточки B2B-Center заблокированы CAPTCHA"
             enriched.append(_merge_detail(tender, detail) if detail else tender)
-        return enriched
+        return enriched, ""
 
     def _fetch_detail(self, url: str) -> B2BDetail | None:
         try:
@@ -200,6 +274,9 @@ class B2BCenterSource:
         finally:
             if self.detail_delay_seconds:
                 sleep(self.detail_delay_seconds)
+        response_url = str(getattr(response, "url", url))
+        if is_blocked_page(response_url, response.text):
+            raise SourceBlockedError("B2B-Center detail CAPTCHA")
         return parse_detail_page(response.text)
 
 

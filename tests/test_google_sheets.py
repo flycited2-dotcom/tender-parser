@@ -1,6 +1,10 @@
 from datetime import datetime
 
-from tender_parser.google_sheets import GoogleSheetsConfig, GoogleSheetsRegistry
+from tender_parser.google_sheets import (
+    GoogleSheetsConfig,
+    GoogleSheetsRegistry,
+    _summary_rows,
+)
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, SourceHealth
 
@@ -117,7 +121,7 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
     ranges = {item["range"]: item["values"] for item in values_payload["data"]}
     active = ranges["'Все актуальные'!A2:T2"][0]
     assert active[16:18] == ["Беру", "Позвонить"]
-    assert active[8] == '=IF(H2="","",INT(H2-TODAY()))'
+    assert active[8] == '=IF(H2="";"";INT(H2-TODAY()))'
     archive = ranges["'Архив'!A2:T2"][0]
     assert archive[0] == "fake:closed"
     assert archive[2] == "Не найдена в последнем запуске"
@@ -127,3 +131,62 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
     assert history[2:4] == [3, 2]
     table_payload = session.posts[-1][1]
     assert table_payload["requests"][0]["updateTable"]["table"]["range"]["endRowIndex"] == 2
+
+
+def test_sync_keeps_last_good_rows_when_source_is_temporarily_blocked() -> None:
+    session = FakeSession()
+    config = GoogleSheetsConfig(
+        enabled=True,
+        spreadsheet_id="sheet-1",
+        spreadsheet_url="https://docs.google.com/spreadsheets/d/sheet-1/edit",
+    )
+    report = SourceFetchResult(
+        health=[SourceHealth("fake", "blocked", 0, 0.1, "CAPTCHA")],
+    )
+
+    result = GoogleSheetsRegistry(config, session=session).sync(
+        [],
+        [],
+        report,
+        generated_at=datetime(2026, 8, 9, 12, 0),
+        profile="fast",
+    )
+
+    assert result.status == "synced"
+    values_payload = next(
+        payload for url, payload in session.posts if url.endswith("values:batchUpdate")
+    )
+    ranges = {item["range"]: item["values"] for item in values_payload["data"]}
+    active = ranges["'Все актуальные'!A2:T2"][0]
+    assert active[0] == "fake:1"
+    assert active[2] == "⚠ Источник временно недоступен"
+    assert "CAPTCHA" in active[19]
+    archive = ranges["'Архив'!A2:T2"][0]
+    assert archive[0] == "fake:closed"
+
+
+def test_summary_uses_readable_label_for_missing_optional_import_folder() -> None:
+    report = SourceFetchResult(
+        health=[
+            SourceHealth(
+                "ImportFolderSource",
+                "empty",
+                0,
+                0.0,
+                r"folder missing: C:\private\workspace\imports",
+            )
+        ]
+    )
+
+    rows = _summary_rows(
+        report,
+        generated_at=datetime(2026, 8, 13),
+        profile="fast",
+        raw_count=0,
+        unique_count=0,
+        active_count=0,
+        new_count=0,
+    )
+
+    assert rows[-1][1] == "Нет файлов"
+    assert rows[-1][4] == "Папка imports не создана — ручных выгрузок нет"

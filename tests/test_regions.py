@@ -1,4 +1,9 @@
-from tender_parser.regions import detect_region, region_bucket
+from tender_parser.regions import (
+    detect_delivery_region,
+    detect_non_target_region,
+    detect_region,
+    region_bucket,
+)
 
 
 def test_detect_region_finds_crimean_cities() -> None:
@@ -13,6 +18,13 @@ def test_detect_region_understands_declensions_and_abbreviations() -> None:
     assert detect_region("Запорожская обл., г. Мелитополь") == "Запорожская область"
     assert detect_region("Херсонской области") == "Херсонская область"
     assert detect_region("город Геническ") == "Херсонская область"
+
+
+def test_detect_region_covers_target_region_towns() -> None:
+    assert detect_region("г. Судак, ул. Ленина") == "Крым"
+    assert detect_region("Каменка-Днепровская, склад № 1") == "Запорожская область"
+    assert detect_region("г. Новая Каховка") == "Херсонская область"
+    assert detect_region("г. Алешки") == "Херсонская область"
 
 
 def test_detect_region_prefers_specific_over_generic() -> None:
@@ -34,6 +46,7 @@ def test_detect_region_ignores_lookalike_places() -> None:
     assert detect_region("коньяк армянский пятилетний") is None
     assert detect_region("музей-заповедник Херсонес Таврический") is None
     assert detect_region("г. Белогорск, Амурская область") is None
+    assert detect_region("Москва, ул. Крымская, д. 12") is None
 
 
 def test_detect_region_keeps_real_crimean_adjectives() -> None:
@@ -51,3 +64,21 @@ def test_region_bucket_groups_simferopol_with_crimea() -> None:
     assert region_bucket("Геническ") == "kherson"
     assert region_bucket("Мелитополь") == "zaporizhzhia"
     assert region_bucket("Москва") == ""
+
+
+def test_detect_delivery_region_requires_delivery_context() -> None:
+    assert (
+        detect_delivery_region("Заказчик Москва. Адрес места поставки: г. Севастополь")
+        == "Севастополь"
+    )
+    assert detect_delivery_region("Фильтр: Республика Крым, Севастополь") is None
+
+
+def test_detect_non_target_region_returns_explicit_other_region() -> None:
+    assert detect_non_target_region("Доставка до г. Магадан") == "магадан"
+    assert detect_non_target_region("Республика Хакасия") == "хакас"
+    assert detect_non_target_region("г. Москва") == "москва"
+
+
+def test_detect_non_target_region_yields_to_any_target_region() -> None:
+    assert detect_non_target_region("Заказчик Москва, доставка в Республику Крым") is None

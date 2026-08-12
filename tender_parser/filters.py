@@ -5,7 +5,11 @@ from datetime import datetime
 
 from tender_parser import config
 from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
-from tender_parser.regions import detect_region
+from tender_parser.regions import (
+    detect_delivery_region,
+    detect_non_target_region,
+    detect_region,
+)
 from tender_parser.text import normalize_text, phrase_stems_match, word_term_matches
 
 
@@ -118,9 +122,53 @@ def _subject_searchable(tender: TenderRecord) -> str:
     return subject
 
 
+def _resolve_target_region(tender: TenderRecord) -> tuple[str | None, str | None]:
+    """Определяет целевой регион и, отдельно, причину строгого отсева.
+
+    Поле из документов и явный контекст доставки важнее адреса заказчика. При
+    этом структурированный нецелевой ``region`` нельзя перебить случайным словом
+    «Крым» из выпадающего списка/шаблона страницы.
+    """
+    evidence_region = detect_region(tender.delivery_region_evidence)
+    title_region = detect_region(tender.title)
+    declared_region = detect_region(tender.region)
+    delivery_region = detect_delivery_region(tender.raw_text)
+
+    for strong_region in (evidence_region, title_region, delivery_region, declared_region):
+        if strong_region:
+            return strong_region, None
+
+    if tender.region:
+        return None, "регион не целевой"
+
+    # Если структурированного региона нет, локальный заказчик или иной текст
+    # карточки всё ещё являются полезным подтверждением целевого охвата.
+    unstructured_region = detect_region(
+        " ".join([tender.customer or "", tender.raw_text])
+    )
+    if unstructured_region:
+        return unstructured_region, None
+
+    non_target = detect_non_target_region(
+        " ".join(
+            [
+                tender.title,
+                tender.customer or "",
+                tender.raw_text,
+                tender.delivery_region_evidence,
+            ]
+        )
+    )
+    if non_target:
+        return None, f"регион не целевой: {non_target}"
+
+    if tender.source in config.STRICT_TARGET_REGION_SOURCES:
+        return None, "целевой регион не подтвержден"
+    return None, None
+
+
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
-    searchable = normalize_text(" ".join([tender.title, tender.region or "", tender.customer or "", tender.raw_text]))
     subject = _subject_searchable(tender)
 
     stop_term = _first_matching_term(subject, config.STOP_TERMS)
@@ -134,9 +182,9 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if not category:
         return _exclude(tender, "категория интереса не найдена")
 
-    region = detect_region(searchable)
-    if tender.region and not region:
-        return _exclude(tender, "регион не целевой")
+    region, region_exclusion = _resolve_target_region(tender)
+    if region_exclusion:
+        return _exclude(tender, region_exclusion)
 
     if tender.price is not None and tender.price < config.MIN_PRICE_RUB:
         return _exclude(tender, f"сумма меньше {config.MIN_PRICE_RUB}")
