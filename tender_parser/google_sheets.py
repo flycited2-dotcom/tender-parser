@@ -63,19 +63,30 @@ SOURCE_LABELS = {
     "sberbank-ast": "Сбербанк-АСТ",
     "tender-pro": "Tender.Pro",
     "torgi82": "Торги-82",
+    "crimea-small-purchases": "Малые закупки Крыма",
+    "sevastopol-small-purchases": "Малые закупки Севастополя",
     "b2b-center": "B2B-Center",
     "eat-berezka": "ЕАТ «Берёзка»",
     "eis-zakupki": "ЕИС",
+    "eis-regional-xml": "ЕИС XML (официальная выгрузка)",
     "rostender": "РосТендер",
+    "rts-background-snapshot": "РТС — фоновый снимок",
+    "rts-rosatom": "РТС — Росатом",
+    "rts-zakupki-simferopol": "РТС — Симферополь",
+    "rts-yalta-zmo": "РТС — Ялта ЗМО",
+    "rts-market": "РТС — общий рынок",
     "EtpGpbApiSource": "ЭТП ГПБ",
     "RoseltorgSource": "Росэлторг",
     "ZakazRfSource": "ZakazRF",
     "SberbankAstSource": "Сбербанк-АСТ",
     "TenderProSource": "Tender.Pro",
     "Torgi82Source": "Торги-82",
+    "CrimeaSmallPurchasesSource": "Малые закупки Крыма",
+    "SevastopolSmallPurchasesAdapter": "Малые закупки Севастополя",
     "B2BCenterSource": "B2B-Center",
     "EatIntegrationSource": "ЕАТ «Берёзка»",
     "EisZakupkiSource": "ЕИС",
+    "EisRegionalXmlSource": "ЕИС XML (официальная выгрузка)",
     "RostenderSource": "РосТендер",
     "ImportFolderSource": "Локальный импорт",
 }
@@ -92,14 +103,29 @@ SOURCE_URLS = {
     "TenderProSource": "https://www.tender.pro/",
     "torgi82": "https://torgi82.ru/",
     "Torgi82Source": "https://torgi82.ru/",
+    "crimea-small-purchases": "https://zrk.rk.gov.ru/smallpurchases/",
+    "CrimeaSmallPurchasesSource": "https://zrk.rk.gov.ru/smallpurchases/",
+    "sevastopol-small-purchases": (
+        "http://rks.sevzakaz.ru/zakupki-malogo-obema/oos-rks-001-001"
+    ),
+    "SevastopolSmallPurchasesAdapter": (
+        "http://rks.sevzakaz.ru/zakupki-malogo-obema/oos-rks-001-001"
+    ),
     "b2b-center": "https://www.b2b-center.ru/market/",
     "B2BCenterSource": "https://www.b2b-center.ru/market/",
     "eat-berezka": "https://agregatoreat.ru/",
     "EatIntegrationSource": "https://agregatoreat.ru/",
     "eis-zakupki": "https://zakupki.gov.ru/",
     "EisZakupkiSource": "https://zakupki.gov.ru/",
+    "eis-regional-xml": "https://roskazna.gov.ru/gis/eis-zakupki-gov-ru",
+    "EisRegionalXmlSource": "https://roskazna.gov.ru/gis/eis-zakupki-gov-ru",
     "rostender": "https://rostender.info/",
     "RostenderSource": "https://rostender.info/",
+    "rts-background-snapshot": "https://www.rts-tender.ru/",
+    "rts-rosatom": "https://www.rosatom.rts-tender.ru/market/",
+    "rts-zakupki-simferopol": "https://zakupki-simferopol.rts-tender.ru/market/",
+    "rts-yalta-zmo": "https://yalta-zmo.rts-tender.ru/market/",
+    "rts-market": "https://www.rts-tender.ru/market/",
 }
 STATUS_LABELS = {
     "ok": "Работает",
@@ -419,7 +445,7 @@ class GoogleSheetsRegistry:
             data.append(
                 {
                     "range": f"'{CUSTOMER_SHEET}'!A2:P{len(customer_rows) + 1}",
-                    "values": customer_rows,
+                    "values": [_safe_customer_row(row) for row in customer_rows],
                 }
             )
         response = session.post(  # type: ignore[attr-defined]
@@ -689,7 +715,10 @@ def _summary_rows(
     new_count: int,
 ) -> list[list[object]]:
     bad_statuses = {"error", "blocked", "timeout", "ssl_error"}
-    partial_statuses = {"partial", "suspect_empty", "skipped"}
+    # Optional/feature-flagged sources may be intentionally skipped and remain
+    # visible in the source table. They must not turn an otherwise successful
+    # daily cycle into a permanent warning at the top of the dashboard.
+    partial_statuses = {"partial", "suspect_empty"}
     has_errors = any(item.status in bad_statuses for item in source_result.health)
     has_partial = any(item.status in partial_statuses for item in source_result.health)
     overall = "Есть ошибки" if has_errors else "Частично" if has_partial else "Успешно"
@@ -767,10 +796,16 @@ def _row_source_id(value: object) -> str:
     """Extract the canonical source ID from plain text or a HYPERLINK formula."""
     text = str(value or "")
     folded = text.casefold()
-    for source, url in SOURCE_URLS.items():
+    # More specific URLs/labels must win. Several sources share a parent host
+    # (EIS HTML/XML and the RTS endpoints), so insertion order is insufficient.
+    for source, url in sorted(
+        SOURCE_URLS.items(), key=lambda item: len(item[1]), reverse=True
+    ):
         if url.casefold() in folded:
             return canonical_source_name(source)
-    for source, label in SOURCE_LABELS.items():
+    for source, label in sorted(
+        SOURCE_LABELS.items(), key=lambda item: len(item[1]), reverse=True
+    ):
         if label.casefold() in folded:
             return canonical_source_name(source)
     return canonical_source_name(text)
@@ -789,6 +824,28 @@ def _hyperlink(url: str, label: str) -> object:
     escaped_url = url.replace('"', '""')
     escaped_label = label.replace('"', '""')
     return f'=HYPERLINK("{escaped_url}";"{escaped_label}")'
+
+
+def _safe_customer_row(row: list[object]) -> list[object]:
+    """Keep contact text literal when values are written with USER_ENTERED.
+
+    Phone numbers commonly start with ``+`` and would otherwise be parsed as
+    formulas by Google Sheets. Only hyperlinks generated by this module are
+    intentionally allowed to remain formulas in the customer registry.
+    """
+    result: list[object] = []
+    for value in row:
+        if not isinstance(value, str):
+            result.append(value)
+            continue
+        stripped = value.lstrip()
+        if stripped.upper().startswith("=HYPERLINK("):
+            result.append(value)
+        elif stripped.startswith(("=", "+", "-", "@")):
+            result.append("'" + value)
+        else:
+            result.append(value)
+    return result
 
 
 def _history_row(

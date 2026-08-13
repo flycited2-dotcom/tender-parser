@@ -3,6 +3,9 @@ from datetime import datetime
 from tender_parser.google_sheets import (
     GoogleSheetsConfig,
     GoogleSheetsRegistry,
+    _row_source_id,
+    _safe_customer_row,
+    _source_link,
     _summary_rows,
 )
 from tender_parser.models import TenderRecord
@@ -190,3 +193,71 @@ def test_summary_uses_readable_label_for_missing_optional_import_folder() -> Non
 
     assert rows[-1][1] == "Нет файлов"
     assert rows[-1][4] == "Папка imports не создана — ручных выгрузок нет"
+
+
+def test_summary_links_official_crimea_small_purchases_source() -> None:
+    report = SourceFetchResult(
+        health=[SourceHealth("crimea-small-purchases", "ok", 41, 1.2)]
+    )
+
+    rows = _summary_rows(
+        report,
+        generated_at=datetime(2026, 8, 13),
+        profile="fast",
+        raw_count=41,
+        unique_count=41,
+        active_count=3,
+        new_count=3,
+    )
+
+    assert rows[-1][0] == "Малые закупки Крыма"
+    assert rows[-1][5] == '=HYPERLINK("https://zrk.rk.gov.ru/smallpurchases/";"Открыть")'
+
+
+def test_intentionally_skipped_optional_source_does_not_mark_cycle_partial() -> None:
+    report = SourceFetchResult(
+        health=[
+            SourceHealth(
+                "sevastopol-small-purchases",
+                "skipped",
+                0,
+                0.0,
+                "ожидает устойчивого публичного API",
+            )
+        ]
+    )
+
+    rows = _summary_rows(
+        report,
+        generated_at=datetime(2026, 8, 13),
+        profile="fast",
+        raw_count=0,
+        unique_count=0,
+        active_count=0,
+        new_count=0,
+    )
+
+    assert rows[1][5] == "Успешно"
+    assert rows[-1][1] == "Пропущен"
+
+
+def test_row_source_id_prefers_specific_rts_market_url_over_parent_site() -> None:
+    assert _row_source_id(_source_link("rts-market")) == "rts-market"
+
+
+def test_row_source_id_recovers_official_eis_xml_source() -> None:
+    assert _row_source_id(_source_link("eis-regional-xml")) == "eis-regional-xml"
+
+
+def test_customer_phone_is_written_as_literal_not_formula() -> None:
+    row = ["org", "Организация", "", "", "", "", "", "mail@example.ru", "+7 978 000-00-00"]
+
+    safe = _safe_customer_row(row)
+
+    assert safe[8] == "'+7 978 000-00-00"
+
+
+def test_generated_customer_hyperlink_remains_formula() -> None:
+    formula = '=HYPERLINK("https://example.test/";"Открыть")'
+
+    assert _safe_customer_row([formula]) == [formula]

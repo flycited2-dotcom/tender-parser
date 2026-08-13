@@ -75,3 +75,21 @@ def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:
     assert "--remote-debugging-port=9222" in open_text
     assert "browser_profiles\\rts_chrome" in open_text
     assert "python -m tender_parser run --profile rts-cabinet" in collect_text
+
+
+def test_isolated_rts_task_has_hard_timeout_and_scheduler_retries() -> None:
+    runner = (ROOT / "run_rts_background.ps1").read_text(encoding="utf-8")
+    installer = (ROOT / "Настроить_фоновый_RTS.ps1").read_text(encoding="utf-8")
+
+    assert "TenderParserRtsBackgroundGuard" in runner
+    assert "rts-refresh" in runner
+    assert "WaitForExit($TimeoutMinutes * 60 * 1000)" in runner
+    assert "$process.WaitForExit()" in runner
+    assert "rts_background_state.json" in runner
+    assert "treating the run as failed" in runner
+    assert "Stop-Process -Id $process.Id -Force" in runner
+    assert "-StartWhenAvailable" in installer
+    assert "-RunOnlyIfNetworkAvailable" in installer
+    assert "-RestartCount 3" in installer
+    assert "-RestartInterval (New-TimeSpan -Minutes 30)" in installer
+    assert "-MultipleInstances IgnoreNew" in installer

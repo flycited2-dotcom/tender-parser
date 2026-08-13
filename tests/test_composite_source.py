@@ -1,4 +1,6 @@
+from dataclasses import replace
 from datetime import datetime
+from threading import Barrier
 
 import pytest
 
@@ -113,6 +115,52 @@ def test_composite_source_can_stop_after_first_success() -> None:
     tenders = source.fetch_keywords(["мфу"])
 
     assert len(tenders) == 1
+    assert first.calls == 1
+    assert second.calls == 0
+
+
+def test_composite_source_can_run_independent_sources_in_parallel() -> None:
+    rendezvous = Barrier(2, timeout=2)
+
+    class ParallelSource(GoodSource):
+        def __init__(self, number: str) -> None:
+            self.number = number
+
+        def fetch_keywords(self, keywords: list[str]) -> list[TenderRecord]:
+            rendezvous.wait()
+            item = super().fetch_keywords(keywords)[0]
+            return [
+                replace(
+                    item,
+                    tender_number=self.number,
+                    source=f"parallel-{self.number}",
+                )
+            ]
+
+    source = CompositeSource(
+        [ParallelSource("1"), ParallelSource("2")],
+        parallel=True,
+        max_workers=2,
+    )
+
+    result = source.fetch_with_report(["мфу"])
+
+    assert [item.source for item in result.tenders] == ["parallel-1", "parallel-2"]
+    assert [item.status for item in result.health] == ["ok", "ok"]
+
+
+def test_parallel_mode_keeps_fallback_chain_lazy() -> None:
+    first = CountingSource()
+    second = CountingSource()
+    source = CompositeSource(
+        [first, second],
+        stop_after_first_success=True,
+        parallel=True,
+        max_workers=2,
+    )
+
+    source.fetch_keywords(["мфу"])
+
     assert first.calls == 1
     assert second.calls == 0
 

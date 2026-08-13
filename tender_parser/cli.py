@@ -32,11 +32,17 @@ from tender_parser.run_report import (
     load_previous_counts,
     load_previous_profile,
 )
+from tender_parser.rts_background import (
+    DEFAULT_MAX_SNAPSHOT_AGE_HOURS,
+    RtsSnapshotStore,
+)
 from tender_parser.search_config import load_and_apply_search_config
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
+from tender_parser.sources.crimea_small_purchases import CrimeaSmallPurchasesSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
+from tender_parser.sources.eis_regional_xml import EisRegionalXmlSource
 from tender_parser.sources.etp_gpb import EtpGpbApiSource
 from tender_parser.sources.imports import ImportFolderSource
 from tender_parser.rts_accumulator import RtsAccumulator, RtsAccumulatorSource
@@ -47,6 +53,7 @@ from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.torgi82 import Torgi82Source
 from tender_parser.sources.sberbank_ast import SberbankAstSource
+from tender_parser.sources.sevastopol_small_purchases import SevastopolSmallPurchasesAdapter
 from tender_parser.sources.zakazrf import ZakazRfSource
 from tender_parser.storage import TenderStorage
 
@@ -66,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="run",
-        choices=["run", "check-env", "rts-add-page", "rts-watch"],
+        choices=["run", "check-env", "rts-add-page", "rts-watch", "rts-refresh"],
     )
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
     parser.add_argument("--dry-run", action="store_true", help="Create directories and exit")
@@ -108,11 +115,30 @@ def _all_keywords() -> list[str]:
     return result
 
 
-def build_default_source() -> TenderSource:
-    return build_source_for_profile("full")
+def build_default_source(base_dir: Path | None = None) -> TenderSource:
+    return build_source_for_profile("full", base_dir=base_dir)
 
 
-def build_source_for_profile(profile: RunProfile) -> TenderSource:
+def build_source_for_profile(
+    profile: RunProfile,
+    *,
+    base_dir: Path | None = None,
+) -> TenderSource:
+    project_dir = (base_dir or Path.cwd()).resolve()
+    eis_state_path = _project_path_from_env(
+        project_dir,
+        "EIS_XML_STATE_PATH",
+        Path("data/eis_regional_xml_state.json"),
+    )
+    eis_import_dir = _project_path_from_env(
+        project_dir,
+        "EIS_XML_IMPORT_DIR",
+        Path("imports/eis_xml"),
+    )
+    eis_xml_source = lambda: EisRegionalXmlSource.from_env(
+        state_path=eis_state_path,
+        import_dir=eis_import_dir,
+    )
     if profile == "local":
         return CompositeSource([])
     if profile == "rts":
@@ -130,11 +156,16 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
                         SberbankAstSource(),
                         TenderProSource(),
                         Torgi82Source(),
+                        CrimeaSmallPurchasesSource(),
+                        SevastopolSmallPurchasesAdapter(),
                         B2BCenterSource(),
                         EatIntegrationSource(),
+                        eis_xml_source(),
                         EisZakupkiSource(),
                         RostenderSource(),
-                    ]
+                    ],
+                    parallel=True,
+                    max_workers=4,
                 ),
             ],
             stop_after_first_success=True,
@@ -149,12 +180,17 @@ def build_source_for_profile(profile: RunProfile) -> TenderSource:
                     SberbankAstSource(),
                     TenderProSource(),
                     Torgi82Source(),
+                    CrimeaSmallPurchasesSource(),
+                    SevastopolSmallPurchasesAdapter(),
                     B2BCenterSource(),
                     EatIntegrationSource(),
+                    eis_xml_source(),
                     EisZakupkiSource(),
                     RostenderSource(),
                     RtsPublicSource(),
-                ]
+                ],
+                parallel=True,
+                max_workers=4,
             ),
         ],
         stop_after_first_success=True,
@@ -213,6 +249,50 @@ def _check_env_command(base_dir: Path) -> int:
     return 0 if all(status.values()) else 1
 
 
+def _rts_refresh_command(
+    data_dir: Path,
+    keywords: list[str],
+    current_time: datetime,
+    source: TenderSource | None,
+) -> int:
+    active_source = source or RtsPublicSource()
+    if not hasattr(active_source, "fetch_with_report"):
+        print("RTS background source must provide fetch_with_report().")
+        return 2
+    outcome = RtsSnapshotStore(data_dir).refresh(
+        active_source,  # type: ignore[arg-type]
+        keywords,
+        now=current_time,
+    )
+    print(f"RTS background: {outcome.status}")
+    print(f"Получено сейчас: {outcome.fetched_count}")
+    print(f"В last-good снимке: {outcome.snapshot_count}")
+    print(f"Сохранено из прошлого снимка: {outcome.preserved_count}")
+    print(outcome.detail)
+    return outcome.exit_code
+
+
+def _project_path_from_env(
+    project_dir: Path,
+    env_key: str,
+    default: Path,
+) -> Path:
+    configured = os.getenv(env_key, "").strip()
+    path = Path(configured) if configured else default
+    return path if path.is_absolute() else project_dir / path
+
+
+def _rts_snapshot_max_age_hours() -> int:
+    value = os.getenv("RTS_BACKGROUND_MAX_SNAPSHOT_AGE_HOURS", "").strip()
+    if not value:
+        return DEFAULT_MAX_SNAPSHOT_AGE_HOURS
+    try:
+        parsed = int(value)
+    except ValueError:
+        return DEFAULT_MAX_SNAPSHOT_AGE_HOURS
+    return parsed if parsed > 0 else DEFAULT_MAX_SNAPSHOT_AGE_HOURS
+
+
 def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -> int:
     args = build_parser().parse_args(argv)
     base_dir = Path(args.base_dir).resolve()
@@ -249,12 +329,14 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     except ValueError:
         print(f"Неверный формат --now: {args.now!r}; нужен ISO, например 2026-07-04T08:00:00")
         return 2
+    if args.command == "rts-refresh":
+        return _rts_refresh_command(data_dir, _all_keywords(), current_time, source)
     if source is not None:
         active_source = source
     elif args.profile == "rts-accumulated":
         active_source = RtsAccumulatorSource(data_dir / "tenders.db")
     else:
-        active_source = build_source_for_profile(args.profile)
+        active_source = build_source_for_profile(args.profile, base_dir=base_dir)
     try:
         source_result = _fetch_with_report(
             active_source,
@@ -265,6 +347,15 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         print(f"Ошибка источника: {exc}")
         print("Excel и JSON не перезаписаны, предыдущий отчет сохранен.")
         return 2
+
+    if args.profile == "fast":
+        rts_snapshot = RtsSnapshotStore(data_dir).load_for_fast_run(
+            now=current_time,
+            max_age_hours=_rts_snapshot_max_age_hours(),
+        )
+        source_result.tenders.extend(rts_snapshot.tenders)
+        source_result.health.extend(rts_snapshot.health)
+        source_result.errors.extend(rts_snapshot.errors)
 
     import_result = ImportFolderSource(base_dir / "imports").fetch_with_report(_all_keywords())
     source_result.tenders.extend(import_result.tenders)

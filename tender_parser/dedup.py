@@ -10,6 +10,7 @@ from tender_parser.text import normalize_text
 
 
 SOURCE_PRIORITY = {
+    "eis-regional-xml": 110,
     "eis-zakupki": 100,
     "roseltorg": 95,
     "zakazrf": 95,

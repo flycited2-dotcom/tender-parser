@@ -7,10 +7,13 @@ from openpyxl import load_workbook
 from tender_parser.cli import _all_keywords, build_default_source, build_source_for_profile, run
 from tender_parser.models import TenderRecord
 from tender_parser.notifications import NotificationResult
+from tender_parser.run_report import SourceFetchResult, SourceHealth
 from tender_parser.sources.b2b_center import B2BCenterSource
 from tender_parser.sources.composite import CompositeSource
+from tender_parser.sources.crimea_small_purchases import CrimeaSmallPurchasesSource
 from tender_parser.sources.eat import EatIntegrationSource
 from tender_parser.sources.eis import EisZakupkiSource
+from tender_parser.sources.eis_regional_xml import EisRegionalXmlSource
 from tender_parser.sources.etp_gpb import EtpGpbApiSource
 from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.roseltorg import RoseltorgSource
@@ -19,6 +22,7 @@ from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.torgi82 import Torgi82Source
 from tender_parser.sources.sberbank_ast import SberbankAstSource
+from tender_parser.sources.sevastopol_small_purchases import SevastopolSmallPurchasesAdapter
 from tender_parser.sources.zakazrf import ZakazRfSource
 
 
@@ -175,11 +179,14 @@ def test_build_default_source_uses_composite_source() -> None:
     assert isinstance(first_layer.sources[3], SberbankAstSource)
     assert isinstance(first_layer.sources[4], TenderProSource)
     assert isinstance(first_layer.sources[5], Torgi82Source)
-    assert isinstance(first_layer.sources[6], B2BCenterSource)
-    assert isinstance(first_layer.sources[7], EatIntegrationSource)
-    assert isinstance(first_layer.sources[8], EisZakupkiSource)
-    assert isinstance(first_layer.sources[9], RostenderSource)
-    assert isinstance(first_layer.sources[10], RtsPublicSource)
+    assert isinstance(first_layer.sources[6], CrimeaSmallPurchasesSource)
+    assert isinstance(first_layer.sources[7], SevastopolSmallPurchasesAdapter)
+    assert isinstance(first_layer.sources[8], B2BCenterSource)
+    assert isinstance(first_layer.sources[9], EatIntegrationSource)
+    assert isinstance(first_layer.sources[10], EisRegionalXmlSource)
+    assert isinstance(first_layer.sources[11], EisZakupkiSource)
+    assert isinstance(first_layer.sources[12], RostenderSource)
+    assert isinstance(first_layer.sources[13], RtsPublicSource)
     assert len(source.sources) == 1
 
 
@@ -195,11 +202,28 @@ def test_build_fast_profile_includes_eis_after_native_tls_fix() -> None:
         "SberbankAstSource",
         "TenderProSource",
         "Torgi82Source",
+        "CrimeaSmallPurchasesSource",
+        "SevastopolSmallPurchasesAdapter",
         "B2BCenterSource",
         "EatIntegrationSource",
+        "EisRegionalXmlSource",
         "EisZakupkiSource",
         "RostenderSource",
     ]
+    assert source.sources[0].parallel is True
+    assert source.sources[0].max_workers == 4
+
+
+def test_eis_xml_paths_are_scoped_to_cli_base_dir(tmp_path: Path) -> None:
+    source = build_source_for_profile("fast", base_dir=tmp_path)
+
+    eis_xml = next(
+        item
+        for item in source.sources[0].sources
+        if isinstance(item, EisRegionalXmlSource)
+    )
+    assert eis_xml.state_path == tmp_path / "data" / "eis_regional_xml_state.json"
+    assert eis_xml.import_dir == tmp_path / "imports" / "eis_xml"
 
 
 def test_build_rts_profile_runs_only_rts_source() -> None:
@@ -498,3 +522,60 @@ def test_run_enriches_records_from_documents_before_filtering(tmp_path: Path) ->
     assert latest["items"][0]["detail_status"] == "enriched"
     assert "севастополь" in latest["items"][0]["document_matches"]
     assert "specification.txt" in latest["items"][0]["delivery_region_evidence"]
+
+
+def test_rts_refresh_command_creates_snapshot_without_common_exports(tmp_path: Path) -> None:
+    class RtsReportSource:
+        def fetch_with_report(self, keywords: list[str]) -> SourceFetchResult:
+            return SourceFetchResult(
+                tenders=[
+                    TenderRecord(
+                        title="Поставка МФУ",
+                        url="https://rts.example.test/1",
+                        source="rts-market",
+                        tender_number="RTS-1",
+                        region="Республика Крым",
+                    )
+                ],
+                health=[
+                    SourceHealth(
+                        source="rts-market",
+                        status="ok",
+                        found=1,
+                        elapsed_seconds=0.1,
+                    )
+                ],
+            )
+
+    result = run(
+        [
+            "rts-refresh",
+            "--base-dir",
+            str(tmp_path),
+            "--now",
+            "2026-08-13T02:30:00",
+        ],
+        source=RtsReportSource(),
+    )
+
+    assert result == 0
+    assert (tmp_path / "data" / "rts_last_good.json").exists()
+    assert (tmp_path / "data" / "rts_background_state.json").exists()
+    assert not (tmp_path / "exports" / "latest.json").exists()
+
+    fast_result = run(
+        [
+            "--profile",
+            "fast",
+            "--base-dir",
+            str(tmp_path),
+            "--now",
+            "2026-08-13T08:00:00",
+        ],
+        source=EmptySource(),
+    )
+    latest = json.loads((tmp_path / "exports" / "latest.json").read_text(encoding="utf-8"))
+
+    assert fast_result == 0
+    assert latest["count"] == 1
+    assert latest["items"][0]["source"] == "rts-market"

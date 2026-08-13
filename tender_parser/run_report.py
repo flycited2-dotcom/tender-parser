@@ -19,9 +19,12 @@ SOURCE_NAME_ALIASES = {
     "SberbankAstSource": "sberbank-ast",
     "TenderProSource": "tender-pro",
     "Torgi82Source": "torgi82",
+    "CrimeaSmallPurchasesSource": "crimea-small-purchases",
+    "SevastopolSmallPurchasesAdapter": "sevastopol-small-purchases",
     "B2BCenterSource": "b2b-center",
     "EatIntegrationSource": "eat-berezka",
     "EisZakupkiSource": "eis-zakupki",
+    "EisRegionalXmlSource": "eis-regional-xml",
     "RostenderSource": "rostender",
 }
 
