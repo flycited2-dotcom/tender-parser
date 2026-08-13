@@ -80,6 +80,9 @@ def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:
 def test_isolated_rts_task_has_hard_timeout_and_scheduler_retries() -> None:
     runner = (ROOT / "run_rts_background.ps1").read_text(encoding="utf-8")
     installer = (ROOT / "Настроить_фоновый_RTS.ps1").read_text(encoding="utf-8")
+    daily_installer = (ROOT / "Настроить_ежедневный_запуск.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert "TenderParserRtsBackgroundGuard" in runner
     assert "rts-refresh" in runner
@@ -93,3 +96,8 @@ def test_isolated_rts_task_has_hard_timeout_and_scheduler_retries() -> None:
     assert "-RestartCount 3" in installer
     assert "-RestartInterval (New-TimeSpan -Minutes 30)" in installer
     assert "-MultipleInstances IgnoreNew" in installer
+    for task_installer in (installer, daily_installer):
+        assert "New-ScheduledTaskPrincipal" in task_installer
+        assert "-UserId 'SYSTEM'" in task_installer
+        assert "-LogonType ServiceAccount" in task_installer
+        assert "-Principal $principal" in task_installer

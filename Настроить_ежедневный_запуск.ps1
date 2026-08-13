@@ -21,6 +21,10 @@ $dailyTrigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact($Tim
 $logonUser = "$env:USERDOMAIN\$env:USERNAME"
 $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $logonUser
 $logonTrigger.Delay = 'PT2M'
+$principal = New-ScheduledTaskPrincipal `
+    -UserId 'SYSTEM' `
+    -LogonType ServiceAccount `
+    -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable `
@@ -33,6 +37,6 @@ $settings = New-ScheduledTaskSettingsSet `
 $description = "Daily tender collection with catch-up at logon and retries. Profile: $Profile."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Create or update daily task at $Time")) {
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($dailyTrigger, $logonTrigger) -Settings $settings -Description $description -Force | Out-Null
-    Write-Host "Task '$TaskName' is scheduled daily at $Time, catches up at logon, and retries failures three times."
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($dailyTrigger, $logonTrigger) -Principal $principal -Settings $settings -Description $description -Force | Out-Null
+    Write-Host "Task '$TaskName' runs as SYSTEM daily at $Time, catches up at logon, and retries failures three times."
 }

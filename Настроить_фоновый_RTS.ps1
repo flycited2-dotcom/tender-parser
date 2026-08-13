@@ -18,6 +18,10 @@ $powershellPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.ex
 $actionArguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$runnerPath`" -TimeoutMinutes $TimeoutMinutes"
 $action = New-ScheduledTaskAction -Execute $powershellPath -Argument $actionArguments
 $dailyTrigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact($Time, 'HH:mm', $null))
+$principal = New-ScheduledTaskPrincipal `
+    -UserId 'SYSTEM' `
+    -LogonType ServiceAccount `
+    -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable `
@@ -34,8 +38,9 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Create or update isolated RTS task at $T
         -TaskName $TaskName `
         -Action $action `
         -Trigger $dailyTrigger `
+        -Principal $principal `
         -Settings $settings `
         -Description $description `
         -Force | Out-Null
-    Write-Host "Task '$TaskName' runs daily at $Time, catches up when available, times out after $TimeoutMinutes minutes, and retries three times."
+    Write-Host "Task '$TaskName' runs as SYSTEM daily at $Time, catches up when available, times out after $TimeoutMinutes minutes, and retries three times."
 }
