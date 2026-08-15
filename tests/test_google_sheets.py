@@ -1,8 +1,12 @@
 from datetime import datetime
 
 from tender_parser.google_sheets import (
+    DATA_HEADERS,
     GoogleSheetsConfig,
     GoogleSheetsRegistry,
+    LEGACY_DATA_HEADERS,
+    _migrate_existing_row,
+    _record_row,
     _row_source_id,
     _safe_customer_row,
     _source_link,
@@ -33,12 +37,18 @@ class FakeSession:
                 {
                     "sheets": [
                         {
-                            "properties": {"sheetId": 1, "title": "Все актуальные"},
+                            "properties": {
+                                "sheetId": 1,
+                                "title": "Все актуальные",
+                                "gridProperties": {"columnCount": 20},
+                            },
                             "tables": [{"tableId": "active", "name": "ActiveTendersTable"}],
                         }
                     ]
                 }
             )
+        if "A1%3AAB1" in url:
+            return FakeResponse({"values": [LEGACY_DATA_HEADERS]})
         if "%D0%92%D1%81%D0%B5%20%D0%B0%D0%BA%D1%82%D1%83%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B5" in url:
             return FakeResponse(
                 {
@@ -86,6 +96,14 @@ def make_tender() -> TenderRecord:
         deadline=datetime(2026, 8, 10, 10, 0),
         discovered_at=datetime(2026, 8, 7, 8, 0),
         review_priority="hot",
+        official_number="0174100000626000005",
+        official_url="https://zakupki.gov.ru/notice/0174100000626000005",
+        official_source="ЕИС",
+        platform_number="AST-1",
+        platform_url="https://utp.sberbank-ast.ru/purchase/1",
+        procurement_law="44-ФЗ",
+        resolution_method="rostender-meta",
+        resolution_confidence=0.98,
     )
 
 
@@ -120,15 +138,35 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
     )
 
     assert result.status == "synced"
+    expand_payload = next(
+        payload
+        for url, payload in session.posts
+        if url.endswith(":batchUpdate")
+        and any("appendDimension" in item for item in payload.get("requests", []))
+    )
+    assert expand_payload["requests"][0]["appendDimension"]["length"] == 8
     values_payload = next(payload for url, payload in session.posts if url.endswith("values:batchUpdate"))
     ranges = {item["range"]: item["values"] for item in values_payload["data"]}
-    active = ranges["'Все актуальные'!A2:T2"][0]
+    assert ranges["'Все актуальные'!A1:AB1"][0] == DATA_HEADERS
+    active = ranges["'Все актуальные'!A2:AB2"][0]
     assert active[16:18] == ["Беру", "Позвонить"]
     assert active[8] == '=IF(H2="";"";INT(H2-TODAY()))'
-    archive = ranges["'Архив'!A2:T2"][0]
+    assert active[12] == "'0174100000626000005"
+    assert "zakupki.gov.ru" in active[18]
+    assert active[20] == "'1"
+    assert "example.test/1" in active[21]
+    assert active[22:28] == [
+        "ЕИС",
+        "'AST-1",
+        '=HYPERLINK("https://utp.sberbank-ast.ru/purchase/1";"Открыть площадку")',
+        "44-ФЗ",
+        "rostender-meta",
+        0.98,
+    ]
+    archive = ranges["'Архив'!A2:AB2"][0]
     assert archive[0] == "fake:closed"
     assert archive[2] == "Не найдена в последнем запуске"
-    selected = ranges["'Мой отбор'!A2:T2"][0]
+    selected = ranges["'Мой отбор'!A2:AB2"][0]
     assert selected[0] == "fake:1"
     history = ranges["'История запусков'!A2:L2"][0]
     assert history[2:4] == [3, 2]
@@ -160,11 +198,11 @@ def test_sync_keeps_last_good_rows_when_source_is_temporarily_blocked() -> None:
         payload for url, payload in session.posts if url.endswith("values:batchUpdate")
     )
     ranges = {item["range"]: item["values"] for item in values_payload["data"]}
-    active = ranges["'Все актуальные'!A2:T2"][0]
+    active = ranges["'Все актуальные'!A2:AB2"][0]
     assert active[0] == "fake:1"
     assert active[2] == "⚠ Источник временно недоступен"
     assert "CAPTCHA" in active[19]
-    archive = ranges["'Архив'!A2:T2"][0]
+    archive = ranges["'Архив'!A2:AB2"][0]
     assert archive[0] == "fake:closed"
 
 
@@ -261,3 +299,44 @@ def test_generated_customer_hyperlink_remains_formula() -> None:
     formula = '=HYPERLINK("https://example.test/";"Открыть")'
 
     assert _safe_customer_row([formula]) == [formula]
+
+
+def test_legacy_google_row_is_mapped_by_headers_without_moving_manual_fields() -> None:
+    # The input order is deliberately shuffled to prove migration is driven by
+    # names, not the old 20-column positions.
+    headers = ["Комментарий", "Ключ", "Мой выбор", "Ссылка", "Номер", "Название"]
+    row = [
+        "Позвонить",
+        "rostender:94216089",
+        "Беру",
+        "https://rostender.info/tender/94216089",
+        "94216089",
+        "Поставка МФУ",
+    ]
+
+    migrated = _migrate_existing_row(row, headers)
+
+    assert migrated[0] == "rostender:94216089"
+    assert migrated[4] == "Поставка МФУ"
+    assert migrated[16:18] == ["Беру", "Позвонить"]
+    assert migrated[12] == ""
+    assert migrated[18] == ""
+    assert migrated[20] == "94216089"  # original provenance is preserved
+    assert migrated[21] == "https://rostender.info/tender/94216089"
+
+
+def test_unresolved_rostender_row_does_not_claim_source_id_as_official() -> None:
+    tender = TenderRecord(
+        title="Поставка МФУ",
+        url="https://rostender.info/region/krym/94216089-tender-postavka-mfu",
+        source="rostender",
+        tender_number="94216089",
+        review_priority="review",
+    )
+
+    row = _record_row(tender, set(), {}, datetime(2026, 8, 15, 12, 0))
+
+    assert row[12] == ""  # no confirmed official_number
+    assert row[18] == ""  # source URL is not a direct official/platform URL
+    assert row[20] == "'94216089"
+    assert "rostender.info" in row[21]

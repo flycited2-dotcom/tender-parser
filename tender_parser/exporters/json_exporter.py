@@ -37,6 +37,14 @@ def _to_dict(tender: TenderRecord) -> dict[str, object]:
         "document_matches": tender.document_matches,
         "delivery_region_evidence": tender.delivery_region_evidence,
         "source_confidence": tender.source_confidence,
+        "official_number": tender.official_number,
+        "official_url": tender.official_url,
+        "official_source": tender.official_source,
+        "platform_number": tender.platform_number,
+        "platform_url": tender.platform_url,
+        "procurement_law": tender.procurement_law,
+        "resolution_method": tender.resolution_method,
+        "resolution_confidence": tender.resolution_confidence,
     }
 
 

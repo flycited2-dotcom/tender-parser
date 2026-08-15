@@ -19,7 +19,7 @@ from tender_parser.run_report import SourceFetchResult, canonical_source_name
 
 
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
-DATA_HEADERS = [
+LEGACY_DATA_HEADERS = [
     "Ключ",
     "Новая",
     "Состояние",
@@ -41,6 +41,26 @@ DATA_HEADERS = [
     "Ссылка",
     "Причина включения",
 ]
+DATA_HEADERS = [
+    *LEGACY_DATA_HEADERS[:12],
+    "Официальный номер",
+    *LEGACY_DATA_HEADERS[13:18],
+    "Прямая ссылка",
+    LEGACY_DATA_HEADERS[19],
+    "Номер источника",
+    "Ссылка источника",
+    "Официальный источник",
+    "Номер на площадке",
+    "Ссылка на площадку",
+    "Закон",
+    "Способ определения",
+    "Уверенность определения",
+]
+DATA_LAST_COLUMN = "AB"
+LEGACY_HEADER_ALIASES = {
+    "Номер": "Номер источника",
+    "Ссылка": "Ссылка источника",
+}
 PRIORITY_LABELS = {
     "hot": "Горячий",
     "review": "На проверку",
@@ -70,6 +90,7 @@ SOURCE_LABELS = {
     "eis-zakupki": "ЕИС",
     "eis-regional-xml": "ЕИС XML (официальная выгрузка)",
     "rostender": "РосТендер",
+    "rostender-resolution": "Первоисточники РосТендера",
     "rts-background-snapshot": "РТС — фоновый снимок",
     "rts-rosatom": "РТС — Росатом",
     "rts-zakupki-simferopol": "РТС — Симферополь",
@@ -120,6 +141,7 @@ SOURCE_URLS = {
     "eis-regional-xml": "https://roskazna.gov.ru/gis/eis-zakupki-gov-ru",
     "EisRegionalXmlSource": "https://roskazna.gov.ru/gis/eis-zakupki-gov-ru",
     "rostender": "https://rostender.info/",
+    "rostender-resolution": "https://rostender.info/",
     "RostenderSource": "https://rostender.info/",
     "rts-background-snapshot": "https://www.rts-tender.ru/",
     "rts-rosatom": "https://www.rosatom.rts-tender.ru/market/",
@@ -216,16 +238,41 @@ class GoogleSheetsRegistry:
         try:
             session = self._session or self._authorized_session()
             metadata = self._metadata(session)
+            self._ensure_data_columns(session, metadata)
             available_sheets = {
                 str(sheet.get("properties", {}).get("title", ""))
                 for sheet in metadata.get("sheets", [])
             }
-            active_existing = self._get_values(
-                session, "'Все актуальные'!A2:T1000", value_render_option="FORMULA"
+            active_headers = _read_headers(
+                self._get_values(
+                    session,
+                    f"'Все актуальные'!A1:{DATA_LAST_COLUMN}1",
+                    value_render_option="FORMULA",
+                )
             )
-            archive_existing = self._get_values(
-                session, "'Архив'!A2:T1000", value_render_option="FORMULA"
+            archive_headers = _read_headers(
+                self._get_values(
+                    session,
+                    f"'Архив'!A1:{DATA_LAST_COLUMN}1",
+                    value_render_option="FORMULA",
+                )
             )
+            active_existing = [
+                _migrate_existing_row(row, active_headers)
+                for row in self._get_values(
+                    session,
+                    f"'Все актуальные'!A2:{DATA_LAST_COLUMN}1000",
+                    value_render_option="FORMULA",
+                )
+            ]
+            archive_existing = [
+                _migrate_existing_row(row, archive_headers)
+                for row in self._get_values(
+                    session,
+                    f"'Архив'!A2:{DATA_LAST_COLUMN}1000",
+                    value_render_option="FORMULA",
+                )
+            ]
             history_existing = self._get_values(session, "'История запусков'!A2:L1000")
             customer_existing = (
                 self._get_values(
@@ -396,6 +443,39 @@ class GoogleSheetsRegistry:
             raise ValueError("invalid spreadsheet metadata")
         return payload
 
+    def _ensure_data_columns(self, session: object, metadata: dict) -> None:
+        """Expand legacy 20-column grids before reading/writing through AB."""
+        requests_payload: list[dict[str, object]] = []
+        for sheet in metadata.get("sheets", []):
+            properties = sheet.get("properties", {})
+            title = str(properties.get("title", ""))
+            sheet_id = properties.get("sheetId")
+            column_count = properties.get("gridProperties", {}).get("columnCount")
+            if (
+                title not in TABLE_NAMES
+                or sheet_id is None
+                or not isinstance(column_count, int)
+                or column_count >= len(DATA_HEADERS)
+            ):
+                continue
+            requests_payload.append(
+                {
+                    "appendDimension": {
+                        "sheetId": int(sheet_id),
+                        "dimension": "COLUMNS",
+                        "length": len(DATA_HEADERS) - column_count,
+                    }
+                }
+            )
+        if not requests_payload:
+            return
+        response = session.post(  # type: ignore[attr-defined]
+            f"{SHEETS_API}/{self.config.spreadsheet_id}:batchUpdate",
+            json={"requests": requests_payload},
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
+
     def _get_values(
         self,
         session: object,
@@ -423,10 +503,23 @@ class GoogleSheetsRegistry:
         customer_rows: list[list[object]],
         available_sheets: set[str],
     ) -> None:
-        data = [
-            {"range": f"'{sheet}'!A2:T{len(rows) + 1}", "values": rows}
-            for sheet, rows in values_by_sheet.items()
-        ]
+        data: list[dict[str, object]] = []
+        for sheet, rows in values_by_sheet.items():
+            # Rewriting headers is intentional: old registries had 20 columns.
+            # Named migration above preserves manual fields before the table is
+            # expanded to the new provenance-aware 28-column layout.
+            data.append(
+                {
+                    "range": f"'{sheet}'!A1:{DATA_LAST_COLUMN}1",
+                    "values": [DATA_HEADERS],
+                }
+            )
+            data.append(
+                {
+                    "range": f"'{sheet}'!A2:{DATA_LAST_COLUMN}{len(rows) + 1}",
+                    "values": rows,
+                }
+            )
         if history_rows:
             data.append(
                 {
@@ -456,7 +549,8 @@ class GoogleSheetsRegistry:
         response.raise_for_status()
 
         clear_specs = [
-            (sheet, "T", len(rows) + 2) for sheet, rows in values_by_sheet.items()
+            (sheet, DATA_LAST_COLUMN, len(rows) + 2)
+            for sheet, rows in values_by_sheet.items()
         ]
         clear_specs.append(("История запусков", "L", len(history_rows) + 2))
         if SUMMARY_SHEET in available_sheets:
@@ -634,6 +728,8 @@ def _record_row(
         tender.unique_key,
         (_format_dt(tender.discovered_at or generated_at), "Не выбрано", ""),
     )
+    direct_number = tender.official_number
+    direct_url = tender.official_url or tender.platform_url
     return [
         tender.unique_key,
         "🆕" if tender.unique_key in fresh_keys else "",
@@ -647,15 +743,66 @@ def _record_row(
         tender.customer or "",
         tender.category or "",
         _source_link(tender.source),
-        tender.tender_number or "",
+        _identifier(direct_number),
         tender.status or "",
         first_seen,
         _format_dt(generated_at),
         choice or "Не выбрано",
         comment or "",
-        _hyperlink(tender.url, "Открыть закупку"),
+        _hyperlink(direct_url, "Открыть первоисточник") if direct_url else "",
         tender.include_reason,
+        _identifier(tender.tender_number),
+        _hyperlink(tender.url, "Открыть исходную карточку"),
+        tender.official_source or "",
+        _identifier(tender.platform_number),
+        _hyperlink(tender.platform_url or "", "Открыть площадку")
+        if tender.platform_url
+        else "",
+        tender.procurement_law or "",
+        tender.resolution_method or "",
+        tender.resolution_confidence,
     ]
+
+
+def _read_headers(values: list[list[object]]) -> list[str]:
+    if not values:
+        return []
+    return [str(value or "").strip() for value in values[0]]
+
+
+def _migrate_existing_row(raw: list[object], headers: list[str]) -> list[object]:
+    """Map registry rows by header name, including the legacy 20-column layout.
+
+    Manual columns must never move positionally when new provenance columns are
+    introduced.  Legacy ``Номер``/``Ссылка`` describe the aggregator/source
+    card; they are copied into explicit source columns and must never be shown
+    as official data until resolution has actually succeeded.
+    """
+    source_headers = headers
+    if not source_headers:
+        source_headers = (
+            LEGACY_DATA_HEADERS if len(raw) <= len(LEGACY_DATA_HEADERS) else DATA_HEADERS
+        )
+
+    aliases = {
+        old.casefold(): new for old, new in LEGACY_HEADER_ALIASES.items()
+    }
+    current_by_name = {
+        header.casefold(): index for index, header in enumerate(DATA_HEADERS)
+    }
+    result: list[object] = [""] * len(DATA_HEADERS)
+    for index, value in enumerate(raw):
+        if index >= len(source_headers):
+            break
+        source_header = source_headers[index].strip()
+        if not source_header:
+            continue
+        target_header = aliases.get(source_header.casefold(), source_header)
+        target_index = current_by_name.get(target_header.casefold())
+        if target_index is not None:
+            result[target_index] = value
+
+    return result
 
 
 def _saved_fields(rows: Iterable[list[object]]) -> dict[str, tuple[object, object, object]]:
@@ -698,9 +845,15 @@ def _decorate_existing_row(raw: list[object]) -> list[object]:
     source = str(row[11] or "")
     if source and not source.startswith("="):
         row[11] = _source_link(source)
-    tender_url = str(row[18] or "")
-    if tender_url.startswith(("http://", "https://")):
-        row[18] = _hyperlink(tender_url, "Открыть закупку")
+    link_specs = (
+        (18, "Открыть первоисточник"),
+        (21, "Открыть исходную карточку"),
+        (24, "Открыть площадку"),
+    )
+    for index, label in link_specs:
+        url = str(row[index] or "")
+        if url.startswith(("http://", "https://")):
+            row[index] = _hyperlink(url, label)
     return row
 
 
@@ -824,6 +977,11 @@ def _hyperlink(url: str, label: str) -> object:
     escaped_url = url.replace('"', '""')
     escaped_label = label.replace('"', '""')
     return f'=HYPERLINK("{escaped_url}";"{escaped_label}")'
+
+
+def _identifier(value: str | None) -> str:
+    """Force procurement identifiers to text under USER_ENTERED semantics."""
+    return f"'{value}" if value else ""
 
 
 def _safe_customer_row(row: list[object]) -> list[object]:

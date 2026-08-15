@@ -132,17 +132,52 @@ def _tender_row(tender: TenderRecord) -> str:
             _line("Совпадения", ", ".join(tender.document_matches)),
             _line("Evidence", tender.delivery_region_evidence),
             _line("Причина", tender.include_reason or tender.exclude_reason),
+            _line("Способ определения", tender.resolution_method or ""),
         ]
         if value
     )
     terms = f'<div class="muted">{escape(", ".join(tender.matched_terms))}</div>' if tender.matched_terms else ""
+    provenance = _provenance_html(tender)
     return f"""<tr>
   <td><span class="badge {css_class}">{escape(PRIORITY_LABELS.get(priority, priority))}</span></td>
-  <td><a href="{escape(_safe_url(tender.url))}" target="_blank" rel="noopener">{escape(tender.title)}</a>{terms}<div class="muted">{escape(tender.customer or "")}</div></td>
+  <td><a href="{escape(_safe_url(tender.url))}" target="_blank" rel="noopener">{escape(tender.title)}</a>{terms}<div class="muted">{escape(tender.customer or "")}</div>{provenance}</td>
   <td>{escape(tender.region or "")}<br>{escape(_money(tender.price))}<br>{escape(_date(tender.deadline))}</td>
   <td>{escape(tender.source)}<br><span class="muted">{escape(tender.tender_number or "")}</span><br><span class="muted">confidence {tender.source_confidence:.2f}</span></td>
   <td>{evidence}</td>
 </tr>"""
+
+
+def _provenance_html(tender: TenderRecord) -> str:
+    direct_url = tender.official_url or tender.platform_url
+    direct_number = tender.official_number or tender.platform_number
+    if direct_url:
+        direct = (
+            f'<a href="{escape(_safe_url(direct_url))}" target="_blank" rel="noopener">'
+            f'{escape(direct_number or "Открыть первоисточник")}</a>'
+        )
+    elif direct_number:
+        direct = escape(direct_number)
+    else:
+        direct = ""
+
+    rows = []
+    if direct:
+        rows.append(f"<b>Первоисточник:</b> {direct}")
+    if tender.official_source:
+        rows.append(f"<b>Официальный источник:</b> {escape(tender.official_source)}")
+    if tender.platform_number:
+        platform_number = escape(tender.platform_number)
+        if tender.platform_url:
+            platform_number = (
+                f'<a href="{escape(_safe_url(tender.platform_url))}" target="_blank" '
+                f'rel="noopener">{platform_number}</a>'
+            )
+        rows.append(f"<b>Номер на площадке:</b> {platform_number}")
+    if tender.procurement_law:
+        rows.append(f"<b>Закон:</b> {escape(tender.procurement_law)}")
+    if tender.resolution_method or tender.resolution_confidence:
+        rows.append(f"<b>Уверенность определения:</b> {tender.resolution_confidence:.0%}")
+    return "".join(f'<div class="muted">{row}</div>' for row in rows)
 
 
 def _source_row(item: object) -> str:

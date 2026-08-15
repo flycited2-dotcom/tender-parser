@@ -68,6 +68,14 @@ def test_storage_keeps_filled_fields_when_update_is_empty(tmp_path: Path) -> Non
         review_priority="hot",
         discovered_at=datetime(2026, 5, 19, 12, 0),
         raw_text="Поставка МФУ в Республику Крым",
+        official_number="0174100000626000005",
+        official_url="https://zakupki.gov.ru/notice/0174100000626000005",
+        official_source="ЕИС",
+        platform_number="AST-1",
+        platform_url="https://utp.sberbank-ast.ru/purchase/1",
+        procurement_law="44-ФЗ",
+        resolution_method="rostender-meta",
+        resolution_confidence=0.98,
     )
     degraded = replace(
         full,
@@ -76,6 +84,14 @@ def test_storage_keeps_filled_fields_when_update_is_empty(tmp_path: Path) -> Non
         price=None,
         deadline=None,
         raw_text="",
+        official_number=None,
+        official_url=None,
+        official_source=None,
+        platform_number=None,
+        platform_url=None,
+        procurement_law=None,
+        resolution_method=None,
+        resolution_confidence=0.0,
         filter_status="review",
         review_priority="review",
     )
@@ -90,6 +106,14 @@ def test_storage_keeps_filled_fields_when_update_is_empty(tmp_path: Path) -> Non
     assert row.deadline == datetime(2026, 5, 25, 10, 0)
     assert row.raw_text == "Поставка МФУ в Республику Крым"
     assert row.review_priority == "review"
+    assert row.official_number == "0174100000626000005"
+    assert row.official_url == "https://zakupki.gov.ru/notice/0174100000626000005"
+    assert row.official_source == "ЕИС"
+    assert row.platform_number == "AST-1"
+    assert row.platform_url == "https://utp.sberbank-ast.ru/purchase/1"
+    assert row.procurement_law == "44-ФЗ"
+    assert row.resolution_method == "rostender-meta"
+    assert row.resolution_confidence == 0.98
 
 
 def test_storage_reports_promotion_to_actionable(tmp_path: Path) -> None:
@@ -186,6 +210,14 @@ def test_merge_with_history_restores_known_fields_without_overwriting_fresh_valu
         document_matches=["мфу"],
         delivery_region_evidence="notice.pdf: Республика Крым",
         source_confidence=0.9,
+        official_number="0174100000626000005",
+        official_url="https://zakupki.gov.ru/notice/0174100000626000005",
+        official_source="ЕИС",
+        platform_number="AST-1",
+        platform_url="https://utp.sberbank-ast.ru/purchase/1",
+        procurement_law="44-ФЗ",
+        resolution_method="rostender-meta",
+        resolution_confidence=0.98,
     )
     storage.upsert_many([historical])
 
@@ -203,6 +235,14 @@ def test_merge_with_history_restores_known_fields_without_overwriting_fresh_valu
         document_matches=[],
         delivery_region_evidence="",
         source_confidence=0.0,
+        official_number=None,
+        official_url=None,
+        official_source=None,
+        platform_number=None,
+        platform_url=None,
+        procurement_law=None,
+        resolution_method=None,
+        resolution_confidence=0.0,
     )
 
     merged = storage.merge_with_history([partial])[0]
@@ -217,6 +257,14 @@ def test_merge_with_history_restores_known_fields_without_overwriting_fresh_valu
     assert merged.document_matches == ["мфу"]
     assert merged.delivery_region_evidence == "notice.pdf: Республика Крым"
     assert merged.source_confidence == 0.9
+    assert merged.official_number == "0174100000626000005"
+    assert merged.official_url == "https://zakupki.gov.ru/notice/0174100000626000005"
+    assert merged.official_source == "ЕИС"
+    assert merged.platform_number == "AST-1"
+    assert merged.platform_url == "https://utp.sberbank-ast.ru/purchase/1"
+    assert merged.procurement_law == "44-ФЗ"
+    assert merged.resolution_method == "rostender-meta"
+    assert merged.resolution_confidence == 0.98
 
 
 def test_merge_with_history_preserves_order_and_unknown_records(tmp_path: Path) -> None:

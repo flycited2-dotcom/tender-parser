@@ -32,6 +32,7 @@ from tender_parser.run_report import (
     load_previous_counts,
     load_previous_profile,
 )
+from tender_parser.rostender_resolution import RostenderOfficialResolver
 from tender_parser.rts_background import (
     DEFAULT_MAX_SNAPSHOT_AGE_HOURS,
     RtsSnapshotStore,
@@ -65,6 +66,7 @@ class TenderSource(Protocol):
 
 EAT_REQUIRED_ENV_KEYS = ["EAT_API_TOKEN", "EAT_EXT_SYSTEM"]
 RunProfile = Literal["full", "fast", "local", "rts", "rts-cabinet", "rts-accumulated"]
+ACTIONABLE_PRIORITIES = {"hot", "review", "wide"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -293,6 +295,72 @@ def _rts_snapshot_max_age_hours() -> int:
     return parsed if parsed > 0 else DEFAULT_MAX_SNAPSHOT_AGE_HOURS
 
 
+def _env_enabled(name: str, *, default: bool = True) -> bool:
+    value = os.getenv(name, "1" if default else "0").strip().casefold()
+    return value in {"1", "true", "yes", "on", "да"}
+
+
+def _resolve_rostender_records(
+    tenders: list[TenderRecord],
+    collected_records: list[TenderRecord],
+    *,
+    data_dir: Path,
+) -> tuple[list[TenderRecord], SourceHealth]:
+    """Hydrate only shortlisted Rostender rows from their public metadata."""
+
+    started_at = monotonic()
+    shortlist = [
+        tender
+        for tender in tenders
+        if tender.source == "rostender"
+        and tender.review_priority in ACTIONABLE_PRIORITIES
+    ]
+    if not _env_enabled("ROSTENDER_RESOLUTION_ENABLED"):
+        return tenders, SourceHealth(
+            source="rostender-resolution",
+            status="skipped",
+            found=0,
+            elapsed_seconds=round(monotonic() - started_at, 3),
+            detail=f"отключено; кандидатов {len(shortlist)}",
+        )
+    if not shortlist:
+        return tenders, SourceHealth(
+            source="rostender-resolution",
+            status="empty",
+            found=0,
+            elapsed_seconds=round(monotonic() - started_at, 3),
+            detail="подходящих карточек Ростендера нет",
+        )
+
+    configured_cache = os.getenv("ROSTENDER_RESOLUTION_CACHE_PATH", "").strip()
+    cache_path = (
+        Path(configured_cache)
+        if configured_cache
+        else Path("data/rostender_resolution_cache.json")
+    )
+    if not cache_path.is_absolute():
+        cache_path = data_dir.parent / cache_path
+    resolver = RostenderOfficialResolver(cache_path=cache_path)
+    resolved_shortlist = resolver.resolve_shortlist(shortlist, collected_records)
+    resolved_by_key = {tender.unique_key: tender for tender in resolved_shortlist}
+    enriched = [resolved_by_key.get(tender.unique_key, tender) for tender in tenders]
+
+    resolved_count = sum(bool(item.official_number) for item in resolved_shortlist)
+    errors = [item for item in resolver.last_results if item.error]
+    status = "partial" if errors else "ok"
+    detail = (
+        f"официальный номер найден у {resolved_count}/{len(shortlist)}; "
+        f"сетевых/проверочных ошибок {len(errors)}"
+    )
+    return enriched, SourceHealth(
+        source="rostender-resolution",
+        status=status,
+        found=resolved_count,
+        elapsed_seconds=round(monotonic() - started_at, 3),
+        detail=detail,
+    )
+
+
 def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -> int:
     args = build_parser().parse_args(argv)
     base_dir = Path(args.base_dir).resolve()
@@ -373,7 +441,24 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         source_result.tenders
     )
     raw_tenders = storage.merge_with_history(enriched_tenders)
-    deduplication = deduplicate_tenders(raw_tenders)
+    preliminary_deduplication = deduplicate_tenders(raw_tenders)
+    preliminary_evaluated = [
+        evaluate_tender(tender, now=current_time)
+        for tender in preliminary_deduplication.tenders
+    ]
+    if any(tender.source == "rostender" for tender in raw_tenders):
+        resolved_tenders, resolution_health = _resolve_rostender_records(
+            preliminary_evaluated,
+            raw_tenders,
+            data_dir=data_dir,
+        )
+        source_result.health.append(resolution_health)
+    else:
+        resolved_tenders = preliminary_evaluated
+    # Official-number joins may now replace an aggregator duplicate with the
+    # already collected official EIS/ETP record. Re-run the cheap in-memory
+    # deduplication once after resolution, then evaluate the final records.
+    deduplication = deduplicate_tenders(resolved_tenders)
     evaluated = [evaluate_tender(tender, now=current_time) for tender in deduplication.tenders]
 
     # Только предпросмотр «новых»: фиксация в БД — после успешных экспортов,

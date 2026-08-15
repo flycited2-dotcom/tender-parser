@@ -65,7 +65,15 @@ class TenderStorage:
                     detail_status TEXT,
                     document_matches TEXT,
                     delivery_region_evidence TEXT,
-                    source_confidence REAL
+                    source_confidence REAL,
+                    official_number TEXT,
+                    official_url TEXT,
+                    official_source TEXT,
+                    platform_number TEXT,
+                    platform_url TEXT,
+                    procurement_law TEXT,
+                    resolution_method TEXT,
+                    resolution_confidence REAL
                 )
                 """
             )
@@ -97,6 +105,19 @@ class TenderStorage:
                 conn.execute("ALTER TABLE tenders ADD COLUMN delivery_region_evidence TEXT")
             if "source_confidence" not in columns:
                 conn.execute("ALTER TABLE tenders ADD COLUMN source_confidence REAL")
+            provenance_columns = {
+                "official_number": "TEXT",
+                "official_url": "TEXT",
+                "official_source": "TEXT",
+                "platform_number": "TEXT",
+                "platform_url": "TEXT",
+                "procurement_law": "TEXT",
+                "resolution_method": "TEXT",
+                "resolution_confidence": "REAL",
+            }
+            for name, sql_type in provenance_columns.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE tenders ADD COLUMN {name} {sql_type}")
 
     def upsert_many(
         self,
@@ -123,9 +144,11 @@ class TenderStorage:
                         price, deadline, status, published_at, discovered_at, last_seen_at,
                         raw_text, category, include_reason, exclude_reason, filter_status,
                         match_confidence, review_priority, detail_status, document_matches,
-                        delivery_region_evidence, source_confidence
+                        delivery_region_evidence, source_confidence, official_number,
+                        official_url, official_source, platform_number, platform_url,
+                        procurement_law, resolution_method, resolution_confidence
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(unique_key) DO UPDATE SET
                         title=excluded.title,
                         url=excluded.url,
@@ -154,7 +177,28 @@ class TenderStorage:
                         delivery_region_evidence=COALESCE(
                             NULLIF(excluded.delivery_region_evidence, ''), delivery_region_evidence
                         ),
-                        source_confidence=MAX(source_confidence, excluded.source_confidence)
+                        source_confidence=MAX(source_confidence, excluded.source_confidence),
+                        official_number=COALESCE(
+                            NULLIF(excluded.official_number, ''), official_number
+                        ),
+                        official_url=COALESCE(NULLIF(excluded.official_url, ''), official_url),
+                        official_source=COALESCE(
+                            NULLIF(excluded.official_source, ''), official_source
+                        ),
+                        platform_number=COALESCE(
+                            NULLIF(excluded.platform_number, ''), platform_number
+                        ),
+                        platform_url=COALESCE(NULLIF(excluded.platform_url, ''), platform_url),
+                        procurement_law=COALESCE(
+                            NULLIF(excluded.procurement_law, ''), procurement_law
+                        ),
+                        resolution_method=COALESCE(
+                            NULLIF(excluded.resolution_method, ''), resolution_method
+                        ),
+                        resolution_confidence=MAX(
+                            COALESCE(resolution_confidence, 0.0),
+                            COALESCE(excluded.resolution_confidence, 0.0)
+                        )
                     """,
                     (
                         tender.unique_key,
@@ -181,6 +225,14 @@ class TenderStorage:
                         json.dumps(tender.document_matches, ensure_ascii=False),
                         tender.delivery_region_evidence,
                         tender.source_confidence,
+                        tender.official_number,
+                        tender.official_url,
+                        tender.official_source,
+                        tender.platform_number,
+                        tender.platform_url,
+                        tender.procurement_law,
+                        tender.resolution_method,
+                        tender.resolution_confidence,
                     ),
                 )
             for candidate in notification_candidates or []:
@@ -245,6 +297,16 @@ class TenderStorage:
                 current.delivery_region_evidence or previous.delivery_region_evidence
             ),
             source_confidence=max(current.source_confidence, previous.source_confidence),
+            official_number=current.official_number or previous.official_number,
+            official_url=current.official_url or previous.official_url,
+            official_source=current.official_source or previous.official_source,
+            platform_number=current.platform_number or previous.platform_number,
+            platform_url=current.platform_url or previous.platform_url,
+            procurement_law=current.procurement_law or previous.procurement_law,
+            resolution_method=current.resolution_method or previous.resolution_method,
+            resolution_confidence=max(
+                current.resolution_confidence, previous.resolution_confidence
+            ),
         )
 
     def _is_new(self, conn: sqlite3.Connection, tender: TenderRecord) -> bool:
@@ -334,4 +396,12 @@ class TenderStorage:
             document_matches=json.loads(row["document_matches"] or "[]"),
             delivery_region_evidence=row["delivery_region_evidence"] or "",
             source_confidence=row["source_confidence"] or 0.0,
+            official_number=row["official_number"],
+            official_url=row["official_url"],
+            official_source=row["official_source"],
+            platform_number=row["platform_number"],
+            platform_url=row["platform_url"],
+            procurement_law=row["procurement_law"],
+            resolution_method=row["resolution_method"],
+            resolution_confidence=row["resolution_confidence"] or 0.0,
         )

@@ -36,6 +36,17 @@ class TenderRecord:
     document_matches: list[str] = field(default_factory=list)
     delivery_region_evidence: str = ""
     source_confidence: float = 0.0
+    # Direct identifiers resolved from the original procurement system.  The
+    # source ``tender_number``/``url`` remain untouched for provenance (for
+    # example, they can be Rostender's internal card ID and URL).
+    official_number: str | None = None
+    official_url: str | None = None
+    official_source: str | None = None
+    platform_number: str | None = None
+    platform_url: str | None = None
+    procurement_law: str | None = None
+    resolution_method: str | None = None
+    resolution_confidence: float = 0.0
 
     @property
     def unique_key(self) -> str:

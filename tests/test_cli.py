@@ -1,10 +1,18 @@
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from openpyxl import load_workbook
 
-from tender_parser.cli import _all_keywords, build_default_source, build_source_for_profile, run
+from tender_parser.cli import (
+    _all_keywords,
+    _resolve_rostender_records,
+    build_default_source,
+    build_source_for_profile,
+    run,
+)
 from tender_parser.models import TenderRecord
 from tender_parser.notifications import NotificationResult
 from tender_parser.run_report import SourceFetchResult, SourceHealth
@@ -240,6 +248,92 @@ def test_build_rts_cabinet_profile_runs_only_cabinet_source() -> None:
     assert isinstance(source, CompositeSource)
     assert len(source.sources) == 1
     assert isinstance(source.sources[0], RtsCabinetBrowserSource)
+
+
+def test_rostender_resolution_opens_only_actionable_shortlist(
+    tmp_path: Path, monkeypatch
+) -> None:
+    hot = TenderRecord(
+        title="Поставка МФУ в Республику Крым",
+        url="https://rostender.info/tender/94300001",
+        source="rostender",
+        tender_number="94300001",
+        review_priority="hot",
+    )
+    excluded = TenderRecord(
+        title="Нецелевая закупка",
+        url="https://rostender.info/tender/94300002",
+        source="rostender",
+        tender_number="94300002",
+        review_priority="excluded",
+    )
+    captured: dict[str, object] = {}
+
+    class FakeResolver:
+        def __init__(self, *, cache_path: Path) -> None:
+            captured["cache_path"] = cache_path
+            self.last_results: list[object] = []
+
+        def resolve_shortlist(
+            self,
+            shortlist: list[TenderRecord],
+            collected: list[TenderRecord],
+        ) -> list[TenderRecord]:
+            captured["shortlist"] = shortlist
+            captured["collected"] = collected
+            resolved = replace(
+                shortlist[0],
+                official_number="0175400000326000024",
+                official_url="https://zakupki.gov.ru/official",
+                official_source="eis-zakupki",
+                procurement_law="44-ФЗ",
+                resolution_method="rostender-meta+eis-exact",
+                resolution_confidence=1.0,
+            )
+            self.last_results = [SimpleNamespace(error=None)]
+            return [resolved]
+
+    monkeypatch.setattr("tender_parser.cli.RostenderOfficialResolver", FakeResolver)
+    monkeypatch.delenv("ROSTENDER_RESOLUTION_CACHE_PATH", raising=False)
+    monkeypatch.setenv("ROSTENDER_RESOLUTION_ENABLED", "1")
+
+    resolved, health = _resolve_rostender_records(
+        [hot, excluded],
+        [hot, excluded],
+        data_dir=tmp_path / "data",
+    )
+
+    assert captured["shortlist"] == [hot]
+    assert captured["cache_path"] == tmp_path / "data" / "rostender_resolution_cache.json"
+    assert resolved[0].tender_number == hot.tender_number
+    assert resolved[0].official_number == "0175400000326000024"
+    assert resolved[1] is excluded
+    assert health.source == "rostender-resolution"
+    assert health.status == "ok"
+    assert health.found == 1
+
+
+def test_rostender_resolution_can_be_disabled_without_network(
+    tmp_path: Path, monkeypatch
+) -> None:
+    record = TenderRecord(
+        title="Поставка МФУ в Республику Крым",
+        url="https://rostender.info/tender/94300001",
+        source="rostender",
+        tender_number="94300001",
+        review_priority="hot",
+    )
+    monkeypatch.setenv("ROSTENDER_RESOLUTION_ENABLED", "0")
+
+    resolved, health = _resolve_rostender_records(
+        [record],
+        [record],
+        data_dir=tmp_path / "data",
+    )
+
+    assert resolved == [record]
+    assert health.status == "skipped"
+    assert health.found == 0
 
 
 def test_run_local_profile_uses_imports_without_live_sources(tmp_path: Path) -> None:

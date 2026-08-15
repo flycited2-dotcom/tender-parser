@@ -33,6 +33,14 @@ HEADERS = [
     "уверенность",
     "мой_выбор",
     "комментарий",
+    "официальный номер",
+    "прямая ссылка",
+    "официальный источник",
+    "номер на площадке",
+    "ссылка на площадку",
+    "закон",
+    "способ определения",
+    "уверенность определения",
     "номер",
     "источник",
     "статус",
@@ -58,6 +66,14 @@ COLUMN_WIDTHS = {
     "уверенность": 15,
     "мой_выбор": 12,
     "комментарий": 24,
+    "официальный номер": 22,
+    "прямая ссылка": 23,
+    "официальный источник": 20,
+    "номер на площадке": 22,
+    "ссылка на площадку": 22,
+    "закон": 12,
+    "способ определения": 24,
+    "уверенность определения": 14,
     "номер": 16,
     "источник": 18,
     "статус": 16,
@@ -304,6 +320,16 @@ def _append_rows(
                     tender.match_confidence or "",
                     choice,
                     comment,
+                    tender.official_number or "",
+                    "Открыть первоисточник"
+                    if (tender.official_url or tender.platform_url)
+                    else "",
+                    tender.official_source or "",
+                    tender.platform_number or "",
+                    "Открыть площадку" if tender.platform_url else "",
+                    tender.procurement_law or "",
+                    tender.resolution_method or "",
+                    tender.resolution_confidence,
                     tender.tender_number or "",
                     tender.source,
                     tender.status or "",
@@ -344,12 +370,28 @@ def _append_rows(
             title_cell.hyperlink = tender.url
             title_cell.font = LINK_FONT
 
+        direct_link_cell = sheet.cell(row=row, column=HEADERS.index("прямая ссылка") + 1)
+        direct_url = tender.official_url or tender.platform_url
+        if direct_url:
+            direct_link_cell.hyperlink = direct_url
+            direct_link_cell.font = LINK_FONT
+        platform_link_cell = sheet.cell(
+            row=row, column=HEADERS.index("ссылка на площадку") + 1
+        )
+        if tender.platform_url:
+            platform_link_cell.hyperlink = tender.platform_url
+            platform_link_cell.font = LINK_FONT
+
         price_cell = sheet.cell(row=row, column=HEADERS.index("сумма") + 1)
         price_cell.number_format = PRICE_FORMAT
         deadline_cell = sheet.cell(row=row, column=HEADERS.index("срок_подачи") + 1)
         deadline_cell.number_format = DATE_FORMAT
-        # Номер как текст: Excel не должен превращать 19-значные номера в float.
-        sheet.cell(row=row, column=HEADERS.index("номер") + 1).number_format = "@"
+        # Номера как текст: Excel не должен превращать 19-значные идентификаторы в float.
+        for header in ("официальный номер", "номер на площадке", "номер"):
+            sheet.cell(row=row, column=HEADERS.index(header) + 1).number_format = "@"
+        sheet.cell(
+            row=row, column=HEADERS.index("уверенность определения") + 1
+        ).number_format = "0%"
         for header in ("причина_включения", "причина_исключения", "delivery_region_evidence"):
             sheet.cell(row=row, column=HEADERS.index(header) + 1).alignment = WRAP_TOP
 
