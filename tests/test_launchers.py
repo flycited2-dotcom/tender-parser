@@ -101,3 +101,11 @@ def test_isolated_rts_task_has_hard_timeout_and_scheduler_retries() -> None:
         assert "-UserId 'SYSTEM'" in task_installer
         assert "-LogonType ServiceAccount" in task_installer
         assert "-Principal $principal" in task_installer
+
+
+def test_tender_agent_has_one_click_hidden_and_visible_launchers() -> None:
+    hidden = (ROOT / "Тендерный_агент.vbs").read_text(encoding="utf-8")
+    visible = (ROOT / "Открыть_тендерного_агента.bat").read_text(encoding="utf-8")
+
+    assert "pythonw -m tender_parser control-center --open-browser" in hidden
+    assert "python -m tender_parser control-center --open-browser" in visible

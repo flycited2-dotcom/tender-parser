@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ from time import monotonic
 from typing import Literal, Protocol, Sequence
 
 from tender_parser import config
+from tender_parser.case_preflight import analyze_case_documents, export_preflight
+from tender_parser.case_report import export_case_report
 from tender_parser.dedup import deduplicate_tenders
 from tender_parser.document_downloader import DocumentDownloadConfig, EisDocumentDownloader
 from tender_parser.direct_links import EisCardLinkEnricher, normalize_direct_links
@@ -58,11 +61,17 @@ from tender_parser.sources.sberbank_ast import SberbankAstSource
 from tender_parser.sources.sevastopol_small_purchases import SevastopolSmallPurchasesAdapter
 from tender_parser.sources.zakazrf import ZakazRfSource
 from tender_parser.storage import TenderStorage
+from tender_parser.supplier_search import (
+    TenderProductApiGateway,
+    export_supplier_search,
+    search_case_products,
+)
 from tender_parser.suppliers import (
     SupplierCatalog,
     export_supplier_matches,
     format_supplier_matches,
 )
+from tender_parser.tender_case import calculate_case, initialize_case, load_case, slugify_case_id
 
 
 class TenderSource(Protocol):
@@ -91,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
             "supplier-search",
             "supplier-import",
             "customers-refresh",
+            "case-init",
+            "case-preflight",
+            "case-products",
+            "case-report",
+            "control-center",
         ],
     )
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
@@ -103,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sender", default="", help="Sender email for supplier-import")
     parser.add_argument("--channel", default="manual", help="Import channel: gmail, telegram, manual")
     parser.add_argument("--message-id", default="", help="Source message ID for audit trail")
+    parser.add_argument("--case-id", default="", help="Tender case identifier")
+    parser.add_argument("--title", default="", help="Tender title for case-init")
+    parser.add_argument("--host", default="127.0.0.1", help="Control center bind address")
+    parser.add_argument("--port", type=int, default=8765, help="Control center port")
+    parser.add_argument("--open-browser", action="store_true", help="Open control center in the default browser")
     parser.add_argument(
         "--auto-register",
         action="store_true",
@@ -279,6 +298,139 @@ def _check_env_command(base_dir: Path) -> int:
     return 0 if all(status.values()) else 1
 
 
+def _case_init_command(base_dir: Path, case_id: str, title: str) -> int:
+    effective_id = slugify_case_id(
+        case_id or datetime.now().strftime("tender-%Y%m%d-%H%M%S")
+    )
+    case_dir = base_dir / "cases" / effective_id
+    try:
+        created = initialize_case(case_dir, case_id=effective_id, title=title)
+    except FileExistsError as exc:
+        print(exc)
+        return 2
+    print(f"Создано тендерное дело: {case_dir}")
+    for path in created:
+        print(f"Шаблон: {path}")
+    print(f"Документы закупки положите в: {case_dir / 'documents'}")
+    print(f"Ответы поставщиков положите в: {case_dir / 'supplier_responses'}")
+    print(
+        "После заполнения: python -m tender_parser case-report "
+        f"--case-id {effective_id}"
+    )
+    return 0
+
+
+def _resolve_case_dir(base_dir: Path, case_id: str) -> Path | None:
+    cases_dir = base_dir / "cases"
+    candidates = (
+        [
+            path
+            for path in cases_dir.iterdir()
+            if path.is_dir() and (path / "case.json").exists()
+        ]
+        if cases_dir.exists()
+        else []
+    )
+    requested = case_id.strip()
+    if requested:
+        direct = cases_dir / slugify_case_id(requested)
+        if (direct / "case.json").exists():
+            return direct
+        for candidate in candidates:
+            try:
+                payload = json.loads(
+                    (candidate / "case.json").read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                continue
+            identifiers = {
+                str(payload.get("case_id") or "").strip(),
+                str(payload.get("title") or "").strip(),
+                str(payload.get("tender_number") or "").strip(),
+            }
+            if requested in identifiers:
+                return candidate
+        return None
+    return max(
+        candidates,
+        key=lambda path: (path / "case.json").stat().st_mtime,
+        default=None,
+    )
+
+
+def _case_report_command(base_dir: Path, case_id: str) -> int:
+    case_dir = _resolve_case_dir(base_dir, case_id)
+    if case_dir is None:
+        print("Тендерное дело не найдено. Сначала создайте дело и положите в него документы.")
+        return 2
+    print(f"Используется тендерное дело: {case_dir.name}")
+    try:
+        tender_case, items, offers, expenses = load_case(case_dir)
+        economics = calculate_case(tender_case, items, offers, expenses)
+        output_path = export_case_report(
+            tender_case,
+            economics,
+            offers,
+            expenses,
+            case_dir,
+            case_dir / "output" / "case_report.xlsx",
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Не удалось сформировать отчет: {exc}")
+        return 2
+    print(f"Решение: {economics.decision} — {economics.decision_reason}")
+    print(f"Закупка товара: {economics.procurement_gross:.2f} руб.")
+    print(f"Целевая цена (30%): {economics.target_price:.2f} руб.")
+    print(f"Рабочий порог (15%): {economics.viable_price:.2f} руб.")
+    print(f"Жесткий порог (12%): {economics.hard_floor_price:.2f} руб.")
+    print(f"Excel: {output_path}")
+    return 0
+
+
+def _case_preflight_command(base_dir: Path, case_id: str) -> int:
+    case_dir = _resolve_case_dir(base_dir, case_id)
+    if case_dir is None:
+        print("Тендерное дело не найдено. Сначала создайте дело и положите в него документы.")
+        return 2
+    print(f"Используется тендерное дело: {case_dir.name}")
+    try:
+        result = analyze_case_documents(case_dir)
+        outputs = export_preflight(result, case_dir / "output")
+    except (OSError, ValueError) as exc:
+        print(f"Не удалось проанализировать документацию: {exc}")
+        return 2
+    blockers = sum(finding.severity == "blocker" for finding in result.findings)
+    risks = sum(finding.severity == "risk" for finding in result.findings)
+    print(f"Документов: {len(result.documents)}")
+    print(f"Кандидатов позиций: {len(result.item_candidates)}")
+    print(f"Блокеров: {blockers}; рисков: {risks}")
+    print(f"Готово к поиску товаров: {'да' if result.ready_for_product_search else 'нет'}")
+    for label, path in outputs.items():
+        print(f"{label}: {path}")
+    return 0
+
+
+def _case_products_command(base_dir: Path, case_id: str, limit: int) -> int:
+    case_dir = _resolve_case_dir(base_dir, case_id)
+    if case_dir is None:
+        print("Тендерное дело не найдено. Сначала создайте дело и положите в него документы.")
+        return 2
+    print(f"Используется тендерное дело: {case_dir.name}")
+    try:
+        gateway = TenderProductApiGateway.from_environment()
+        results = search_case_products(case_dir, gateway, limit_per_item=limit)
+        outputs = export_supplier_search(results, case_dir / "output")
+    except (OSError, ValueError) as exc:
+        print(f"Не удалось выполнить поиск товаров: {exc}")
+        return 2
+    found = sum(len(result.products) for result in results)
+    failed = sum(bool(result.error) for result in results)
+    print(f"Позиций: {len(results)}; кандидатов: {found}; ошибок: {failed}")
+    for label, path in outputs.items():
+        print(f"{label}: {path}")
+    return 0 if failed == 0 else 1
+
+
 def _rts_refresh_command(
     data_dir: Path,
     keywords: list[str],
@@ -397,6 +549,23 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     load_env_file(base_dir / ".env.local")
     if args.command == "check-env":
         return _check_env_command(base_dir)
+    if args.command == "case-init":
+        return _case_init_command(base_dir, args.case_id, args.title)
+    if args.command == "case-preflight":
+        return _case_preflight_command(base_dir, args.case_id)
+    if args.command == "case-products":
+        return _case_products_command(base_dir, args.case_id, args.limit)
+    if args.command == "case-report":
+        return _case_report_command(base_dir, args.case_id)
+    if args.command == "control-center":
+        from tender_parser.control_center import run_control_center
+
+        return run_control_center(
+            base_dir,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open_browser,
+        )
     if args.command == "rts-add-page":
         return _rts_add_page_command(data_dir, source)
     if args.command == "rts-watch":

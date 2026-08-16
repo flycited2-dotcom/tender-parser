@@ -15,7 +15,7 @@ from tender_parser.config import BROAD_SEARCH_TERMS, CATEGORY_KEYWORDS, REGION_T
 from tender_parser.text import normalize_text, phrase_stems_match, word_term_matches
 
 
-SUPPORTED_SUFFIXES = {".csv", ".docx", ".html", ".htm", ".json", ".pdf", ".txt", ".xlsx", ".xml"}
+SUPPORTED_SUFFIXES = {".csv", ".docx", ".html", ".htm", ".json", ".md", ".pdf", ".txt", ".xlsx", ".xml"}
 
 
 @dataclass(frozen=True)

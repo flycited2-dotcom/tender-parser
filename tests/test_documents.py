@@ -113,3 +113,18 @@ def test_document_analyzer_extracts_evidence_from_pdf(tmp_path: Path) -> None:
     assert "мфу" in evidence.matched_terms
     assert "симферополь" in evidence.regions
     assert "notice.pdf" in evidence.summary
+
+
+def test_document_analyzer_extracts_evidence_from_markdown(tmp_path: Path) -> None:
+    documents_dir = tmp_path / "documents"
+    documents_dir.mkdir()
+    (documents_dir / "instructions.md").write_text(
+        "# Инструкция\nПоставка МФУ в Республику Крым",
+        encoding="utf-8",
+    )
+
+    evidence = DocumentAnalyzer(documents_dir).analyze()
+
+    assert "мфу" in evidence.matched_terms
+    assert "республика крым" in evidence.regions
+    assert "instructions.md" in evidence.summary
