@@ -745,7 +745,7 @@ def _record_row(
         tender.customer or "",
         tender.category or "",
         _source_link(tender.source),
-        _identifier(direct_number),
+        _identifier(direct_number, direct_url),
         tender.status or "",
         first_seen,
         _format_dt(generated_at),
@@ -753,10 +753,10 @@ def _record_row(
         comment or "",
         _hyperlink(direct_url, "Открыть первоисточник") if direct_url else "",
         tender.include_reason,
-        _identifier(tender.tender_number),
+        _identifier(tender.tender_number, tender.url),
         _hyperlink(tender.url, "Открыть исходную карточку"),
         tender.official_source or "",
-        _identifier(tender.platform_number),
+        _identifier(tender.platform_number, tender.platform_url),
         _hyperlink(tender.platform_url or "", "Открыть площадку")
         if tender.platform_url
         else "",
@@ -986,9 +986,22 @@ def _hyperlink(url: str, label: str) -> object:
     return f'=HYPERLINK("{escaped_url}";"{escaped_label}")'
 
 
-def _identifier(value: str | None) -> str:
-    """Force procurement identifiers to text under USER_ENTERED semantics."""
-    return f"'{value}" if value else ""
+def _identifier(value: str | None, url: str | None = None) -> str:
+    """Keep procurement identifiers exact and make them directly actionable.
+
+    A leading apostrophe protects 19-digit EIS numbers from numeric rounding,
+    but it is confusing in the formula bar and leaves the number itself
+    unclickable.  A formula whose result is text preserves every digit without
+    displaying an apostrophe.  When a source URL is known, the same cell is a
+    hyperlink so the user can open the procurement by clicking its number.
+    """
+    if not value:
+        return ""
+    text = str(value)
+    if url:
+        return str(_hyperlink(url, text))
+    escaped = text.replace('"', '""')
+    return f'="{escaped}"'
 
 
 def _safe_customer_row(row: list[object]) -> list[object]:

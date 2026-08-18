@@ -154,13 +154,16 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
     active = ranges["'Все актуальные'!A2:AC2"][0]
     assert active[16:18] == ["Беру", "Позвонить"]
     assert active[8] == '=IF(H2="";"";INT(H2-TODAY()))'
-    assert active[12] == "'0174100000626000005"
+    assert active[12] == (
+        '=HYPERLINK("https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html'
+        '?regNumber=0174100000626000005";"0174100000626000005")'
+    )
     assert "zakupki.gov.ru" in active[18]
-    assert active[20] == "'1"
+    assert active[20] == '=HYPERLINK("https://example.test/1";"1")'
     assert "example.test/1" in active[21]
     assert active[22:28] == [
         "ЕИС",
-        "'AST-1",
+        '=HYPERLINK("https://utp.sberbank-ast.ru/purchase/1";"AST-1")',
         '=HYPERLINK("https://utp.sberbank-ast.ru/purchase/1";"Открыть площадку")',
         "44-ФЗ",
         "rostender-meta",
@@ -342,5 +345,8 @@ def test_unresolved_rostender_row_does_not_claim_source_id_as_official() -> None
 
     assert row[12] == ""  # no confirmed official_number
     assert row[18] == ""  # source URL is not a direct official/platform URL
-    assert row[20] == "'94216089"
+    assert row[20] == (
+        '=HYPERLINK("https://rostender.info/region/krym/94216089-tender-postavka-mfu";'
+        '"94216089")'
+    )
     assert "rostender.info" in row[21]
