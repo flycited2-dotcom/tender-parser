@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 
 from tender_parser.models import TenderRecord
+from tender_parser.direct_links import documents_destination
 from tender_parser.run_report import SourceFetchResult
 
 
@@ -173,6 +174,12 @@ def _provenance_html(tender: TenderRecord) -> str:
                 f'rel="noopener">{platform_number}</a>'
             )
         rows.append(f"<b>Номер на площадке:</b> {platform_number}")
+    documents = documents_destination(tender)
+    if documents:
+        rows.append(
+            f'<b>Документы:</b> <a href="{escape(_safe_url(documents[0]))}" '
+            f'target="_blank" rel="noopener">{escape(documents[1])}</a>'
+        )
     if tender.procurement_law:
         rows.append(f"<b>Закон:</b> {escape(tender.procurement_law)}")
     if tender.resolution_method or tender.resolution_confidence:

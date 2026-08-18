@@ -11,6 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from tender_parser.http import get_with_retry
+from tender_parser.direct_links import parse_eis_card_links
 from tender_parser.models import TenderRecord
 from tender_parser.sources.eis import EIS_SOURCE_NAME, USER_AGENT
 
@@ -85,7 +86,7 @@ class EisDocumentDownloader:
         eligible = [
             tender
             for tender in tenders
-            if tender.source == EIS_SOURCE_NAME and build_eis_documents_url(tender.url)
+            if _eis_card_url(tender)
         ][: self.config.max_tenders]
         if not eligible:
             report.status = "no_eis_tenders"
@@ -108,8 +109,33 @@ class EisDocumentDownloader:
         output_dir: Path,
         report: DocumentDownloadReport,
     ) -> None:
-        documents_url = build_eis_documents_url(tender.url)
+        card_url = _eis_card_url(tender)
+        if not card_url:
+            return
+        documents_url = build_eis_documents_url(card_url)
         if not documents_url:
+            # 223-ФЗ document tabs include a notice GUID which is not present
+            # in the registry URL. Resolve that public link from the confirmed
+            # common-info card before downloading its files.
+            try:
+                card_response = get_with_retry(
+                    self.session,
+                    card_url,
+                    timeout=self.config.timeout_seconds,
+                )
+                number = tender.official_number or tender.tender_number or ""
+                documents_url = parse_eis_card_links(
+                    card_response.text, card_response.url, number
+                ).documents_url
+            except requests.RequestException as exc:
+                report.errors.append(
+                    f"{tender.tender_number or tender.url}: {exc.__class__.__name__}"
+                )
+                return
+        if not documents_url:
+            report.skipped.append(
+                f"{tender.tender_number or tender.url}: documents link not found"
+            )
             return
         try:
             response = get_with_retry(
@@ -182,6 +208,16 @@ def build_eis_documents_url(tender_url: str) -> str | None:
     if replaced == parsed.path:
         return None
     return parsed._replace(path=replaced, fragment="").geturl()
+
+
+def _eis_card_url(tender: TenderRecord) -> str | None:
+    for value in (tender.official_url, tender.url if tender.source == EIS_SOURCE_NAME else None):
+        if not value:
+            continue
+        parsed = urlparse(value)
+        if parsed.scheme == "https" and parsed.hostname == "zakupki.gov.ru":
+            return value
+    return None
 
 
 def parse_eis_document_links(html: str, source_url: str) -> list[DocumentLink]:

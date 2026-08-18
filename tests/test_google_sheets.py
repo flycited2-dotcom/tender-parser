@@ -47,7 +47,7 @@ class FakeSession:
                     ]
                 }
             )
-        if "A1%3AAB1" in url:
+        if "A1%3AAC1" in url:
             return FakeResponse({"values": [LEGACY_DATA_HEADERS]})
         if "%D0%92%D1%81%D0%B5%20%D0%B0%D0%BA%D1%82%D1%83%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B5" in url:
             return FakeResponse(
@@ -97,7 +97,10 @@ def make_tender() -> TenderRecord:
         discovered_at=datetime(2026, 8, 7, 8, 0),
         review_priority="hot",
         official_number="0174100000626000005",
-        official_url="https://zakupki.gov.ru/notice/0174100000626000005",
+        official_url=(
+            "https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html"
+            "?regNumber=0174100000626000005"
+        ),
         official_source="ЕИС",
         platform_number="AST-1",
         platform_url="https://utp.sberbank-ast.ru/purchase/1",
@@ -144,11 +147,11 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
         if url.endswith(":batchUpdate")
         and any("appendDimension" in item for item in payload.get("requests", []))
     )
-    assert expand_payload["requests"][0]["appendDimension"]["length"] == 8
+    assert expand_payload["requests"][0]["appendDimension"]["length"] == 9
     values_payload = next(payload for url, payload in session.posts if url.endswith("values:batchUpdate"))
     ranges = {item["range"]: item["values"] for item in values_payload["data"]}
-    assert ranges["'Все актуальные'!A1:AB1"][0] == DATA_HEADERS
-    active = ranges["'Все актуальные'!A2:AB2"][0]
+    assert ranges["'Все актуальные'!A1:AC1"][0] == DATA_HEADERS
+    active = ranges["'Все актуальные'!A2:AC2"][0]
     assert active[16:18] == ["Беру", "Позвонить"]
     assert active[8] == '=IF(H2="";"";INT(H2-TODAY()))'
     assert active[12] == "'0174100000626000005"
@@ -163,10 +166,11 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
         "rostender-meta",
         0.98,
     ]
-    archive = ranges["'Архив'!A2:AB2"][0]
+    assert "documents.html" in active[28]
+    archive = ranges["'Архив'!A2:AC2"][0]
     assert archive[0] == "fake:closed"
     assert archive[2] == "Не найдена в последнем запуске"
-    selected = ranges["'Мой отбор'!A2:AB2"][0]
+    selected = ranges["'Мой отбор'!A2:AC2"][0]
     assert selected[0] == "fake:1"
     history = ranges["'История запусков'!A2:L2"][0]
     assert history[2:4] == [3, 2]
@@ -198,11 +202,11 @@ def test_sync_keeps_last_good_rows_when_source_is_temporarily_blocked() -> None:
         payload for url, payload in session.posts if url.endswith("values:batchUpdate")
     )
     ranges = {item["range"]: item["values"] for item in values_payload["data"]}
-    active = ranges["'Все актуальные'!A2:AB2"][0]
+    active = ranges["'Все актуальные'!A2:AC2"][0]
     assert active[0] == "fake:1"
     assert active[2] == "⚠ Источник временно недоступен"
     assert "CAPTCHA" in active[19]
-    archive = ranges["'Архив'!A2:AB2"][0]
+    archive = ranges["'Архив'!A2:AC2"][0]
     assert archive[0] == "fake:closed"
 
 

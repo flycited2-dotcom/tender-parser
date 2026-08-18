@@ -6,6 +6,7 @@ from math import isfinite
 from pathlib import Path
 
 from tender_parser.models import TenderRecord
+from tender_parser.direct_links import documents_destination
 from tender_parser.run_report import SourceFetchResult
 
 
@@ -14,6 +15,7 @@ def _format_dt(value: datetime | None) -> str | None:
 
 
 def _to_dict(tender: TenderRecord) -> dict[str, object]:
+    documents = documents_destination(tender)
     return {
         "title": tender.title,
         "url": tender.url,
@@ -45,6 +47,8 @@ def _to_dict(tender: TenderRecord) -> dict[str, object]:
         "procurement_law": tender.procurement_law,
         "resolution_method": tender.resolution_method,
         "resolution_confidence": tender.resolution_confidence,
+        "documents_url": documents[0] if documents else None,
+        "documents_label": documents[1] if documents else None,
     }
 
 

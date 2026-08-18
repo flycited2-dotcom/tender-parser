@@ -17,6 +17,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
 from tender_parser.models import TenderRecord
+from tender_parser.direct_links import documents_destination
 from tender_parser.run_report import SourceHealth
 
 
@@ -35,6 +36,7 @@ HEADERS = [
     "комментарий",
     "официальный номер",
     "прямая ссылка",
+    "документы",
     "официальный источник",
     "номер на площадке",
     "ссылка на площадку",
@@ -68,6 +70,7 @@ COLUMN_WIDTHS = {
     "комментарий": 24,
     "официальный номер": 22,
     "прямая ссылка": 23,
+    "документы": 22,
     "официальный источник": 20,
     "номер на площадке": 22,
     "ссылка на площадку": 22,
@@ -304,6 +307,7 @@ def _append_rows(
     for tender in tenders:
         days = _days_left(tender.deadline, now)
         choice, comment = _selection_for(tender, selections)
+        documents = documents_destination(tender)
         sheet.append(
             [
                 _safe(value)
@@ -324,6 +328,7 @@ def _append_rows(
                     "Открыть первоисточник"
                     if (tender.official_url or tender.platform_url)
                     else "",
+                    documents[1] if documents else "",
                     tender.official_source or "",
                     tender.platform_number or "",
                     "Открыть площадку" if tender.platform_url else "",
@@ -375,6 +380,10 @@ def _append_rows(
         if direct_url:
             direct_link_cell.hyperlink = direct_url
             direct_link_cell.font = LINK_FONT
+        documents_link_cell = sheet.cell(row=row, column=HEADERS.index("документы") + 1)
+        if documents:
+            documents_link_cell.hyperlink = documents[0]
+            documents_link_cell.font = LINK_FONT
         platform_link_cell = sheet.cell(
             row=row, column=HEADERS.index("ссылка на площадку") + 1
         )

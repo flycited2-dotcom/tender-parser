@@ -178,13 +178,24 @@ class TenderStorage:
                             NULLIF(excluded.delivery_region_evidence, ''), delivery_region_evidence
                         ),
                         source_confidence=MAX(source_confidence, excluded.source_confidence),
-                        official_number=COALESCE(
-                            NULLIF(excluded.official_number, ''), official_number
-                        ),
-                        official_url=COALESCE(NULLIF(excluded.official_url, ''), official_url),
-                        official_source=COALESCE(
-                            NULLIF(excluded.official_source, ''), official_source
-                        ),
+                        official_number=CASE
+                            WHEN excluded.resolution_method IN (
+                                'rostender-meta+unverified', 'rostender-meta-unverified'
+                            ) THEN excluded.official_number
+                            ELSE COALESCE(NULLIF(excluded.official_number, ''), official_number)
+                        END,
+                        official_url=CASE
+                            WHEN excluded.resolution_method IN (
+                                'rostender-meta+unverified', 'rostender-meta-unverified'
+                            ) THEN excluded.official_url
+                            ELSE COALESCE(NULLIF(excluded.official_url, ''), official_url)
+                        END,
+                        official_source=CASE
+                            WHEN excluded.resolution_method IN (
+                                'rostender-meta+unverified', 'rostender-meta-unverified'
+                            ) THEN excluded.official_source
+                            ELSE COALESCE(NULLIF(excluded.official_source, ''), official_source)
+                        END,
                         platform_number=COALESCE(
                             NULLIF(excluded.platform_number, ''), platform_number
                         ),
@@ -195,10 +206,15 @@ class TenderStorage:
                         resolution_method=COALESCE(
                             NULLIF(excluded.resolution_method, ''), resolution_method
                         ),
-                        resolution_confidence=MAX(
-                            COALESCE(resolution_confidence, 0.0),
-                            COALESCE(excluded.resolution_confidence, 0.0)
-                        )
+                        resolution_confidence=CASE
+                            WHEN excluded.resolution_method IN (
+                                'rostender-meta+unverified', 'rostender-meta-unverified'
+                            ) THEN COALESCE(excluded.resolution_confidence, 0.0)
+                            ELSE MAX(
+                                COALESCE(resolution_confidence, 0.0),
+                                COALESCE(excluded.resolution_confidence, 0.0)
+                            )
+                        END
                     """,
                     (
                         tender.unique_key,

@@ -10,6 +10,7 @@ from typing import Literal, Protocol, Sequence
 from tender_parser import config
 from tender_parser.dedup import deduplicate_tenders
 from tender_parser.document_downloader import DocumentDownloadConfig, EisDocumentDownloader
+from tender_parser.direct_links import EisCardLinkEnricher, normalize_direct_links
 from tender_parser.documents import DocumentAnalyzer
 from tender_parser.enrichment import TenderEnricher
 from tender_parser.env import get_env_status, load_env_file
@@ -460,6 +461,13 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     # deduplication once after resolution, then evaluate the final records.
     deduplication = deduplicate_tenders(resolved_tenders)
     evaluated = [evaluate_tender(tender, now=current_time) for tender in deduplication.tenders]
+    # Every native EIS/ETP row must expose a usable direct destination.  For
+    # actionable EIS cards we additionally verify that the notice exists and
+    # discover the actual trading platform shown by EIS.  This also prevents a
+    # number printed only by an aggregator from becoming a broken "official"
+    # link in the registry.
+    link_enricher = EisCardLinkEnricher()
+    evaluated = link_enricher.enrich(normalize_direct_links(evaluated))
 
     # Только предпросмотр «новых»: фиксация в БД — после успешных экспортов,
     # иначе упавший экспорт навсегда теряет карточки из CRM-очереди.
@@ -594,6 +602,13 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     if document_result is not None:
         print(f"Telegram-Excel: {document_result.status} {document_result.detail}")
     print(f"Google Sheets: {google_result.status} {google_result.detail}")
+    print(
+        "Прямые ссылки: "
+        f"проверено {link_enricher.last_report.checked}, "
+        f"подтверждено {link_enricher.last_report.confirmed}, "
+        f"снято ошибочных {link_enricher.last_report.invalidated}, "
+        f"ошибок сети {len(link_enricher.last_report.errors)}"
+    )
     if download_report.status == "disabled":
         print("Документы ЕИС: автозагрузка отключена")
     else:

@@ -14,6 +14,7 @@ from tender_parser.customers import (
     build_customer_registry,
     compact_tender_region,
 )
+from tender_parser.direct_links import documents_destination
 from tender_parser.models import TenderRecord
 from tender_parser.run_report import SourceFetchResult, canonical_source_name
 
@@ -55,8 +56,9 @@ DATA_HEADERS = [
     "Закон",
     "Способ определения",
     "Уверенность определения",
+    "Документы",
 ]
-DATA_LAST_COLUMN = "AB"
+DATA_LAST_COLUMN = "AC"
 LEGACY_HEADER_ALIASES = {
     "Номер": "Номер источника",
     "Ссылка": "Ссылка источника",
@@ -761,6 +763,11 @@ def _record_row(
         tender.procurement_law or "",
         tender.resolution_method or "",
         tender.resolution_confidence,
+        (
+            _hyperlink(*documents_destination(tender))
+            if documents_destination(tender)
+            else ""
+        ),
     ]
 
 

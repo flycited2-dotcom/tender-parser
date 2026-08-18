@@ -29,6 +29,7 @@ DEFAULT_DELAY_SECONDS = 0.75
 DEFAULT_TIMEOUT_SECONDS = 20.0
 DEFAULT_RETRIES = 2
 DEFAULT_NEGATIVE_TTL_HOURS = 24.0
+DEFAULT_POSITIVE_TTL_HOURS = 12.0
 MAX_RETRY_DELAY_SECONDS = 300.0
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.3"
 
@@ -146,6 +147,7 @@ class RostenderOfficialResolver:
         delay_seconds: float | None = None,
         timeout_seconds: float | None = None,
         negative_ttl_hours: float | None = None,
+        positive_ttl_hours: float | None = None,
         retries: int = DEFAULT_RETRIES,
         sleeper: Callable[[float], None] = sleep,
         now: Callable[[], datetime] | None = None,
@@ -174,6 +176,14 @@ class RostenderOfficialResolver:
             )
             if negative_ttl_hours is None
             else max(0.0, negative_ttl_hours)
+        )
+        self.positive_ttl_hours = (
+            _env_float(
+                "ROSTENDER_RESOLUTION_POSITIVE_TTL_HOURS",
+                DEFAULT_POSITIVE_TTL_HOURS,
+            )
+            if positive_ttl_hours is None
+            else max(0.0, positive_ttl_hours)
         )
         self.retries = max(0, retries)
         self._sleep = sleeper
@@ -329,20 +339,26 @@ class RostenderOfficialResolver:
         if official_url is None and not matches:
             lookup_status = str(entry.get("eis_lookup_status") or "")
             cached_eis_url = str(entry.get("eis_url") or "") or None
-            reusable_eis_cache = lookup_status == "exact" or (
+            reusable_eis_cache = (
+                lookup_status == "exact"
+                and self._cache_is_fresh(
+                    str(entry.get("eis_checked_at") or "") or None,
+                    self.positive_ttl_hours,
+                )
+            ) or (
                 lookup_status == "not_found"
                 and self._negative_cache_is_fresh(
                     str(entry.get("eis_checked_at") or "") or None
                 )
             )
-            if reusable_eis_cache and cached_eis_url:
-                official_url = cached_eis_url
+            if reusable_eis_cache:
+                official_url = cached_eis_url if lookup_status == "exact" else None
                 method = (
                     "rostender-meta+eis-exact"
                     if lookup_status == "exact"
-                    else "rostender-meta+eis-search-link"
+                    else "rostender-meta+unverified"
                 )
-                confidence = 1.0 if lookup_status == "exact" else 0.95
+                confidence = 1.0 if lookup_status == "exact" else 0.6
             else:
                 official_url, lookup_status, lookup_error = self._lookup_eis(official_number)
                 entry["eis_lookup_status"] = lookup_status
@@ -355,20 +371,24 @@ class RostenderOfficialResolver:
                 method = (
                     "rostender-meta+eis-exact"
                     if lookup_status == "exact"
-                    else "rostender-meta+eis-search-link"
+                    else "rostender-meta+unverified"
                 )
-                confidence = 1.0 if lookup_status == "exact" else 0.95
-            official_source = EIS_SOURCE_NAME
+                confidence = 1.0 if lookup_status == "exact" else 0.6
+            official_source = EIS_SOURCE_NAME if official_url else None
 
         if official_url is None:
-            # An exact ETP match is already useful, while the generic official
-            # search link still gives the user a direct, login-free next step.
-            official_url = build_eis_search_url(official_number)
-            official_source = EIS_SOURCE_NAME
+            # Keep the number printed by the aggregator for manual research,
+            # but never label it as official until EIS or a collected platform
+            # record confirms it.  A generic search URL that returns zero rows
+            # is not a procurement card.
+            platform_number = platform_number or official_number
+            if platform_url is None:
+                method = "rostender-meta+unverified"
+                confidence = min(confidence, 0.6)
 
         enriched = replace(
             record,
-            official_number=official_number,
+            official_number=official_number if official_url else None,
             official_url=official_url,
             official_source=official_source,
             platform_number=platform_number,
@@ -379,7 +399,7 @@ class RostenderOfficialResolver:
         )
         result = ResolutionResult(
             record=enriched,
-            official_number=official_number,
+            official_number=official_number if official_url else None,
             official_url=official_url,
             official_source=official_source,
             platform_number=platform_number,
@@ -392,7 +412,7 @@ class RostenderOfficialResolver:
         )
         return enriched, result, entry
 
-    def _lookup_eis(self, official_number: str) -> tuple[str, str, str | None]:
+    def _lookup_eis(self, official_number: str) -> tuple[str | None, str, str | None]:
         search_url = build_eis_search_url(official_number)
         try:
             # One official search request: no pagination and no request retry.
@@ -404,9 +424,9 @@ class RostenderOfficialResolver:
             )
             if exact is not None:
                 return exact.url, "exact", None
-            return search_url, "not_found", None
+            return None, "not_found", None
         except Exception as exc:
-            return search_url, "error", f"{type(exc).__name__}: {exc}"
+            return None, "error", f"{type(exc).__name__}: {exc}"
 
     def _get(self, url: str, *, retries: int) -> object:
         attempt = 0
@@ -459,7 +479,10 @@ class RostenderOfficialResolver:
         return value.isoformat()
 
     def _negative_cache_is_fresh(self, checked_at: str | None) -> bool:
-        if not checked_at or self.negative_ttl_hours <= 0:
+        return self._cache_is_fresh(checked_at, self.negative_ttl_hours)
+
+    def _cache_is_fresh(self, checked_at: str | None, ttl_hours: float) -> bool:
+        if not checked_at or ttl_hours <= 0:
             return False
         try:
             cached_at = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
@@ -471,7 +494,7 @@ class RostenderOfficialResolver:
         if current.tzinfo is None:
             current = current.replace(tzinfo=timezone.utc)
         age_hours = (current - cached_at).total_seconds() / 3600
-        return 0 <= age_hours < self.negative_ttl_hours
+        return 0 <= age_hours < ttl_hours
 
 
 def _build_official_index(records: Iterable[TenderRecord]) -> dict[str, list[TenderRecord]]:

@@ -140,11 +140,11 @@ def test_exact_join_enriches_copy_and_preserves_rostender_provenance(tmp_path: P
 
     assert resolved.tender_number == "94216089"
     assert resolved.url == rostender.url
-    assert resolved.official_number == NUMBER_44
-    assert resolved.official_source == "eis-zakupki"
+    assert resolved.official_number is None
+    assert resolved.official_source is None
     assert resolved.platform_number == NUMBER_44
     assert resolved.platform_url == platform.url
-    assert resolved.official_url is not None and "zakupki.gov.ru" in resolved.official_url
+    assert resolved.official_url is None
     assert resolved.procurement_law == "44-ФЗ"
     assert resolved.resolution_method == "rostender-meta+collected-exact"
     assert resolved.resolution_confidence == 1.0
@@ -207,7 +207,7 @@ def test_exact_eis_search_result_becomes_direct_official_url(tmp_path: Path) -> 
     assert resolved.resolution_confidence == 1.0
 
 
-def test_eis_failure_keeps_number_and_uses_generic_search_link(tmp_path: Path) -> None:
+def test_eis_failure_keeps_claimed_number_but_does_not_fake_official_link(tmp_path: Path) -> None:
     session = QueueSession(
         [FakeResponse(_detail_html(NUMBER_223)), requests.Timeout("eis timeout")]
     )
@@ -215,12 +215,11 @@ def test_eis_failure_keeps_number_and_uses_generic_search_link(tmp_path: Path) -
 
     resolved = resolver.resolve_shortlist([_rostender_record()])[0]
 
-    assert resolved.official_number == NUMBER_223
+    assert resolved.official_number is None
+    assert resolved.platform_number == NUMBER_223
     assert resolved.procurement_law == "223-ФЗ"
-    assert resolved.official_url is not None
-    assert "extendedsearch/results.html" in resolved.official_url
-    assert f"searchString={NUMBER_223}" in resolved.official_url
-    assert resolved.resolution_method == "rostender-meta+eis-search-link"
+    assert resolved.official_url is None
+    assert resolved.resolution_method == "rostender-meta+unverified"
     assert resolver.last_results[0].error == "Timeout: eis timeout"
 
 
@@ -236,7 +235,8 @@ def test_cache_has_fingerprint_and_checked_at_and_avoids_repeat_fetch(tmp_path: 
     calls_after_first = len(session.calls)
     second = resolver.resolve_shortlist([record])[0]
 
-    assert first.official_number == second.official_number == NUMBER_44
+    assert first.official_number is second.official_number is None
+    assert first.platform_number == second.platform_number == NUMBER_44
     assert len(session.calls) == calls_after_first
     payload = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     fingerprint = record_fingerprint(record)
@@ -263,7 +263,9 @@ def test_unresolved_detail_is_rechecked_after_negative_cache_ttl(tmp_path: Path)
     assert len(session.calls) == 1
 
     current[0] += timedelta(hours=2)
-    assert resolver.resolve_shortlist([record])[0].official_number == NUMBER_44
+    refreshed = resolver.resolve_shortlist([record])[0]
+    assert refreshed.official_number is None
+    assert refreshed.platform_number == NUMBER_44
     assert len(session.calls) == 3
 
 
@@ -291,7 +293,7 @@ def test_eis_not_found_is_rechecked_after_negative_cache_ttl(tmp_path: Path) -> 
     record = _rostender_record()
 
     first = resolver.resolve_shortlist([record])[0]
-    assert first.resolution_method == "rostender-meta+eis-search-link"
+    assert first.resolution_method == "rostender-meta+unverified"
     current[0] += timedelta(hours=23)
     resolver.resolve_shortlist([record])
     assert len(session.calls) == 2
@@ -301,6 +303,40 @@ def test_eis_not_found_is_rechecked_after_negative_cache_ttl(tmp_path: Path) -> 
     assert len(session.calls) == 3
     assert refreshed.resolution_method == "rostender-meta+eis-exact"
     assert f"common-info.html?regNumber={NUMBER_44}" in (refreshed.official_url or "")
+
+
+def test_cached_exact_eis_link_is_revalidated_and_can_be_downgraded(tmp_path: Path) -> None:
+    current = [datetime(2026, 8, 15, 9, 30, tzinfo=timezone.utc)]
+    eis_exact_html = f"""
+    <div class="search-registry-entry-block">
+      <div class="registry-entry__header-mid__number">
+        <a href="/epz/order/notice/ea20/view/common-info.html?regNumber={NUMBER_44}">№ {NUMBER_44}</a>
+      </div>
+      <div class="registry-entry__body-block">
+        <div class="registry-entry__body-title">Объект закупки</div>
+        <div class="registry-entry__body-value">Поставка оборудования</div>
+      </div>
+    </div>
+    """
+    session = QueueSession(
+        [
+            FakeResponse(_detail_html(NUMBER_44)),
+            FakeResponse(eis_exact_html),
+            FakeResponse("<html></html>"),
+        ]
+    )
+    resolver = _resolver(tmp_path, session, now=lambda: current[0])
+    record = _rostender_record()
+
+    assert resolver.resolve_shortlist([record])[0].official_number == NUMBER_44
+    current[0] += timedelta(hours=13)
+    refreshed = resolver.resolve_shortlist([record])[0]
+
+    assert refreshed.official_number is None
+    assert refreshed.official_url is None
+    assert refreshed.platform_number == NUMBER_44
+    assert refreshed.resolution_method == "rostender-meta+unverified"
+    assert len(session.calls) == 3
 
 
 def test_limit_fetches_only_first_shortlisted_records(tmp_path: Path) -> None:
@@ -317,8 +353,10 @@ def test_limit_fetches_only_first_shortlisted_records(tmp_path: Path) -> None:
 
     resolved = resolver.resolve_shortlist(records)
 
-    assert resolved[0].official_number == NUMBER_44
-    assert resolved[1].official_number == NUMBER_223
+    assert resolved[0].platform_number == NUMBER_44
+    assert resolved[1].platform_number == NUMBER_223
+    assert resolved[0].official_number is None
+    assert resolved[1].official_number is None
     assert resolved[2] is records[2]
     assert all(records[2].url not in url for url, _ in session.calls)
 
@@ -341,7 +379,8 @@ def test_429_obeys_retry_after_and_then_succeeds(tmp_path: Path) -> None:
 
     resolved = resolver.resolve_shortlist([_rostender_record()])[0]
 
-    assert resolved.official_number == NUMBER_44
+    assert resolved.official_number is None
+    assert resolved.platform_number == NUMBER_44
     assert waits == [4.0]
     assert len(session.calls) == 3
 
