@@ -290,6 +290,10 @@ def test_row_source_id_prefers_specific_rts_market_url_over_parent_site() -> Non
     assert _row_source_id(_source_link("rts-market")) == "rts-market"
 
 
+def test_row_source_id_recovers_rts_cross_platform_search() -> None:
+    assert _row_source_id(_source_link("rts-poisk")) == "rts-poisk"
+
+
 def test_row_source_id_recovers_official_eis_xml_source() -> None:
     assert _row_source_id(_source_link("eis-regional-xml")) == "eis-regional-xml"
 

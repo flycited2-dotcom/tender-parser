@@ -171,6 +171,12 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     current = now or datetime.now()
     subject = _subject_searchable(tender)
 
+    medical_ventilation = _first_matching_term(
+        subject, config.MEDICAL_VENTILATION_FALSE_POSITIVES
+    )
+    if medical_ventilation:
+        return _exclude(tender, f"медицинская вентиляция: {medical_ventilation}")
+
     stop_term = _first_matching_term(subject, config.STOP_TERMS)
     if stop_term:
         return _exclude(tender, f"стоп-тема: {stop_term}")

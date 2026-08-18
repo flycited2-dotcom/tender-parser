@@ -29,6 +29,8 @@ PLATFORM_SOURCE_NAMES = {
     "crimea-small-purchases": "Малые закупки Крыма",
 }
 
+MIXED_AGGREGATOR_SOURCES = {"rts-poisk"}
+
 
 @dataclass(frozen=True)
 class DirectLinkReport:
@@ -49,6 +51,44 @@ def normalize_direct_links(records: Iterable[TenderRecord]) -> list[TenderRecord
     normalized: list[TenderRecord] = []
     for record in records:
         number = (record.tender_number or "").strip()
+        destination_host = (urlparse(record.url).hostname or "").casefold()
+        # RTS "Поиск закупок" is a mixed catalogue: each result already
+        # exposes the exact public destination in EIS or on a trading platform.
+        if (
+            record.source in MIXED_AGGREGATOR_SOURCES
+            and destination_host == "zakupki.gov.ru"
+            and procurement_law_for_number(number)
+        ):
+            normalized.append(
+                replace(
+                    record,
+                    official_number=record.official_number or number,
+                    official_url=record.official_url or record.url,
+                    official_source=record.official_source or EIS_SOURCE_NAME,
+                    procurement_law=(
+                        record.procurement_law or procurement_law_for_number(number)
+                    ),
+                    resolution_method=record.resolution_method or "rts-poisk-direct-eis",
+                    resolution_confidence=max(record.resolution_confidence, 1.0),
+                )
+            )
+            continue
+
+        if record.source in MIXED_AGGREGATOR_SOURCES:
+            normalized.append(
+                replace(
+                    record,
+                    platform_number=record.platform_number or record.tender_number,
+                    platform_url=record.platform_url or record.url,
+                    procurement_law=(
+                        record.procurement_law or procurement_law_for_number(number)
+                    ),
+                    resolution_method=record.resolution_method or "rts-poisk-direct-platform",
+                    resolution_confidence=max(record.resolution_confidence, 1.0),
+                )
+            )
+            continue
+
         if record.source == EIS_SOURCE_NAME and procurement_law_for_number(number):
             normalized.append(
                 replace(

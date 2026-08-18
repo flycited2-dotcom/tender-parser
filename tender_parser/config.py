@@ -336,6 +336,17 @@ STOP_TERMS = [
     "запчасти уаз",
 ]
 
+# "Вентиляция" is a valid HVAC keyword, but in these medical phrases it
+# describes respiratory support rather than building climate equipment.  Keep
+# this guard outside the editable STOP_TERMS workbook so a dictionary reload
+# cannot accidentally reintroduce the false positives.
+MEDICAL_VENTILATION_FALSE_POSITIVES = [
+    "искусственной вентиляции легких",
+    "искусственная вентиляция легких",
+    "наркозно-дыхательн",
+    "анестезиологическ",
+]
+
 RTS_MARKET_BASE_URL = "https://www.rosatom.rts-tender.ru/market/"
 RTS_MARKET_ENDPOINTS = [
     {

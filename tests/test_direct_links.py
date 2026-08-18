@@ -67,6 +67,40 @@ def test_native_sources_expose_direct_eis_and_platform_destinations() -> None:
     assert normalized_gpb.platform_url == gpb.url
 
 
+def test_rts_poisk_promotes_exact_eis_destination() -> None:
+    record = TenderRecord(
+        title="Бумага",
+        url=EIS_URL,
+        source="rts-poisk",
+        tender_number=NUMBER,
+    )
+
+    normalized = normalize_direct_links([record])[0]
+
+    assert normalized.official_number == NUMBER
+    assert normalized.official_url == EIS_URL
+    assert normalized.official_source == "eis-zakupki"
+    assert normalized.platform_number is None
+    assert normalized.resolution_method == "rts-poisk-direct-eis"
+
+
+def test_rts_poisk_keeps_non_eis_as_platform_destination() -> None:
+    platform_url = "https://agregatoreat.ru/purchases/announcement/example/info"
+    record = TenderRecord(
+        title="Монтаж",
+        url=platform_url,
+        source="rts-poisk",
+        tender_number="200909853126100144",
+    )
+
+    normalized = normalize_direct_links([record])[0]
+
+    assert normalized.official_number is None
+    assert normalized.platform_number == "200909853126100144"
+    assert normalized.platform_url == platform_url
+    assert normalized.resolution_method == "rts-poisk-direct-platform"
+
+
 def test_eis_card_discovers_documents_and_exact_rts_44_destination() -> None:
     parsed = parse_eis_card_links(eis_html(), EIS_URL, NUMBER)
 

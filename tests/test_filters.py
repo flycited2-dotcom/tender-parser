@@ -684,3 +684,32 @@ def test_evaluate_tender_clears_matched_metadata_when_excluded() -> None:
     assert result.category is None
     assert result.include_reason == ""
     assert result.matched_terms == []
+
+
+def test_medical_lung_ventilation_is_not_classified_as_hvac() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title=(
+                "Датчик кислорода для системы искусственной "
+                "вентиляции легких"
+            ),
+            raw_text="Аппарат ИВЛ, Севастополь",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "медицинская вентиляция" in result.exclude_reason
+
+
+def test_anaesthesia_ventilator_is_not_classified_as_hvac() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Наркозно-дыхательный аппарат с вентиляцией",
+            raw_text="Наркозно-дыхательный аппарат, Республика Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "медицинская вентиляция" in result.exclude_reason
