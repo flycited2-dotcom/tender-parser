@@ -1,5 +1,5 @@
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 
 import pytest
 
@@ -196,7 +196,7 @@ def test_fetch_with_report_uses_rts_query_list_by_default() -> None:
 
     source.fetch_with_report(["Симферополь"])
 
-    first_url = unquote(session.requested_urls[0])
+    first_url = unquote_plus(session.requested_urls[0])
     assert RTS_SEARCH_QUERIES[0] in first_url
     assert "Симферополь" not in first_url
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import datetime
+from functools import lru_cache
 
 from tender_parser import config
 from tender_parser.models import MatchConfidence, ReviewPriority, TenderRecord
@@ -34,16 +36,46 @@ def _first_matching_term(text: str, terms: list[str]) -> str | None:
     return None
 
 
-def matching_category(text: str) -> tuple[str | None, list[str]]:
+def matching_category(
+    text: str, *, title_text: str | None = None
+) -> tuple[str | None, list[str]]:
+    best_category: str | None = None
+    best_matches: list[str] = []
+    best_score = (0, 0)
     for category, terms in config.CATEGORY_KEYWORDS.items():
-        matches = [normalize_text(term) for term in terms if _category_term_matches(text, term)]
+        matches = []
+        for term in terms:
+            normalized = _normalized_category_term(term)
+            # A lone noun/acronym found only deep in a card often belongs to a
+            # customer name, navigation block or incidental specification.
+            # Detailed text remains useful for precise multiword phrases.
+            searchable = (
+                title_text
+                if title_text is not None and " " not in normalized
+                else text
+            )
+            if _category_term_matches(searchable, term):
+                matches.append(normalized)
         if matches:
-            return category, matches
-    return None, []
+            unique_matches = list(dict.fromkeys(matches))
+            score = (
+                sum(match.count(" ") + 1 for match in unique_matches),
+                max(len(match) for match in unique_matches),
+            )
+            if score > best_score:
+                best_category = category
+                best_matches = unique_matches
+                best_score = score
+    return best_category, best_matches
+
+
+@lru_cache(maxsize=8192)
+def _normalized_category_term(term: str) -> str:
+    return normalize_text(term)
 
 
 def _category_term_matches(text: str, term: str) -> bool:
-    normalized = normalize_text(term)
+    normalized = _normalized_category_term(term)
     if not normalized:
         return False
     if " " not in normalized:
@@ -119,6 +151,14 @@ def _subject_searchable(tender: TenderRecord) -> str:
     customer = normalize_text(tender.customer)
     if customer:
         subject = subject.replace(customer, " ")
+    # Standard procurement preference boilerplate contains phrases such as
+    # "не относящихся ... к программному обеспечению" even for tyres or
+    # food.  It describes a legal exception, not the purchased object.
+    subject = re.sub(
+        r"не относящ\w* к товар\w* и программн\w* обеспечен\w*[^.;]{0,1200}",
+        " ",
+        subject,
+    )
     return subject
 
 
@@ -184,7 +224,9 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
     if tender.deadline is not None and tender.deadline <= current:
         return _exclude(tender, "срок подачи истек")
 
-    category, terms = matching_category(subject)
+    category, terms = matching_category(
+        subject, title_text=normalize_text(tender.title)
+    )
     if not category:
         return _exclude(tender, "категория интереса не найдена")
 

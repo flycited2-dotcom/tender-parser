@@ -28,14 +28,16 @@ def test_b2b_queries_do_not_require_region_in_listing_title() -> None:
     assert "картридж" in config.B2B_SEARCH_QUERIES
     assert "сетевое оборудование" in config.B2B_SEARCH_QUERIES
     assert "изолятор" in config.B2B_SEARCH_QUERIES
-    assert "ячейка 10 кВ" in config.B2B_SEARCH_QUERIES
+    assert "ячейка 10 кв" in config.B2B_SEARCH_QUERIES
     assert "металлическая мебель" in config.B2B_SEARCH_QUERIES
 
 
 def test_dictionary_covers_high_value_business_aliases() -> None:
     categories = config.CATEGORY_KEYWORDS
 
-    assert "источник бесперебойного питания" in categories["Компьютерная техника и периферия"]
+    assert "источник бесперебойного питания" in categories["Резервное электропитание и ИБП"]
+    assert "насосное оборудование" in config.SEARCH_QUERY_TERMS
+    assert "программное обеспечение" in config.SEARCH_QUERY_TERMS
     assert "вентиляционное оборудование" in categories["Климатическая техника"]
     assert "холодильное оборудование" in categories["Бытовая техника"]
     assert "уборочный инвентарь" in categories["Хозяйственные товары и уборка"]

@@ -20,9 +20,10 @@ WORKBOOK_PATH = Path("config/Настройки_поиска.xlsx")
 def test_generated_search_workbook_round_trips_current_dictionary() -> None:
     profile = load_search_profile(WORKBOOK_PATH)
 
-    assert profile.category_keywords["Компьютерная техника и периферия"][0] == "компьютер"
+    assert len(profile.category_keywords) == 10
+    assert "компьютер" in profile.category_keywords["Компьютерная техника и периферия"]
     assert "источник бесперебойного питания" in profile.category_keywords[
-        "Компьютерная техника и периферия"
+        "Резервное электропитание и ИБП"
     ]
     assert "шкаф архивный" in profile.category_keywords[
         "Офисная, архивная и складская мебель"

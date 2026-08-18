@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from tender_parser import config
 from tender_parser.filters import evaluate_tender
 from tender_parser.models import TenderRecord
 
@@ -208,7 +209,7 @@ def test_evaluate_tender_does_not_treat_monitoring_as_monitor() -> None:
     assert "категория интереса не найдена" in result.exclude_reason
 
 
-def test_evaluate_tender_does_not_treat_pipeline_as_wire() -> None:
+def test_evaluate_tender_matches_pipeline_as_plumbing() -> None:
     result = evaluate_tender(
         make_tender(
             title="Поставка трубопроводов из стали в Республику Крым",
@@ -217,8 +218,8 @@ def test_evaluate_tender_does_not_treat_pipeline_as_wire() -> None:
         now=NOW,
     )
 
-    assert result.filter_status == "excluded"
-    assert "категория интереса не найдена" in result.exclude_reason
+    assert result.filter_status == "matched"
+    assert result.category == "Отопление, сантехника и насосы"
 
 
 def test_evaluate_tender_excludes_filter_cartridges() -> None:
@@ -480,7 +481,7 @@ def test_evaluate_tender_matches_measuring_devices_and_batteries() -> None:
     )
 
     assert result.filter_status == "matched"
-    assert result.category == "Электротехника и оборудование"
+    assert result.category == "Резервное электропитание и ИБП"
 
 
 def test_evaluate_tender_ignores_boilerplate_provoditsya() -> None:
@@ -713,3 +714,40 @@ def test_anaesthesia_ventilator_is_not_classified_as_hvac() -> None:
 
     assert result.filter_status == "excluded"
     assert "медицинская вентиляция" in result.exclude_reason
+
+
+def test_single_word_category_term_must_be_present_in_title() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Оказание услуг по уборке помещений",
+            raw_text=(
+                "Оказание услуг по уборке. Заказчик ранее покупал ИБП. "
+                "Республика Крым"
+            ),
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"
+    assert "категория интереса не найдена" in result.exclude_reason
+
+
+def test_legal_software_boilerplate_does_not_create_it_match(monkeypatch) -> None:
+    monkeypatch.setitem(
+        config.CATEGORY_KEYWORDS,
+        "Тест ИТ",
+        ["программное обеспечение"],
+    )
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка автомобильных шин",
+            raw_text=(
+                "Поставка автомобильных шин. Исключение: осуществляется "
+                "закупка товаров, не относящихся к товарам и программному "
+                "обеспечению, указанным в позициях 1-7. Республика Крым"
+            ),
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "excluded"

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 MIN_PRICE_RUB = 30_000
 
 REGION_TERMS = [
@@ -479,3 +482,54 @@ EIS_SEARCH_QUERIES = REGIONAL_SEARCH_QUERIES
 TENDER_PRO_API_KEY = "1732ede4de680a0c93d81f01d7bac7d1"
 TENDER_PRO_SET_ID = "7964"
 TENDER_PRO_MAX_ROWS = 200
+
+
+def _load_expanded_dictionary() -> None:
+    """Load the reviewed dictionary bundle used when Excel is unavailable.
+
+    The editable workbook remains the runtime source of truth.  Keeping the
+    same reviewed bundle in JSON prevents a missing/corrupt workbook from
+    silently falling back to the much narrower historical vocabulary.
+    """
+
+    path = Path(__file__).resolve().parent.parent / "config" / "Расширенные_словари.json"
+    if not path.exists():
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        categories = payload["categories"]
+        search_terms = payload["search_terms"]
+        stop_terms = payload["stop_terms"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    if (
+        not isinstance(categories, dict)
+        or not isinstance(search_terms, list)
+        or not isinstance(stop_terms, list)
+    ):
+        return
+    if not categories or not search_terms:
+        return
+
+    CATEGORY_KEYWORDS.clear()
+    CATEGORY_KEYWORDS.update(
+        {
+            str(category): [str(term) for term in terms if str(term).strip()]
+            for category, terms in categories.items()
+            if isinstance(terms, list)
+        }
+    )
+    SEARCH_QUERY_TERMS[:] = [str(term) for term in search_terms if str(term).strip()]
+    RTS_SEARCH_QUERIES[:] = SEARCH_QUERY_TERMS
+    STOP_TERMS[:] = [str(term) for term in stop_terms if str(term).strip()]
+    REGIONAL_SEARCH_QUERIES[:] = [
+        f"{term} {region}"
+        for term in SEARCH_QUERY_TERMS
+        for region in SEARCH_REGION_TERMS
+    ]
+    ROSTENDER_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
+    ETP_GPB_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
+    EIS_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
+
+
+_load_expanded_dictionary()

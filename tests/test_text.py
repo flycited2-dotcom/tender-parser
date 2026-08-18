@@ -28,6 +28,7 @@ def test_word_term_matches_uses_exception_table() -> None:
     assert word_term_matches("узи щитовидной железы", "щит") is False
     assert word_term_matches("щиты распределительные", "щит") is True
     assert word_term_matches("мониторинг цен", "монитор") is False
+    assert word_term_matches("мониторинг цен", "мониторы") is False
     assert word_term_matches("поставка фенов для гостиницы", "фен") is True
     assert word_term_matches("реактив фенол чистый", "фен") is False
     assert word_term_matches("препарат феназепам", "фен") is False
@@ -81,6 +82,12 @@ def test_word_term_matches_blocks_uso_false_stems() -> None:
     assert word_term_matches("стойка усо в комплекте", "усо") is True
 
 
+def test_word_term_matches_does_not_treat_tubular_pasta_as_pipe() -> None:
+    assert word_term_matches("макароны трубчатые", "труба") is False
+    assert word_term_matches("макароны трубчатые", "трубы") is False
+    assert word_term_matches("поставка трубы стальной", "труба") is True
+
+
 def test_parse_price_rub_understands_millions_and_thousands() -> None:
     assert parse_price_rub("1,2 млн руб") == 1_200_000.0
     assert parse_price_rub("450 тыс. руб") == 450_000.0
@@ -101,6 +108,22 @@ def test_phrase_stems_match_limits_gap_between_words() -> None:
     assert phrase_stems_match(scattered, "ремонт здания") is False
     close = "выполнение капитального ремонта здания школы"
     assert phrase_stems_match(close, "ремонт здания") is True
+
+
+def test_phrase_stems_match_requires_short_acronyms() -> None:
+    assert phrase_stems_match("поставка ибп для школы", "ибп для школы") is True
+    assert phrase_stems_match("горячее питание для школы", "ибп для школы") is False
+    assert phrase_stems_match("система электропитания цод", "электропитание цод") is True
+    assert phrase_stems_match("система электропитания здания", "электропитание цод") is False
+
+
+def test_phrase_stems_match_distinguishes_compound_technical_words() -> None:
+    assert phrase_stems_match(
+        "система электронного документооборота", "система электропитания"
+    ) is False
+    assert phrase_stems_match(
+        "системы электропитания здания", "система электропитания"
+    ) is True
 
 
 def test_parse_deadline_reads_russian_datetime() -> None:
