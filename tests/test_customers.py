@@ -4,6 +4,7 @@ from tender_parser.customers import (
     build_customer_registry,
     compact_tender_region,
     customer_region,
+    is_potential_customer,
     is_public_customer,
     organization_type,
 )
@@ -28,6 +29,14 @@ def test_public_customer_detection_and_type() -> None:
     assert is_public_customer('ФГБОУ "Университет"')
     assert not is_public_customer('ООО "Частный поставщик"')
     assert not is_public_customer('АНО "Автономная некоммерческая организация"')
+    assert is_potential_customer('ООО "Частный поставщик"')
+    assert is_potential_customer('АНО "Центр развития"')
+    assert not is_potential_customer("Заказчик")
+    assert not is_potential_customer("Республика Крым")
+    assert not is_potential_customer("Подробнее")
+    assert organization_type('ООО "Частный поставщик"') == "Коммерческая организация — ООО"
+    assert organization_type('АО "Завод"') == "Коммерческая организация — АО"
+    assert organization_type('АНО "Центр"') == "Некоммерческая организация — АНО"
     assert organization_type('ФГБОУ "Университет"') == "Образовательное учреждение"
 
 
@@ -62,7 +71,7 @@ def test_registry_preserves_manually_verified_contacts() -> None:
     assert rows[0][14:] == ["Проверен", "Не дублировать"]
 
 
-def test_registry_skips_private_and_wrong_region_customers() -> None:
+def test_registry_keeps_commercial_but_skips_wrong_region_customers() -> None:
     rows = build_customer_registry(
         [
             tender(customer='ООО "Частное"'),
@@ -70,7 +79,9 @@ def test_registry_skips_private_and_wrong_region_customers() -> None:
         ],
         [],
     )
-    assert rows == []
+    assert len(rows) == 1
+    assert rows[0][1] == 'ООО "Частное"'
+    assert rows[0][2] == "Коммерческая организация — ООО"
 
 
 def test_compact_region_replaces_long_multiregion_list_with_targets() -> None:

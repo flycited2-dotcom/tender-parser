@@ -104,11 +104,10 @@ def build_customer_registry(
         for row in existing_rows
         if row
         and str(row[0] or "").strip()
-        and not is_private_customer(str(row[1] or ""))
     }
     by_key: dict[str, TenderRecord] = {}
     for tender in tenders:
-        if not tender.customer or not is_public_customer(tender.customer):
+        if not tender.customer or not is_potential_customer(tender.customer):
             continue
         region = customer_region(tender)
         if not region:
@@ -151,6 +150,34 @@ def is_public_customer(name: str) -> bool:
     )
 
 
+def is_potential_customer(name: str) -> bool:
+    """Accept any meaningful procurement customer, public or commercial."""
+
+    normalized = " ".join(name.casefold().replace("ё", "е").split())
+    if not normalized:
+        return False
+    placeholders = {
+        "заказчик",
+        "организатор",
+        "не указано",
+        "не указан",
+        "информация отсутствует",
+        "нет данных",
+        "-",
+        "подробнее",
+        "организация",
+        "республика крым",
+        "крым",
+        "севастополь",
+        "запорожская область",
+        "херсонская область",
+        "краснодарский край",
+    }
+    if normalized in placeholders or normalized.startswith("не определен"):
+        return False
+    return sum(character.isalpha() for character in normalized) >= 3
+
+
 def is_private_customer(name: str) -> bool:
     normalized = " ".join(name.casefold().replace("ё", "е").split())
     padded = f"{normalized} "
@@ -159,19 +186,71 @@ def is_private_customer(name: str) -> bool:
 
 def organization_type(name: str) -> str:
     value = name.casefold().replace("ё", "е")
+    compact = re.sub(r"[^0-9a-zа-я]+", " ", value).strip()
+    tokens = set(compact.split())
+    if "ип" in tokens or "индивидуальный предприниматель" in value:
+        return "Индивидуальный предприниматель"
+    if "ооо" in tokens or "общество с ограниченной ответственностью" in value:
+        return "Коммерческая организация — ООО"
+    if "пао" in tokens or "публичное акционерное общество" in value:
+        return "Коммерческая организация — ПАО"
+    if "ао" in tokens or "акционерное общество" in value:
+        return "Коммерческая организация — АО"
+    if "ано" in tokens or "автономная некоммерческая организация" in value:
+        return "Некоммерческая организация — АНО"
+    if "некоммерческая организация" in value or "фонд" in tokens:
+        return "Некоммерческая организация / фонд"
+    if "частное учреждение" in value or "чоу" in tokens or "ноу" in tokens:
+        return "Частное учреждение"
     if "фгуп" in value or "гуп" in value or "муп" in value or "унитарн" in value:
         return "Государственное / муниципальное предприятие"
-    if any(marker in value for marker in ("администрац", "правительств", "министерств", "департамент", "управление")):
+    if any(
+        marker in value
+        for marker in (
+            "администрац",
+            "правительств",
+            "министерств",
+            "департамент",
+            "управлен",
+            "комитет",
+            "служба",
+            "казначейств",
+            "таможн",
+            "законодательное собрание",
+            "счетная палата",
+            "агентств",
+            "уфнс",
+            "уфсин",
+            "росфинмониторинг",
+            "росздравнадзор",
+            "росрыболовств",
+        )
+    ):
         return "Орган власти"
     if re.search(r"\bсуд(?:а|у|ом|е)?\b", value):
         return "Суд"
-    if any(marker in value for marker in ("фгбоу", "фгаоу", "гбоу", "мбоу", "образовательн")):
+    if any(
+        marker in value
+        for marker in (
+            "фгбоу",
+            "фгаоу",
+            "гбоу",
+            "мбоу",
+            "фгбпоу",
+            "гбпоу",
+            "образовательн",
+        )
+    ):
         return "Образовательное учреждение"
     if "казенн" in value or any(marker in value for marker in ("фку", "гку", "мку")):
         return "Казённое учреждение"
     if "автономн" in value or "гау" in value:
         return "Автономное учреждение"
-    return "Бюджетное учреждение"
+    if "бюджетн" in value or "учреждени" in value or tokens.intersection(
+        {"гбу", "гбуз", "фгбу", "фбуз", "фгбун", "кгб", "фбу"}
+    ):
+        return "Бюджетное учреждение"
+    return "Коммерческая / иная организация"
 
 
 def customer_region(tender: TenderRecord) -> str:
