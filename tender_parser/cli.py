@@ -89,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
             "rts-refresh",
             "supplier-index",
             "supplier-search",
+            "supplier-import",
             "customers-refresh",
         ],
     )
@@ -98,6 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--query", default="", help="Product query for supplier-search")
     parser.add_argument("--limit", type=int, default=10, help="Maximum supplier matches")
     parser.add_argument("--supplier", default="", help="Optional supplier ID filter")
+    parser.add_argument("--file", default="", help="Price-list file for supplier-import")
+    parser.add_argument("--sender", default="", help="Sender email for supplier-import")
+    parser.add_argument("--channel", default="manual", help="Import channel: gmail, telegram, manual")
+    parser.add_argument("--message-id", default="", help="Source message ID for audit trail")
     parser.add_argument(
         "--profile",
         default="full",
@@ -393,6 +398,24 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         from tender_parser.browser.rts_watcher import RtsCabinetWatcher
 
         return RtsCabinetWatcher(data_dir / "tenders.db").run_forever()
+    if args.command == "supplier-import":
+        from tender_parser.supplier_inbox import SupplierInbox
+
+        if not args.file:
+            print("Для supplier-import укажите --file")
+            return 2
+        result = SupplierInbox(base_dir / "supplier_catalog").accept_file(
+            Path(args.file),
+            channel=args.channel,
+            sender=args.sender,
+            supplier_id=args.supplier,
+            message_id=args.message_id,
+        )
+        print(
+            f"Прайс: {result.status}; поставщик {result.supplier_id or 'не определён'}; "
+            f"товаров в индексе {result.indexed_products}; {result.detail}"
+        )
+        return 0 if result.status in {"accepted", "stored", "duplicate"} else 2
     if args.command in {"supplier-index", "supplier-search"}:
         catalog = SupplierCatalog(base_dir / "supplier_catalog")
         status = catalog.refresh(force=args.command == "supplier-index")

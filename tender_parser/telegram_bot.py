@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -11,6 +12,7 @@ import requests
 
 from tender_parser.env import load_env_file
 from tender_parser.notifications import NotificationConfig, TelegramNotifier
+from tender_parser.supplier_inbox import MAX_ATTACHMENT_BYTES, SupplierInbox
 from tender_parser.suppliers import SupplierCatalog, format_supplier_matches
 
 
@@ -27,6 +29,14 @@ class TelegramCommandBot:
         self.notifier = TelegramNotifier(config, session=self.session)
         self.offset_path = base_dir / "data" / "telegram_update_offset.txt"
         self._refresh_lock = threading.Lock()
+        self.supplier_chat_id = os.getenv(
+            "SUPPLIER_TELEGRAM_CHAT_ID", config.chat_id
+        ).strip()
+        self.supplier_user_ids = {
+            value.strip()
+            for value in os.getenv("SUPPLIER_TELEGRAM_ALLOWED_USER_IDS", "").split(",")
+            if value.strip()
+        }
 
     def run_forever(self) -> int:
         if not self.config.enabled:
@@ -60,6 +70,9 @@ class TelegramCommandBot:
         callback = update.get("callback_query") or {}
         message = update.get("message") or callback.get("message") or {}
         chat_id = str((message.get("chat") or {}).get("id", ""))
+        if message.get("document") and chat_id == self.supplier_chat_id:
+            self._handle_supplier_document(message)
+            return
         if chat_id != self.config.chat_id:
             return
         if callback:
@@ -76,7 +89,8 @@ class TelegramCommandBot:
                 "🩺 /status — состояние\n"
                 "📎 /report — последний Excel\n"
                 "🔄 /fresh — обновить сейчас\n"
-                "🏭 /price шкаф архивный — найти товар в прайсах",
+                "🏭 /price шкаф архивный — найти товар в прайсах\n"
+                "📥 Перешлите прайс с подписью /pricefile promet — добавить новый прайс",
                 buttons=True,
             )
         elif command in {"/status", "parser_status", "🩺 состояние"}:
@@ -87,6 +101,77 @@ class TelegramCommandBot:
             self._start_refresh()
         elif command in {"/price", "/catalog"}:
             self._send_supplier_matches(argument.strip())
+
+    def _handle_supplier_document(self, message: dict) -> None:
+        sender_id = str((message.get("from") or {}).get("id", ""))
+        if self.supplier_user_ids and sender_id not in self.supplier_user_ids:
+            return
+        document = message.get("document") or {}
+        file_size = int(document.get("file_size") or 0)
+        if file_size > MAX_ATTACHMENT_BYTES:
+            self._send_to_chat(self.supplier_chat_id, "⚠️ Прайс больше 25 МБ и не принят.")
+            return
+        supplier_id = _supplier_id_from_caption(str(message.get("caption", "")))
+        if not supplier_id:
+            self._send_to_chat(
+                self.supplier_chat_id,
+                "Укажите поставщика в подписи к файлу, например: /pricefile promet",
+            )
+            return
+        file_id = str(document.get("file_id", ""))
+        filename = str(document.get("file_name", "price-list.bin"))
+        if not file_id:
+            return
+        try:
+            metadata = self.session.get(
+                self._endpoint("getFile"),
+                params={"file_id": file_id},
+                timeout=self.config.timeout_seconds,
+            )
+            metadata.raise_for_status()
+            file_path = str((metadata.json().get("result") or {}).get("file_path", ""))
+            if not file_path:
+                raise ValueError("missing file_path")
+            response = self.session.get(
+                f"https://api.telegram.org/file/bot{self.config.bot_token}/{file_path}",
+                timeout=max(30, self.config.timeout_seconds),
+            )
+            response.raise_for_status()
+            if len(response.content) > MAX_ATTACHMENT_BYTES:
+                raise ValueError("attachment too large")
+            result = SupplierInbox(self.base_dir / "supplier_catalog").accept_bytes(
+                response.content,
+                filename=filename,
+                channel="telegram",
+                supplier_id=supplier_id,
+                sender=f"telegram:{sender_id}",
+                message_id=str(message.get("message_id", "")),
+            )
+        except (requests.RequestException, ValueError, OSError) as exc:
+            self._send_to_chat(
+                self.supplier_chat_id,
+                f"⚠️ Не удалось принять прайс ({exc.__class__.__name__}).",
+            )
+            return
+        icon = "✅" if result.status in {"accepted", "duplicate"} else "⚠️"
+        self._send_to_chat(
+            self.supplier_chat_id,
+            f"{icon} Прайс: {result.status}. {result.detail}. "
+            f"Товаров в индексе: {result.indexed_products}.",
+        )
+
+    def _send_to_chat(self, chat_id: str, text: str) -> None:
+        if chat_id == self.config.chat_id:
+            self.notifier.send_text(text)
+            return
+        try:
+            self.session.post(
+                self._endpoint("sendMessage"),
+                json={"chat_id": chat_id, "text": text},
+                timeout=self.config.timeout_seconds,
+            ).raise_for_status()
+        except requests.RequestException:
+            pass
 
     def _send_supplier_matches(self, query: str) -> None:
         if not query:
@@ -187,6 +272,7 @@ class TelegramCommandBot:
                         {"command": "report", "description": "Последний Excel"},
                         {"command": "fresh", "description": "Обновить сейчас"},
                         {"command": "price", "description": "Поиск в прайсах поставщиков"},
+                        {"command": "pricefile", "description": "Добавить прайс поставщика"},
                     ]
                 },
                 timeout=self.config.timeout_seconds,
@@ -217,6 +303,16 @@ class TelegramCommandBot:
 
     def _save_offset(self, offset: int) -> None:
         self.offset_path.write_text(str(offset), encoding="utf-8")
+
+
+def _supplier_id_from_caption(value: str) -> str:
+    normalized = value.strip().casefold()
+    if not normalized:
+        return ""
+    match = re.search(r"(?:/pricefile(?:@\w+)?\s+|#)([a-z0-9_-]+)", normalized)
+    if match:
+        return match.group(1)
+    return normalized if re.fullmatch(r"[a-z0-9_-]+", normalized) else ""
 
 
 def main() -> int:

@@ -5,10 +5,16 @@
       "id": "promet",
       "name": "ПРОМЕТ",
       "email": "promet.smf@promet.ru",
+      "email_senders": [
+        "promet.smf@promet.ru",
+        "fil.smf@promet.ru"
+      ],
       "website": "https://www.safe.ru/",
       "enabled": true,
+      "priority": 10,
       "file_globs": [
-        "private/promet/inbox/*.xlsx"
+        "private/promet/inbox/*.xlsx",
+        "private/promet/inbox/*.xlsm"
       ],
       "tender_categories": [
         "Офисная, архивная и складская мебель"

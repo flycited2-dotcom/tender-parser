@@ -70,6 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_Telegra
 - `/report` — последний Excel;
 - `/fresh` — немедленно запустить новый сбор.
 - `/price шкаф архивный` — найти подходящие позиции и дилерские цены в локальных прайсах поставщиков.
+- пересланный в разрешённую группу Excel с подписью `/pricefile promet` — безопасно сохранить новый прайс и сразу перестроить индекс. Бот не получает доступ к личным чатам Telegram.
 
 Обработчик команд должен быть единственным процессом, который вызывает Telegram `getUpdates` для этого токена. Если тот же бот ещё работает на другом VPS, старую службу нужно сначала остановить; обычная отправка ежедневных сообщений при этом конфликтов не создаёт.
 После остановки старой службы включите `TELEGRAM_COMMANDS_ENABLED=1` в `.env.local` и активируйте задачу `Tender Parser Telegram Bot`.
@@ -188,6 +189,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_еже�
 ```powershell
 python -m tender_parser supplier-index
 python -m tender_parser supplier-search --query "AIKO SL-185/2" --limit 10
+python -m tender_parser supplier-import --file "C:\Downloads\price.xlsx" --sender "prices@example.ru" --channel gmail
 ```
 
 Обычный сбор автоматически сопоставляет актуальные тендеры с подходящими

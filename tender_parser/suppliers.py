@@ -50,10 +50,12 @@ class SupplierDefinition:
     supplier_id: str
     name: str
     email: str = ""
+    email_senders: tuple[str, ...] = ()
     website: str = ""
     enabled: bool = True
     file_globs: tuple[str, ...] = ()
     tender_categories: tuple[str, ...] = ()
+    priority: int = 100
 
 
 @dataclass(frozen=True)
@@ -197,6 +199,7 @@ class SupplierCatalog:
         results.sort(
             key=lambda item: (
                 -item.score,
+                self.definitions.get(item.product.supplier_id, SupplierDefinition("", "")).priority,
                 item.product.preferred_price is None,
                 item.product.preferred_price or 0,
                 item.product.name.casefold(),
@@ -245,12 +248,21 @@ class SupplierCatalog:
                     supplier_id=supplier_id,
                     name=name,
                     email=str(raw.get("email", "")).strip(),
+                    email_senders=tuple(
+                        str(value).strip()
+                        for value in raw.get(
+                            "email_senders",
+                            [raw.get("email", "")] if raw.get("email") else [],
+                        )
+                        if str(value).strip()
+                    ),
                     website=str(raw.get("website", "")).strip(),
                     enabled=bool(raw.get("enabled", True)),
                     file_globs=tuple(str(value) for value in raw.get("file_globs", [])),
                     tender_categories=tuple(
                         str(value) for value in raw.get("tender_categories", [])
                     ),
+                    priority=max(1, int(raw.get("priority", 100))),
                 )
             )
         return result
