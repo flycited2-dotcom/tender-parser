@@ -58,6 +58,11 @@ from tender_parser.sources.sberbank_ast import SberbankAstSource
 from tender_parser.sources.sevastopol_small_purchases import SevastopolSmallPurchasesAdapter
 from tender_parser.sources.zakazrf import ZakazRfSource
 from tender_parser.storage import TenderStorage
+from tender_parser.suppliers import (
+    SupplierCatalog,
+    export_supplier_matches,
+    format_supplier_matches,
+)
 
 
 class TenderSource(Protocol):
@@ -76,11 +81,22 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="run",
-        choices=["run", "check-env", "rts-add-page", "rts-watch", "rts-refresh"],
+        choices=[
+            "run",
+            "check-env",
+            "rts-add-page",
+            "rts-watch",
+            "rts-refresh",
+            "supplier-index",
+            "supplier-search",
+        ],
     )
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
     parser.add_argument("--dry-run", action="store_true", help="Create directories and exit")
     parser.add_argument("--now", default="", help="Override current datetime for tests, ISO format")
+    parser.add_argument("--query", default="", help="Product query for supplier-search")
+    parser.add_argument("--limit", type=int, default=10, help="Maximum supplier matches")
+    parser.add_argument("--supplier", default="", help="Optional supplier ID filter")
     parser.add_argument(
         "--profile",
         default="full",
@@ -376,6 +392,28 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         from tender_parser.browser.rts_watcher import RtsCabinetWatcher
 
         return RtsCabinetWatcher(data_dir / "tenders.db").run_forever()
+    if args.command in {"supplier-index", "supplier-search"}:
+        catalog = SupplierCatalog(base_dir / "supplier_catalog")
+        status = catalog.refresh(force=args.command == "supplier-index")
+        if args.command == "supplier-index":
+            print(
+                f"Каталог поставщиков: {status.status}; товаров {status.product_count}, "
+                f"поставщиков {status.supplier_count}, файлов {status.file_count}"
+            )
+            if status.detail:
+                print(f"Предупреждение: {status.detail}")
+            return 2 if status.status == "error" else 0
+        query = args.query.strip()
+        if not query:
+            print("Для supplier-search укажите --query, например: --query \"шкаф архивный\"")
+            return 2
+        matches = catalog.search(
+            query,
+            limit=args.limit,
+            supplier_id=args.supplier.strip().casefold() or None,
+        )
+        print(format_supplier_matches(query, matches))
+        return 0
     configured_path = os.getenv("SEARCH_CONFIG_PATH", "").strip()
     search_config_path = Path(configured_path) if configured_path else base_dir / "config" / "Настройки_поиска.xlsx"
     if not search_config_path.is_absolute():
@@ -480,6 +518,14 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     actionable = sort_for_review(hot + review + wide)
     new_actionable = sort_for_review(
         [tender for tender in first_seen if tender.review_priority in {"hot", "review", "wide"}]
+    )
+
+    supplier_catalog = SupplierCatalog(base_dir / "supplier_catalog")
+    supplier_catalog.refresh()
+    supplier_path, supplier_tender_count = export_supplier_matches(
+        supplier_catalog,
+        actionable,
+        exports_dir / "supplier_matches.json",
     )
 
     download_report = EisDocumentDownloader(DocumentDownloadConfig.from_env()).download(
@@ -591,6 +637,11 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     print(f"HTML: {html_path}")
     print(f"Новые JSON: {new_json_path}")
     print(f"Текст уведомления: {notification_path}")
+    print(
+        f"Прайсы поставщиков: {supplier_catalog.last_status.status}, "
+        f"товаров {supplier_catalog.last_status.product_count}, "
+        f"совпадений с тендерами {supplier_tender_count}; {supplier_path}"
+    )
     if notification_result.status == "sent":
         print(f"Telegram: отправлено {notification_result.sent_count}")
     elif notification_result.status == "error":

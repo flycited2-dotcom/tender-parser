@@ -18,3 +18,4 @@ diagnostics/
 secrets/
 tmp/
 outputs/
+supplier_catalog/private/

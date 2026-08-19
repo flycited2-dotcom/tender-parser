@@ -11,6 +11,7 @@ import requests
 
 from tender_parser.env import load_env_file
 from tender_parser.notifications import NotificationConfig, TelegramNotifier
+from tender_parser.suppliers import SupplierCatalog, format_supplier_matches
 
 
 class TelegramCommandBot:
@@ -64,14 +65,18 @@ class TelegramCommandBot:
         if callback:
             self._answer_callback(str(callback.get("id", "")))
             command = str(callback.get("data", ""))
+            argument = ""
         else:
-            command = str(message.get("text", "")).strip().split("@", 1)[0].casefold()
+            raw_text = str(message.get("text", "")).strip()
+            command_token, _, argument = raw_text.partition(" ")
+            command = command_token.split("@", 1)[0].casefold()
         if command in {"/start", "/help"}:
             self.notifier.send_text(
                 "Управление тендерным парсером:\n"
                 "🩺 /status — состояние\n"
                 "📎 /report — последний Excel\n"
-                "🔄 /fresh — обновить сейчас",
+                "🔄 /fresh — обновить сейчас\n"
+                "🏭 /price шкаф архивный — найти товар в прайсах",
                 buttons=True,
             )
         elif command in {"/status", "parser_status", "🩺 состояние"}:
@@ -80,6 +85,25 @@ class TelegramCommandBot:
             self._send_latest_report()
         elif command in {"/fresh", "refresh_now", "🔄 обновить сейчас"}:
             self._start_refresh()
+        elif command in {"/price", "/catalog"}:
+            self._send_supplier_matches(argument.strip())
+
+    def _send_supplier_matches(self, query: str) -> None:
+        if not query:
+            self.notifier.send_text(
+                "Напишите запрос после команды, например: /price шкаф архивный 1850"
+            )
+            return
+        catalog = SupplierCatalog(self.base_dir / "supplier_catalog")
+        status = catalog.refresh()
+        if status.status == "error":
+            self.notifier.send_text(
+                "⚠️ Локальный каталог поставщиков сейчас недоступен."
+            )
+            return
+        self.notifier.send_text(
+            format_supplier_matches(query, catalog.search(query, limit=10))
+        )
 
     def _start_refresh(self) -> None:
         if not self._refresh_lock.acquire(blocking=False):
@@ -162,6 +186,7 @@ class TelegramCommandBot:
                         {"command": "status", "description": "Состояние парсера"},
                         {"command": "report", "description": "Последний Excel"},
                         {"command": "fresh", "description": "Обновить сейчас"},
+                        {"command": "price", "description": "Поиск в прайсах поставщиков"},
                     ]
                 },
                 timeout=self.config.timeout_seconds,

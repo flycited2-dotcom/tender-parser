@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "suppliers": [
+    {
+      "id": "promet",
+      "name": "ПРОМЕТ",
+      "email": "promet.smf@promet.ru",
+      "website": "https://www.safe.ru/",
+      "enabled": true,
+      "file_globs": [
+        "private/promet/inbox/*.xlsx"
+      ],
+      "tender_categories": [
+        "Офисная, архивная и складская мебель"
+      ]
+    }
+  ]
+}
