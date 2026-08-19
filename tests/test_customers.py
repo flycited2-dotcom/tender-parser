@@ -27,6 +27,7 @@ def test_public_customer_detection_and_type() -> None:
     assert is_public_customer('МКУ "Департамент закупок"')
     assert is_public_customer('ФГБОУ "Университет"')
     assert not is_public_customer('ООО "Частный поставщик"')
+    assert not is_public_customer('АНО "Автономная некоммерческая организация"')
     assert organization_type('ФГБОУ "Университет"') == "Образовательное учреждение"
 
 

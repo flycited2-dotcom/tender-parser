@@ -9,6 +9,10 @@ from urllib.parse import quote
 
 import requests
 
+from tender_parser.customer_contacts import (
+    CustomerContactEnricher,
+    CustomerEnrichmentReport,
+)
 from tender_parser.customers import (
     CUSTOMER_HEADERS,
     build_customer_registry,
@@ -182,6 +186,10 @@ class GoogleSheetsConfig:
     spreadsheet_url: str = ""
     service_account_file: Path | None = None
     timeout_seconds: int = 30
+    customer_enrichment_enabled: bool = False
+    customer_cache_file: Path | None = None
+    customer_max_per_run: int = 25
+    customer_timeout_seconds: int = 25
 
     @classmethod
     def from_env(cls, base_dir: Path) -> "GoogleSheetsConfig":
@@ -189,6 +197,15 @@ class GoogleSheetsConfig:
         credentials_path = Path(raw_path) if raw_path else None
         if credentials_path is not None and not credentials_path.is_absolute():
             credentials_path = base_dir / credentials_path
+        raw_customer_cache = os.getenv("CUSTOMER_CONTACTS_CACHE_PATH", "").strip()
+        customer_cache = (
+            Path(raw_customer_cache)
+            if raw_customer_cache
+            else base_dir / "data" / "customer_contacts.json"
+        )
+        if not customer_cache.is_absolute():
+            customer_cache = base_dir / customer_cache
+        enrichment_setting = os.getenv("CUSTOMER_CONTACTS_ENABLED", "").strip()
         return cls(
             enabled=_truthy(os.getenv("GOOGLE_SHEETS_ENABLED", "")),
             spreadsheet_id=os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "").strip(),
@@ -196,6 +213,16 @@ class GoogleSheetsConfig:
             service_account_file=credentials_path,
             timeout_seconds=_positive_int(
                 os.getenv("GOOGLE_SHEETS_TIMEOUT_SECONDS", ""), default=30
+            ),
+            customer_enrichment_enabled=(
+                _truthy(enrichment_setting) if enrichment_setting else True
+            ),
+            customer_cache_file=customer_cache,
+            customer_max_per_run=_positive_int(
+                os.getenv("CUSTOMER_CONTACTS_MAX_PER_RUN", ""), default=25
+            ),
+            customer_timeout_seconds=_positive_int(
+                os.getenv("CUSTOMER_CONTACTS_TIMEOUT_SECONDS", ""), default=25
             ),
         )
 
@@ -213,6 +240,18 @@ class GoogleSheetsSyncResult:
     spreadsheet_url: str = ""
 
 
+@dataclass(frozen=True)
+class CustomerRegistrySyncResult:
+    status: SyncStatus
+    customer_count: int = 0
+    rows_with_contacts: int = 0
+    fetched: int = 0
+    enriched: int = 0
+    errors: int = 0
+    detail: str = ""
+    spreadsheet_url: str = ""
+
+
 class GoogleSheetsRegistry:
     def __init__(
         self,
@@ -221,6 +260,7 @@ class GoogleSheetsRegistry:
     ) -> None:
         self.config = config
         self._session = session
+        self.last_customer_report = CustomerEnrichmentReport(0, 0, 0, 0, 0, 0)
 
     def sync(
         self,
@@ -232,6 +272,7 @@ class GoogleSheetsRegistry:
         profile: str,
         raw_count: int | None = None,
         unique_count: int | None = None,
+        customer_candidates: list[TenderRecord] | None = None,
     ) -> GoogleSheetsSyncResult:
         if not self.config.enabled:
             return GoogleSheetsSyncResult(
@@ -375,7 +416,13 @@ class GoogleSheetsRegistry:
                     _rows_or_placeholder(archive_rows, "Архив пока пуст", generated_at)
                 ),
             }
-            customer_rows = build_customer_registry(current, customer_existing)
+            customer_tenders = customer_candidates if customer_candidates is not None else current
+            customer_rows = build_customer_registry(customer_tenders, customer_existing)
+            customer_rows = self._enrich_customer_rows(
+                customer_rows,
+                customer_tenders,
+                generated_at=generated_at,
+            )
             summary_rows = _summary_rows(
                 source_result,
                 generated_at=generated_at,
@@ -418,9 +465,128 @@ class GoogleSheetsRegistry:
             active_count=len(current_rows),
             new_count=len(fresh_rows),
             archived_count=len(archive_rows),
-            detail="Google-реестр обновлён",
+            detail=(
+                "Google-реестр обновлён; "
+                f"заказчиков {len(customer_rows)}, "
+                f"с контактами {self.last_customer_report.rows_with_contacts}, "
+                f"проверено ЕИС {self.last_customer_report.fetched}, "
+                f"дополнено {self.last_customer_report.enriched}, "
+                f"ошибок {self.last_customer_report.errors}"
+            ),
             spreadsheet_url=self.config.spreadsheet_url,
         )
+
+    def sync_customers(
+        self,
+        tenders: list[TenderRecord],
+        *,
+        generated_at: datetime,
+        max_fetches: int | None = None,
+    ) -> CustomerRegistrySyncResult:
+        """Backfill only the customer CRM sheet without re-running tender sources."""
+
+        if not self.config.enabled:
+            return CustomerRegistrySyncResult(
+                status="disabled", spreadsheet_url=self.config.spreadsheet_url
+            )
+        if not self.config.spreadsheet_id:
+            return CustomerRegistrySyncResult(
+                status="error",
+                detail="не задан GOOGLE_SHEETS_SPREADSHEET_ID",
+                spreadsheet_url=self.config.spreadsheet_url,
+            )
+        try:
+            session = self._session or self._authorized_session()
+            metadata = self._metadata(session)
+            available_sheets = {
+                str(sheet.get("properties", {}).get("title", ""))
+                for sheet in metadata.get("sheets", [])
+            }
+            if CUSTOMER_SHEET not in available_sheets:
+                raise ValueError(f"нет вкладки {CUSTOMER_SHEET}")
+            existing = self._get_values(
+                session,
+                f"'{CUSTOMER_SHEET}'!A2:P1000",
+                value_render_option="FORMULA",
+            )
+            rows = build_customer_registry(tenders, existing)
+            rows = self._enrich_customer_rows(
+                rows,
+                tenders,
+                generated_at=generated_at,
+                max_fetches=max_fetches,
+            )
+            data = [
+                {"range": f"'{CUSTOMER_SHEET}'!A1:P1", "values": [CUSTOMER_HEADERS]},
+                {
+                    "range": f"'{CUSTOMER_SHEET}'!A2:P{len(rows) + 1}",
+                    "values": [_safe_customer_row(row) for row in rows],
+                },
+            ]
+            response = session.post(  # type: ignore[attr-defined]
+                f"{SHEETS_API}/{self.config.spreadsheet_id}/values:batchUpdate",
+                json={"valueInputOption": "USER_ENTERED", "data": data},
+                timeout=self.config.timeout_seconds,
+            )
+            response.raise_for_status()
+            if len(rows) + 2 <= 1000:
+                clear_range = quote(
+                    f"'{CUSTOMER_SHEET}'!A{len(rows) + 2}:P1000", safe=""
+                )
+                response = session.post(  # type: ignore[attr-defined]
+                    f"{SHEETS_API}/{self.config.spreadsheet_id}/values/"
+                    f"{clear_range}:clear",
+                    json={},
+                    timeout=self.config.timeout_seconds,
+                )
+                response.raise_for_status()
+        except (OSError, ValueError, requests.RequestException) as exc:
+            return CustomerRegistrySyncResult(
+                status="error",
+                detail=exc.__class__.__name__,
+                spreadsheet_url=self.config.spreadsheet_url,
+            )
+        report = self.last_customer_report
+        return CustomerRegistrySyncResult(
+            status="synced",
+            customer_count=len(rows),
+            rows_with_contacts=report.rows_with_contacts,
+            fetched=report.fetched,
+            enriched=report.enriched,
+            errors=report.errors,
+            detail="реестр заказчиков обновлён из истории и публичных карточек ЕИС",
+            spreadsheet_url=self.config.spreadsheet_url,
+        )
+
+    def _enrich_customer_rows(
+        self,
+        rows: list[list[object]],
+        tenders: list[TenderRecord],
+        *,
+        generated_at: datetime,
+        max_fetches: int | None = None,
+    ) -> list[list[object]]:
+        if not self.config.customer_enrichment_enabled:
+            self.last_customer_report = CustomerEnrichmentReport(
+                len(rows),
+                sum(any(str(value or "").strip() for value in row[4:11]) for row in rows),
+                0,
+                0,
+                0,
+                0,
+            )
+            return rows
+        cache_path = self.config.customer_cache_file or Path("data/customer_contacts.json")
+        enricher = CustomerContactEnricher(
+            cache_path,
+            timeout_seconds=self.config.customer_timeout_seconds,
+            max_fetches=(
+                max_fetches if max_fetches is not None else self.config.customer_max_per_run
+            ),
+            now=lambda: generated_at,
+        )
+        rows, self.last_customer_report = enricher.enrich(rows, tenders)
+        return rows
 
     def _authorized_session(self) -> object:
         credentials_path = self.config.service_account_file

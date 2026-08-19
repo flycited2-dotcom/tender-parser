@@ -74,6 +74,24 @@ _PUBLIC_MARKERS = (
     "гбоу",
 )
 
+_PRIVATE_MARKERS = (
+    "общество с ограниченной ответственностью",
+    "акционерное общество",
+    "публичное акционерное общество",
+    "автономная некоммерческая организация",
+    "частное учреждение",
+    "частное образовательное учреждение",
+    "негосударственное образовательное учреждение",
+    "индивидуальный предприниматель",
+    "ооо ",
+    "ао ",
+    "пао ",
+    "ано ",
+    "чоу ",
+    "ноу ",
+    "ип ",
+)
+
 
 def build_customer_registry(
     tenders: Iterable[TenderRecord],
@@ -84,7 +102,9 @@ def build_customer_registry(
     existing = {
         str(row[0]): _pad(row)
         for row in existing_rows
-        if row and str(row[0] or "").strip()
+        if row
+        and str(row[0] or "").strip()
+        and not is_private_customer(str(row[1] or ""))
     }
     by_key: dict[str, TenderRecord] = {}
     for tender in tenders:
@@ -93,7 +113,7 @@ def build_customer_registry(
         region = customer_region(tender)
         if not region:
             continue
-        key = organization_key(_clean_name(tender.customer))
+        key = organization_key(clean_customer_name(tender.customer))
         current = by_key.get(key)
         if current is None or _candidate_score(tender) > _candidate_score(current):
             by_key[key] = tender
@@ -103,7 +123,7 @@ def build_customer_registry(
         previous = existing.get(key, [""] * len(CUSTOMER_HEADERS))
         row = _pad(previous)
         row[0] = key
-        row[1] = _clean_name(tender.customer or "")
+        row[1] = clean_customer_name(tender.customer or "")
         row[2] = organization_type(str(row[1]))
         row[3] = customer_region(tender)
         row[12] = tender.url
@@ -124,7 +144,17 @@ def organization_key(name: str) -> str:
 
 def is_public_customer(name: str) -> bool:
     normalized = " ".join(name.casefold().replace("ё", "е").split())
-    return bool(normalized) and any(marker in normalized for marker in _PUBLIC_MARKERS)
+    return (
+        bool(normalized)
+        and not is_private_customer(normalized)
+        and any(marker in normalized for marker in _PUBLIC_MARKERS)
+    )
+
+
+def is_private_customer(name: str) -> bool:
+    normalized = " ".join(name.casefold().replace("ё", "е").split())
+    padded = f"{normalized} "
+    return any(marker in padded for marker in _PRIVATE_MARKERS)
 
 
 def organization_type(name: str) -> str:
@@ -170,7 +200,7 @@ def _candidate_score(tender: TenderRecord) -> tuple[int, datetime]:
     )
 
 
-def _clean_name(value: str) -> str:
+def clean_customer_name(value: str) -> str:
     cleaned = " ".join(value.split())
     # EIS highlights search matches with inline markup. Extracted text can
     # split a geographical word immediately before its ending.

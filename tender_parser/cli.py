@@ -89,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
             "rts-refresh",
             "supplier-index",
             "supplier-search",
+            "customers-refresh",
         ],
     )
     parser.add_argument("--base-dir", default=".", help="Project directory for data and exports")
@@ -414,6 +415,31 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         )
         print(format_supplier_matches(query, matches))
         return 0
+    if args.command == "customers-refresh":
+        try:
+            current_time = datetime.fromisoformat(args.now) if args.now else datetime.now()
+        except ValueError:
+            print(f"Неверный формат --now: {args.now!r}; нужен ISO")
+            return 2
+        storage = TenderStorage(data_dir / "tenders.db")
+        customer_candidates = storage.fetch_customer_candidates()
+        result = GoogleSheetsRegistry(
+            GoogleSheetsConfig.from_env(base_dir)
+        ).sync_customers(
+            customer_candidates,
+            generated_at=current_time,
+            max_fetches=max(1, args.limit),
+        )
+        print(
+            "Потенциальные заказчики: "
+            f"{result.status}; организаций {result.customer_count}, "
+            f"с контактами {result.rows_with_contacts}, "
+            f"проверено ЕИС {result.fetched}, дополнено {result.enriched}, "
+            f"ошибок {result.errors}"
+        )
+        if result.detail:
+            print(result.detail)
+        return 2 if result.status == "error" else 0
     configured_path = os.getenv("SEARCH_CONFIG_PATH", "").strip()
     search_config_path = Path(configured_path) if configured_path else base_dir / "config" / "Настройки_поиска.xlsx"
     if not search_config_path.is_absolute():
@@ -577,6 +603,12 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         profile=args.profile,
         raw_count=len(raw_tenders),
         unique_count=len(deduplication.tenders),
+        customer_candidates=list(
+            {
+                tender.unique_key: tender
+                for tender in [*storage.fetch_customer_candidates(), *evaluated]
+            }.values()
+        ),
     )
     notification_config = NotificationConfig.from_env()
     storage.upsert_many(

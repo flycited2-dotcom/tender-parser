@@ -345,6 +345,25 @@ class TenderStorage:
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def fetch_customer_candidates(self) -> list[TenderRecord]:
+        """Return the accumulated customer history, including closed tenders.
+
+        The CRM registry is intentionally independent from the current tender
+        shortlist: once a public organization has appeared in any collected
+        procurement, it must remain available for contact enrichment.
+        """
+
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM tenders
+                WHERE customer IS NOT NULL AND TRIM(customer) <> ''
+                ORDER BY last_seen_at DESC, discovered_at DESC
+                """
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
     def fetch_pending_notifications(self, limit: int = 50) -> list[TenderRecord]:
         with closing(self._connect()) as conn:
             rows = conn.execute(
