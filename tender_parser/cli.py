@@ -104,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--channel", default="manual", help="Import channel: gmail, telegram, manual")
     parser.add_argument("--message-id", default="", help="Source message ID for audit trail")
     parser.add_argument(
+        "--auto-register",
+        action="store_true",
+        help="Create a private supplier profile from the sender when unknown",
+    )
+    parser.add_argument(
         "--profile",
         default="full",
         choices=["full", "fast", "local", "rts", "rts-cabinet", "rts-accumulated"],
@@ -410,6 +415,7 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
             sender=args.sender,
             supplier_id=args.supplier,
             message_id=args.message_id,
+            auto_register=args.auto_register,
         )
         print(
             f"Прайс: {result.status}; поставщик {result.supplier_id or 'не определён'}; "

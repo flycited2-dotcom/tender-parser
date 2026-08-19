@@ -189,7 +189,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Настроить_еже�
 ```powershell
 python -m tender_parser supplier-index
 python -m tender_parser supplier-search --query "AIKO SL-185/2" --limit 10
-python -m tender_parser supplier-import --file "C:\Downloads\price.xlsx" --sender "prices@example.ru" --channel gmail
+python -m tender_parser supplier-import --file "C:\Downloads\price.xlsx" --sender "prices@example.ru" --channel gmail --auto-register
 ```
 
 Обычный сбор автоматически сопоставляет актуальные тендеры с подходящими

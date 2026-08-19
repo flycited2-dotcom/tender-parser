@@ -234,26 +234,28 @@ class SupplierCatalog:
         return matches
 
     def _load_definitions(self) -> list[SupplierDefinition]:
-        payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
-        if payload.get("schema_version") != 1:
-            raise ValueError("unsupported schema")
-        result = []
-        for raw in payload.get("suppliers", []):
-            supplier_id = str(raw.get("id", "")).strip().casefold()
-            name = str(raw.get("name", "")).strip()
-            if not supplier_id or not name:
-                continue
-            result.append(
-                SupplierDefinition(
+        payloads = [json.loads(self.manifest_path.read_text(encoding="utf-8"))]
+        auto_manifest = self.private_dir / "suppliers_auto.json"
+        if auto_manifest.is_file():
+            payloads.append(json.loads(auto_manifest.read_text(encoding="utf-8")))
+        result: dict[str, SupplierDefinition] = {}
+        for payload in reversed(payloads):
+            if payload.get("schema_version") != 1:
+                raise ValueError("unsupported schema")
+            for raw in payload.get("suppliers", []):
+                supplier_id = str(raw.get("id", "")).strip().casefold()
+                name = str(raw.get("name", "")).strip()
+                if not supplier_id or not name:
+                    continue
+                email = str(raw.get("email", "")).strip()
+                senders = raw.get("email_senders", [email] if email else [])
+                definition = SupplierDefinition(
                     supplier_id=supplier_id,
                     name=name,
-                    email=str(raw.get("email", "")).strip(),
+                    email=email,
                     email_senders=tuple(
                         str(value).strip()
-                        for value in raw.get(
-                            "email_senders",
-                            [raw.get("email", "")] if raw.get("email") else [],
-                        )
+                        for value in senders
                         if str(value).strip()
                     ),
                     website=str(raw.get("website", "")).strip(),
@@ -264,8 +266,8 @@ class SupplierCatalog:
                     ),
                     priority=max(1, int(raw.get("priority", 100))),
                 )
-            )
-        return result
+                result[definition.supplier_id] = definition
+        return list(result.values())
 
     def _source_files(
         self, definitions: Iterable[SupplierDefinition]

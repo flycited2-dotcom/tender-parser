@@ -96,3 +96,23 @@ def test_unsupported_attachment_is_rejected(tmp_path: Path) -> None:
         supplier_id="promet",
     )
     assert result.status == "rejected"
+
+
+def test_unknown_price_sender_can_be_registered_privately(tmp_path: Path) -> None:
+    inbox, payload = _setup(tmp_path)
+
+    result = inbox.accept_bytes(
+        payload,
+        filename="dealer-price.xlsx",
+        channel="gmail",
+        sender="Sales <sales@newvendor.ru>",
+        auto_register=True,
+    )
+
+    assert result.status == "accepted"
+    assert result.supplier_id == "newvendor"
+    assert result.indexed_products == 1
+    auto_manifest = json.loads(
+        (inbox.private_dir / "suppliers_auto.json").read_text(encoding="utf-8")
+    )
+    assert auto_manifest["suppliers"][0]["email_senders"] == ["sales@newvendor.ru"]

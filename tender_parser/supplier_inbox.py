@@ -11,7 +11,17 @@ from tender_parser.suppliers import SupplierCatalog, SupplierDefinition
 
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
-ALLOWED_SUFFIXES = {".xlsx", ".xlsm", ".csv", ".pdf", ".zip", ".rar"}
+ALLOWED_SUFFIXES = {
+    ".xlsx",
+    ".xlsm",
+    ".xls",
+    ".csv",
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".zip",
+    ".rar",
+}
 INDEXABLE_SUFFIXES = {".xlsx", ".xlsm"}
 
 
@@ -44,6 +54,7 @@ class SupplierInbox:
         supplier_id: str = "",
         message_id: str = "",
         received_at: datetime | None = None,
+        auto_register: bool = False,
     ) -> SupplierIntakeResult:
         if not payload:
             return SupplierIntakeResult(status="rejected", detail="пустой файл")
@@ -61,6 +72,10 @@ class SupplierInbox:
         if not resolved_supplier:
             resolved_supplier = _supplier_for_sender(sender, definitions)
         trusted = definitions.get(resolved_supplier)
+        if trusted is None and auto_register:
+            resolved_supplier = self._register_supplier(sender, resolved_supplier)
+            definitions = self._definitions()
+            trusted = definitions.get(resolved_supplier)
         if trusted is None or not trusted.enabled:
             return self._store(
                 payload,
@@ -117,6 +132,53 @@ class SupplierInbox:
     def _definitions(self) -> dict[str, SupplierDefinition]:
         definitions = self.catalog._load_definitions()
         return {item.supplier_id: item for item in definitions}
+
+    def _register_supplier(self, sender: str, supplier_hint: str) -> str:
+        address = _email_address(sender)
+        candidate = supplier_hint.strip().casefold()
+        if not candidate and address:
+            domain = address.rsplit("@", 1)[-1].split(".", 1)[0]
+            candidate = domain
+        candidate = re.sub(r"[^a-z0-9_-]+", "-", candidate).strip("-")
+        if not candidate:
+            candidate = "supplier-" + hashlib.sha256(sender.encode("utf-8")).hexdigest()[:8]
+        name = candidate.replace("-", " ").replace("_", " ").upper()
+        manifest_path = self.private_dir / "suppliers_auto.json"
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = {"schema_version": 1, "suppliers": []}
+        suppliers = list(payload.get("suppliers", []))
+        existing = next((item for item in suppliers if item.get("id") == candidate), None)
+        if existing is None:
+            suppliers.append(
+                {
+                    "id": candidate,
+                    "name": name,
+                    "email_senders": [address] if address else [],
+                    "enabled": True,
+                    "priority": 100,
+                    "file_globs": [
+                        f"private/{candidate}/inbox/*.xlsx",
+                        f"private/{candidate}/inbox/*.xlsm",
+                    ],
+                    "tender_categories": [],
+                }
+            )
+        elif address and address not in existing.get("email_senders", []):
+            existing.setdefault("email_senders", []).append(address)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = manifest_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(
+                {"schema_version": 1, "suppliers": suppliers},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(manifest_path)
+        return candidate
 
     def _store(
         self,
@@ -193,14 +255,17 @@ class SupplierInbox:
 def _supplier_for_sender(
     sender: str, definitions: dict[str, SupplierDefinition]
 ) -> str:
-    address = sender.strip().casefold()
-    match = re.search(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+", address)
-    if match:
-        address = match.group(0)
+    address = _email_address(sender)
     for item in definitions.values():
         if address and address in {value.casefold() for value in item.email_senders}:
             return item.supplier_id
     return ""
+
+
+def _email_address(sender: str) -> str:
+    address = sender.strip().casefold()
+    match = re.search(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+", address)
+    return match.group(0) if match else ""
 
 
 def _safe_filename(value: str) -> str:

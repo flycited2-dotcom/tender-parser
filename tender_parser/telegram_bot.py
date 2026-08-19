@@ -146,6 +146,7 @@ class TelegramCommandBot:
                 supplier_id=supplier_id,
                 sender=f"telegram:{sender_id}",
                 message_id=str(message.get("message_id", "")),
+                auto_register=True,
             )
         except (requests.RequestException, ValueError, OSError) as exc:
             self._send_to_chat(
