@@ -54,6 +54,17 @@ def test_personal_telegram_agent_has_a_distinct_scheduled_task() -> None:
     assert "RestartCount 10" in text
 
 
+def test_personal_agent_migration_keeps_bot_tokens_separate() -> None:
+    text = (ROOT / "Мигрировать_личного_Telegram_агента.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "TELEGRAM_AGENT_BOT_TOKEN" in text
+    assert "TELEGRAM_AGENT_ALLOWED_USER_IDS" in text
+    assert "before-agent-migration" in text
+    assert "telegram_codex_session.json" in text
+
+
 def test_eat_setup_helper_writes_ignored_env_file() -> None:
     text = (ROOT / "Настроить_EAT_env.ps1").read_text(encoding="utf-8")
 
