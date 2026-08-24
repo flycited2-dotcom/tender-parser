@@ -7,3 +7,5 @@ requests==2.32.3
 playwright==1.61.0
 truststore==0.10.4
 mcp[cli]==2.0.0
+python-telegram-bot==22.8
+faster-whisper==1.2.1

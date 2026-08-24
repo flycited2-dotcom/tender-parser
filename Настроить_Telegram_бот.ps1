@@ -1,5 +1,5 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
-param([string]$TaskName = 'Tender Parser Telegram Bot')
+param([string]$TaskName = 'Tender Parser Command Bot')
 
 $projectDirectory = Split-Path -Parent $PSCommandPath
 $pythonPath = Join-Path $projectDirectory '.venv\Scripts\python.exe'

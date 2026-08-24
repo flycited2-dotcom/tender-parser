@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import csv
 from concurrent.futures import ThreadPoolExecutor
+import base64
 import json
 import os
 import re
+import subprocess
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -13,6 +16,7 @@ from typing import Protocol
 import requests
 
 from tender_parser.product_intelligence import build_search_queries, classify_item_kind, extract_device_models
+from tender_parser.climate_routing import is_climate_request
 from tender_parser.tender_case import LineItem, load_case
 
 
@@ -41,6 +45,8 @@ class SupplierProduct:
     updated_at: str = ""
     attributes: tuple[dict[str, object], ...] = ()
     specifications: object = None
+    source: str = ""
+    supplier_name: str = ""
     compliance_status: str = "conditional"
     compliance_checks: tuple[RequirementCheck, ...] = ()
 
@@ -95,7 +101,17 @@ class _CachingGateway:
 
 
 class TenderProductApiGateway:
-    def __init__(self, api_url: str, api_token: str, *, timeout_seconds: float = 30) -> None:
+    max_limit = 20
+
+    def __init__(
+        self,
+        api_url: str,
+        api_token: str,
+        *,
+        timeout_seconds: float = 30,
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.75,
+    ) -> None:
         if not api_url.strip():
             raise ValueError("Не задан TENDER_SUPPLIER_API_URL")
         if len(api_token.strip()) < 32:
@@ -103,6 +119,8 @@ class TenderProductApiGateway:
         self.api_url = api_url.strip()
         self.api_token = api_token.strip()
         self.timeout_seconds = timeout_seconds
+        self.retry_attempts = max(1, int(retry_attempts))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
 
     @classmethod
     def from_environment(cls) -> "TenderProductApiGateway":
@@ -112,13 +130,27 @@ class TenderProductApiGateway:
         )
 
     def search(self, query: str, *, limit: int = 10) -> tuple[int, list[SupplierProduct]]:
-        response = requests.post(
-            self.api_url,
-            json={"query": query, "limit": max(1, min(int(limit), 20))},
-            headers={"Authorization": f"Bearer {self.api_token}", "Accept": "application/json"},
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
+        response = None
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                response = requests.post(
+                    self.api_url,
+                    json={"query": query, "limit": max(1, min(int(limit), self.max_limit))},
+                    headers={"Authorization": f"Bearer {self.api_token}", "Accept": "application/json"},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                break
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt >= self.retry_attempts:
+                    raise
+            except requests.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                if attempt >= self.retry_attempts or (status != 429 and status < 500):
+                    raise
+            time.sleep(self.retry_backoff_seconds * (2 ** (attempt - 1)))
+        if response is None:  # pragma: no cover - defensive, the loop always runs at least once
+            raise RuntimeError("Каталог поставщика не вернул ответ")
         payload = response.json()
         if not isinstance(payload, dict) or payload.get("ok") is not True:
             raise ValueError("Каталог поставщика вернул некорректный ответ")
@@ -126,32 +158,232 @@ class TenderProductApiGateway:
         return int(payload.get("total") or len(products)), products
 
 
+class ClimateProductApiGateway(TenderProductApiGateway):
+    """Read-only gateway to the owner's climate supplier hub."""
+
+    max_limit = 100
+
+    def __init__(
+        self,
+        api_url: str,
+        api_token: str,
+        *,
+        timeout_seconds: float = 30,
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.75,
+    ) -> None:
+        if not api_url.strip():
+            raise ValueError("Не задан TENDER_CLIMATE_API_URL")
+        if len(api_token.strip()) < 32:
+            raise ValueError("TENDER_CLIMATE_API_TOKEN должен содержать не менее 32 символов")
+        super().__init__(
+            api_url,
+            api_token,
+            timeout_seconds=timeout_seconds,
+            retry_attempts=retry_attempts,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
+
+    @classmethod
+    def from_environment(cls) -> "ClimateProductApiGateway":
+        return cls(
+            os.environ.get("TENDER_CLIMATE_API_URL", ""),
+            os.environ.get("TENDER_CLIMATE_API_TOKEN", ""),
+        )
+
+
+class ClimateProductSshGateway:
+    """Read-only one-shot access to Content Factory through encrypted SSH."""
+
+    def __init__(
+        self,
+        ssh_host: str,
+        identity_file: str,
+        *,
+        ssh_port: int = 22,
+        ssh_bind_address: str = "",
+        remote_dir: str = "/opt/content-factory",
+        timeout_seconds: float = 180,
+    ) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+", ssh_host.strip()):
+            raise ValueError("TENDER_CLIMATE_SSH_HOST должен иметь вид user@host")
+        key = Path(identity_file).expanduser()
+        if not key.is_file():
+            raise ValueError("Файл TENDER_CLIMATE_SSH_KEY не найден")
+        if not re.fullmatch(r"/[A-Za-z0-9_./-]+", remote_dir.strip()):
+            raise ValueError("TENDER_CLIMATE_REMOTE_DIR содержит недопустимые символы")
+        self.ssh_host = ssh_host.strip()
+        if not 1 <= int(ssh_port) <= 65535:
+            raise ValueError("TENDER_CLIMATE_SSH_PORT должен быть от 1 до 65535")
+        self.ssh_port = int(ssh_port)
+        self.ssh_bind_address = ssh_bind_address.strip()
+        self.identity_file = str(key.resolve())
+        self.remote_dir = remote_dir.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    @classmethod
+    def from_environment(cls) -> "ClimateProductSshGateway":
+        return cls(
+            os.environ.get("TENDER_CLIMATE_SSH_HOST", ""),
+            os.environ.get("TENDER_CLIMATE_SSH_KEY", ""),
+            ssh_port=int(os.environ.get("TENDER_CLIMATE_SSH_PORT", "22")),
+            ssh_bind_address=os.environ.get("TENDER_CLIMATE_SSH_BIND_ADDRESS", ""),
+            remote_dir=os.environ.get("TENDER_CLIMATE_REMOTE_DIR", "/opt/content-factory"),
+        )
+
+    def search(self, query: str, *, limit: int = 10) -> tuple[int, list[SupplierProduct]]:
+        return self._search_cli(query, limit=limit, command_name="search", catalog_label="Климатический каталог")
+
+    def _search_cli(
+        self,
+        query: str,
+        *,
+        limit: int,
+        command_name: str,
+        catalog_label: str,
+    ) -> tuple[int, list[SupplierProduct]]:
+        normalized_query = " ".join(query.split()).strip()
+        if not normalized_query:
+            raise ValueError("Поисковый запрос не может быть пустым")
+        encoded_query = base64.urlsafe_b64encode(normalized_query.encode("utf-8")).decode("ascii")
+        safe_limit = max(1, min(int(limit), 100))
+        remote_command = (
+            f"cd {self.remote_dir} && PYTHONPATH=src .venv/bin/python "
+            f"-m content_factory.tender_catalog_cli {command_name} "
+            f"--query-base64 {encoded_query} --limit {safe_limit}"
+        )
+        command = [
+            "ssh", "-T", "-i", self.identity_file,
+            "-p", str(self.ssh_port),
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=12",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ServerAliveCountMax=3",
+            "-o", "LogLevel=ERROR",
+        ]
+        if self.ssh_bind_address:
+            command.extend(["-b", self.ssh_bind_address])
+        command.extend([self.ssh_host, remote_command])
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=self.timeout_seconds,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "SSH command failed").strip()[-1000:]
+            raise OSError(f"{catalog_label} по SSH недоступен: {detail}")
+        payload = _last_json_object(completed.stdout)
+        if payload.get("ok") is not True:
+            raise ValueError(f"{catalog_label} вернул некорректный ответ")
+        products = [_parse_product(value) for value in payload.get("products", []) if isinstance(value, dict)]
+        return int(payload.get("total") or len(products)), products
+
+
+class PrivatePriceSshGateway(ClimateProductSshGateway):
+    """Read-only universal search over price files synchronized in Content Factory."""
+
+    def search(self, query: str, *, limit: int = 10) -> tuple[int, list[SupplierProduct]]:
+        return self._search_cli(
+            query,
+            limit=limit,
+            command_name="search-prices",
+            catalog_label="Приватные прайсы поставщиков",
+        )
+
+
+def climate_gateway_from_environment() -> SupplierProductGateway:
+    if os.environ.get("TENDER_CLIMATE_SSH_HOST", "").strip():
+        return ClimateProductSshGateway.from_environment()
+    return ClimateProductApiGateway.from_environment()
+
+
+def private_price_gateway_from_environment() -> SupplierProductGateway:
+    """Use the existing encrypted Content Factory SSH bridge for general prices."""
+    ssh_host = os.environ.get("TENDER_CATALOG_SSH_HOST", "").strip() or os.environ.get(
+        "TENDER_CLIMATE_SSH_HOST", ""
+    ).strip()
+    key = os.environ.get("TENDER_CATALOG_SSH_KEY", "").strip() or os.environ.get(
+        "TENDER_CLIMATE_SSH_KEY", ""
+    ).strip()
+    port = os.environ.get("TENDER_CATALOG_SSH_PORT", "").strip() or os.environ.get(
+        "TENDER_CLIMATE_SSH_PORT", "22"
+    ).strip()
+    bind = os.environ.get("TENDER_CATALOG_SSH_BIND_ADDRESS", "").strip() or os.environ.get(
+        "TENDER_CLIMATE_SSH_BIND_ADDRESS", ""
+    ).strip()
+    remote_dir = os.environ.get("TENDER_CATALOG_REMOTE_DIR", "").strip() or os.environ.get(
+        "TENDER_CLIMATE_REMOTE_DIR", "/opt/content-factory"
+    ).strip()
+    return PrivatePriceSshGateway(
+        ssh_host,
+        key,
+        ssh_port=int(port),
+        ssh_bind_address=bind,
+        remote_dir=remote_dir,
+    )
+
+
+def _last_json_object(output: str) -> dict[str, object]:
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("Климатический каталог не вернул JSON")
+
+
 def search_case_products(
     case_dir: Path,
     gateway: SupplierProductGateway,
     *,
     limit_per_item: int = 10,
+    climate_gateway: SupplierProductGateway | None = None,
+    private_price_gateway: SupplierProductGateway | None = None,
 ) -> list[LineSearchResult]:
     _, items, _, _ = load_case(case_dir)
     if not items:
         raise ValueError("В items.csv нет подтвержденных позиций для поиска")
     cached_gateway = _CachingGateway(gateway)
+    cached_climate_gateway = _CachingGateway(climate_gateway) if climate_gateway is not None else None
+    cached_private_price_gateway = (
+        _CachingGateway(private_price_gateway) if private_price_gateway is not None else None
+    )
     def search_item(item: LineItem) -> LineSearchResult:
         queries = build_search_queries(item.name, item.required_specs) or (_search_query(item),)
         attempted: list[str] = []
         collected: dict[str, SupplierProduct] = {}
         errors: list[str] = []
-        for query in queries[:3]:
-            attempted.append(query)
-            try:
-                _, products = cached_gateway.search(query, limit=limit_per_item)
-            except (OSError, ValueError, requests.RequestException) as exc:
-                errors.append(str(exc))
-                continue
-            for product in products:
-                evaluated = _evaluate_product(item, product)
-                collected[evaluated.sku or evaluated.name] = evaluated
-            if any(product.compliance_status != "not_compliant" for product in collected.values()):
+        route = [cached_gateway]
+        if cached_private_price_gateway is not None:
+            route.insert(0, cached_private_price_gateway)
+        if cached_climate_gateway is not None and is_climate_request(item.name, item.required_specs):
+            route.insert(0, cached_climate_gateway)
+        for active_gateway in route:
+            viable_before = sum(product.compliance_status != "not_compliant" for product in collected.values())
+            for query in queries[:3]:
+                attempted.append(query)
+                try:
+                    _, products = active_gateway.search(query, limit=limit_per_item)
+                except (OSError, ValueError, requests.RequestException) as exc:
+                    errors.append(str(exc))
+                    continue
+                for product in products:
+                    evaluated = _evaluate_product(item, product)
+                    identity = "|".join((evaluated.source, evaluated.sku or evaluated.name)).casefold()
+                    collected[identity] = evaluated
+                if any(product.compliance_status != "not_compliant" for product in collected.values()):
+                    break
+            viable_after = sum(product.compliance_status != "not_compliant" for product in collected.values())
+            if viable_after > viable_before:
                 break
         products = sorted(collected.values(), key=_product_rank)
         error = "; ".join(dict.fromkeys(errors)) if errors and not products else ""
@@ -202,7 +434,7 @@ def export_supplier_search(results: list[LineSearchResult], output_dir: Path) ->
                 writer.writerow(
                     [
                         result.line_id,
-                        "I-T-P",
+                        product.supplier_name or product.source or "I-T-P",
                         product.sku,
                         product.name,
                         product.purchase_price_gross,
@@ -238,6 +470,8 @@ def _parse_product(payload: dict[str, object]) -> SupplierProduct:
         updated_at=str(payload.get("updatedAt") or ""),
         attributes=tuple(value for value in payload.get("attributes", []) if isinstance(value, dict)),
         specifications=payload.get("specifications"),
+        source=str(payload.get("source") or ""),
+        supplier_name=str(payload.get("supplierName") or ""),
     )
 
 

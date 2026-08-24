@@ -1,10 +1,13 @@
 import asyncio
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+
+from tender_parser.knowledge_mcp import _search_tender_database
 
 
 def test_knowledge_mcp_stdio_handshake_and_tools(tmp_path: Path) -> None:
@@ -31,8 +34,34 @@ def test_knowledge_mcp_stdio_handshake_and_tools(tmp_path: Path) -> None:
                     "list_documents",
                     "search_documents",
                     "read_document",
+                    "search_itp_products",
+                    "search_climate_products",
+                    "search_private_supplier_prices",
+                    "route_product_search",
+                    "search_tenders",
                 }
                 result = await session.call_tool("knowledge_status", {})
                 assert result.is_error is False
 
     asyncio.run(verify())
+
+
+def test_search_tender_database_returns_ranked_read_only_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "tenders.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """CREATE TABLE tenders (
+                title TEXT, url TEXT, source TEXT, tender_number TEXT, customer TEXT,
+                region TEXT, price REAL, deadline TEXT, category TEXT,
+                review_priority TEXT, raw_text TEXT, last_seen_at TEXT
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO tenders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("Поставка роутеров", "https://example.test/1", "eis", "1", "Заказчик", "Крым",
+             90000, "2026-09-01", "сети", "hot", "маршрутизаторы", "2026-08-21"),
+        )
+    result = _search_tender_database(db_path, "роутер", 5)
+    assert result["total"] == 1
+    assert result["tenders"][0]["tender_number"] == "1"
+    assert "raw_text" not in result["tenders"][0]

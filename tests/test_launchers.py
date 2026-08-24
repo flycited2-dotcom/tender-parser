@@ -40,7 +40,18 @@ def test_google_and_telegram_setup_helpers_are_present() -> None:
     assert "service_account" in google_text
     assert "GOOGLE_SHEETS_ENABLED" in google_text
     assert "New-ScheduledTaskTrigger -AtLogOn" in telegram_text
+    assert "Tender Parser Command Bot" in telegram_text
     assert "RestartCount 10" in telegram_text
+
+
+def test_personal_telegram_agent_has_a_distinct_scheduled_task() -> None:
+    text = (ROOT / "Настроить_личного_Telegram_агента.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Tender Personal Telegram Agent" in text
+    assert "-m tender_parser.telegram_agent" in text
+    assert "RestartCount 10" in text
 
 
 def test_eat_setup_helper_writes_ignored_env_file() -> None:

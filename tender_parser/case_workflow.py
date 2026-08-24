@@ -14,6 +14,8 @@ from tender_parser.supplier_search import (
     LineSearchResult,
     SupplierProductGateway,
     TenderProductApiGateway,
+    climate_gateway_from_environment,
+    private_price_gateway_from_environment,
     export_supplier_search,
     search_case_products,
 )
@@ -58,7 +60,25 @@ def run_case_workflow(
     if items:
         try:
             active_gateway = gateway or TenderProductApiGateway.from_environment()
-            supplier_results = search_case_products(case_dir, active_gateway, limit_per_item=limit_per_item)
+            climate_gateway = None
+            private_price_gateway = None
+            if gateway is None:
+                try:
+                    climate_gateway = climate_gateway_from_environment()
+                except ValueError:
+                    # Until the VPS bridge is configured, climate lines safely fall back to I-T-P.
+                    climate_gateway = None
+                try:
+                    private_price_gateway = private_price_gateway_from_environment()
+                except ValueError:
+                    private_price_gateway = None
+            supplier_results = search_case_products(
+                case_dir,
+                active_gateway,
+                limit_per_item=limit_per_item,
+                climate_gateway=climate_gateway,
+                private_price_gateway=private_price_gateway,
+            )
         except (OSError, ValueError) as exc:
             supplier_error = str(exc)
             supplier_results = [
