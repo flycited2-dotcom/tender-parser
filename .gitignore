@@ -5,6 +5,7 @@ __pycache__/
 
 .env
 .env.local
+.env.before-agent-migration-*.bak
 
 data/
 exports/
