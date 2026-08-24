@@ -138,6 +138,7 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
         profile="fast",
         raw_count=3,
         unique_count=2,
+        regional_tenders=[make_tender()],
     )
 
     assert result.status == "synced"
@@ -150,6 +151,8 @@ def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
     assert expand_payload["requests"][0]["appendDimension"]["length"] == 9
     values_payload = next(payload for url, payload in session.posts if url.endswith("values:batchUpdate"))
     ranges = {item["range"]: item["values"] for item in values_payload["data"]}
+    assert ranges["'Все региональные'!A1:AC1"][0] == DATA_HEADERS
+    assert ranges["'Все региональные'!A2:AC2"][0][0] == "fake:1"
     assert ranges["'Все актуальные'!A1:AC1"][0] == DATA_HEADERS
     active = ranges["'Все актуальные'!A2:AC2"][0]
     assert active[16:18] == ["Беру", "Позвонить"]

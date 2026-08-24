@@ -82,6 +82,7 @@ TABLE_NAMES = {
 }
 SUMMARY_SHEET = "Сводка"
 CUSTOMER_SHEET = "Потенциальные заказчики"
+REGIONAL_SHEET = "Все региональные"
 SOURCE_LABELS = {
     "etp-gpb": "ЭТП ГПБ",
     "roseltorg": "Росэлторг",
@@ -261,6 +262,7 @@ class GoogleSheetsRegistry:
         self.config = config
         self._session = session
         self.last_customer_report = CustomerEnrichmentReport(0, 0, 0, 0, 0, 0)
+        self.last_customer_rows: list[list[object]] = []
 
     def sync(
         self,
@@ -273,6 +275,7 @@ class GoogleSheetsRegistry:
         raw_count: int | None = None,
         unique_count: int | None = None,
         customer_candidates: list[TenderRecord] | None = None,
+        regional_tenders: list[TenderRecord] | None = None,
     ) -> GoogleSheetsSyncResult:
         if not self.config.enabled:
             return GoogleSheetsSyncResult(
@@ -288,6 +291,9 @@ class GoogleSheetsRegistry:
                 str(sheet.get("properties", {}).get("title", ""))
                 for sheet in metadata.get("sheets", [])
             }
+            if REGIONAL_SHEET not in available_sheets:
+                self._create_data_sheet(session, REGIONAL_SHEET)
+                available_sheets.add(REGIONAL_SHEET)
             active_headers = _read_headers(
                 self._get_values(
                     session,
@@ -416,6 +422,18 @@ class GoogleSheetsRegistry:
                     _rows_or_placeholder(archive_rows, "Архив пока пуст", generated_at)
                 ),
             }
+            if regional_tenders is not None and REGIONAL_SHEET in available_sheets:
+                regional_rows = [
+                    _record_row(tender, fresh_keys, saved, generated_at)
+                    for tender in regional_tenders
+                ]
+                values_by_sheet[REGIONAL_SHEET] = _with_row_formulas(
+                    _rows_or_placeholder(
+                        regional_rows,
+                        "Региональных закупок в этом запуске нет",
+                        generated_at,
+                    )
+                )
             customer_tenders = customer_candidates if customer_candidates is not None else current
             customer_rows = build_customer_registry(customer_tenders, customer_existing)
             customer_rows = self._enrich_customer_rows(
@@ -423,6 +441,7 @@ class GoogleSheetsRegistry:
                 customer_tenders,
                 generated_at=generated_at,
             )
+            self.last_customer_rows = customer_rows
             summary_rows = _summary_rows(
                 source_result,
                 generated_at=generated_at,
@@ -613,6 +632,36 @@ class GoogleSheetsRegistry:
             raise ValueError("invalid spreadsheet metadata")
         return payload
 
+    def _create_data_sheet(self, session: object, title: str) -> None:
+        response = session.post(  # type: ignore[attr-defined]
+            f"{SHEETS_API}/{self.config.spreadsheet_id}:batchUpdate",
+            json={
+                "requests": [
+                    {
+                        "addSheet": {
+                            "properties": {
+                                "title": title,
+                                "gridProperties": {
+                                    "rowCount": 1000,
+                                    "columnCount": len(DATA_HEADERS),
+                                    "frozenRowCount": 1,
+                                },
+                                "tabColorStyle": {
+                                    "rgbColor": {
+                                        "red": 0.435,
+                                        "green": 0.259,
+                                        "blue": 0.757,
+                                    }
+                                },
+                            }
+                        }
+                    }
+                ]
+            },
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
+
     def _ensure_data_columns(self, session: object, metadata: dict) -> None:
         """Expand legacy 20-column grids before reading/writing through AB."""
         requests_payload: list[dict[str, object]] = []
@@ -622,7 +671,7 @@ class GoogleSheetsRegistry:
             sheet_id = properties.get("sheetId")
             column_count = properties.get("gridProperties", {}).get("columnCount")
             if (
-                title not in TABLE_NAMES
+                title not in {*TABLE_NAMES, REGIONAL_SHEET}
                 or sheet_id is None
                 or not isinstance(column_count, int)
                 or column_count >= len(DATA_HEADERS)

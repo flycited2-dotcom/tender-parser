@@ -5,7 +5,12 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from tender_parser.exporters.excel import export_excel, load_manual_selections, sort_for_review
+from tender_parser.exporters.excel import (
+    export_excel,
+    load_customer_rows,
+    load_manual_selections,
+    sort_for_review,
+)
 from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
 from tender_parser.models import TenderRecord
@@ -56,6 +61,52 @@ def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
     assert hot_sheet["D2"].value == "Поставка МФУ"
     assert workbook["На проверку"]["D2"].value == "Поставка МФУ"
     assert workbook["Широкий хвост"]["D2"].value == "Поставка МФУ"
+
+
+def test_export_excel_adds_regional_and_customer_sheets(tmp_path: Path) -> None:
+    output = tmp_path / "tenders_2026-05-19.xlsx"
+    customer_row = [
+        "org-key",
+        "ГБУ РК Тест",
+        "Государственная / муниципальная",
+        "Республика Крым",
+        "9100000000",
+        "",
+        "",
+        "mail@example.test",
+        "+7 978 000-00-00",
+        "",
+        "https://customer.example.test",
+        "https://zakupki.gov.ru/",
+        "https://example.test/tender-1/",
+        "19.05.2026",
+        "Проверен",
+        "",
+    ]
+    regional = replace(
+        make_tender("excluded"),
+        title="Поставка лекарственных препаратов",
+        exclude_reason="стоп-тема: лекарственные препараты",
+    )
+
+    export_excel(
+        [make_tender("matched")],
+        [],
+        [],
+        [regional],
+        output,
+        now=NOW,
+        regional_tenders=[make_tender("matched"), regional],
+        customer_rows=[customer_row],
+    )
+
+    workbook = load_workbook(output)
+    assert workbook["Все региональные"].max_row == 3
+    assert workbook["Все региональные"]["D3"].value == "Поставка лекарственных препаратов"
+    customers = workbook["Потенциальные заказчики"]
+    assert customers["H2"].value == "mail@example.test"
+    assert customers["M2"].hyperlink.target == "https://example.test/tender-1/"
+    assert load_customer_rows(tmp_path)[0][1] == "ГБУ РК Тест"
 
 
 def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> None:

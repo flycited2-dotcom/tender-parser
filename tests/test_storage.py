@@ -53,6 +53,27 @@ def test_storage_round_trips_match_confidence(tmp_path: Path) -> None:
     assert loaded[0].review_priority == "hot"
 
 
+def test_storage_exposes_accumulated_history_for_regional_sheet(tmp_path: Path) -> None:
+    storage = TenderStorage(tmp_path / "tenders.db")
+    old = TenderRecord(
+        title="Поставка медицинских изделий",
+        url="https://example.test/old",
+        source="test",
+        tender_number="old",
+        region="Республика Крым",
+        filter_status="excluded",
+        review_priority="excluded",
+        exclude_reason="стоп-тема: медицина",
+    )
+    current = replace(old, title="Поставка МФУ", tender_number="current")
+    storage.upsert_many([old, current])
+
+    assert {item.tender_number for item in storage.fetch_all_tenders()} == {
+        "old",
+        "current",
+    }
+
+
 def test_storage_keeps_filled_fields_when_update_is_empty(tmp_path: Path) -> None:
     storage = TenderStorage(tmp_path / "tenders.db")
     full = TenderRecord(

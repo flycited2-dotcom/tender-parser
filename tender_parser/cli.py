@@ -17,10 +17,17 @@ from tender_parser.direct_links import EisCardLinkEnricher, normalize_direct_lin
 from tender_parser.documents import DocumentAnalyzer
 from tender_parser.enrichment import TenderEnricher
 from tender_parser.env import get_env_status, load_env_file
-from tender_parser.exporters.excel import export_excel, load_manual_selections, sort_for_review
+from tender_parser.exporters.excel import (
+    export_excel,
+    load_customer_rows,
+    load_manual_selections,
+    sort_for_review,
+)
 from tender_parser.exporters.html_report import export_html_report
 from tender_parser.exporters.json_exporter import export_json, export_run_report
-from tender_parser.filters import evaluate_tender
+from tender_parser.filters import evaluate_tender, target_region
+from tender_parser.customer_contacts import CustomerContactEnricher
+from tender_parser.customers import build_customer_registry
 from tender_parser.google_sheets import GoogleSheetsConfig, GoogleSheetsRegistry
 from tender_parser.models import TenderRecord
 from tender_parser.notifications import (
@@ -743,6 +750,22 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     new_actionable = sort_for_review(
         [tender for tender in first_seen if tender.review_priority in {"hot", "review", "wide"}]
     )
+    regional_tenders = sort_for_review(
+        [
+            tender
+            for tender in {
+                item.unique_key: item
+                for item in [*storage.fetch_all_tenders(), *evaluated]
+            }.values()
+            if target_region(tender)
+        ]
+    )
+    customer_candidates = list(
+        {
+            tender.unique_key: tender
+            for tender in [*storage.fetch_customer_candidates(), *evaluated]
+        }.values()
+    )
 
     supplier_catalog = SupplierCatalog(base_dir / "supplier_catalog")
     supplier_catalog.refresh()
@@ -757,6 +780,32 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         base_dir / "downloads",
     )
 
+    google_config = GoogleSheetsConfig.from_env(base_dir)
+    google_registry = GoogleSheetsRegistry(google_config)
+    google_result = google_registry.sync(
+        actionable,
+        new_actionable,
+        source_result,
+        generated_at=current_time,
+        profile=args.profile,
+        raw_count=len(raw_tenders),
+        unique_count=len(deduplication.tenders),
+        customer_candidates=customer_candidates,
+        regional_tenders=regional_tenders,
+    )
+    customer_rows = google_registry.last_customer_rows
+    if not customer_rows:
+        customer_rows = build_customer_registry(
+            customer_candidates,
+            load_customer_rows(exports_dir),
+        )
+        customer_rows, _ = CustomerContactEnricher(
+            google_config.customer_cache_file
+            or base_dir / "data" / "customer_contacts.json",
+            max_fetches=0,
+            now=lambda: current_time,
+        ).enrich(customer_rows, customer_candidates)
+
     date_stamp = current_time.strftime("%Y-%m-%d")
     excel_path = export_excel(
         hot,
@@ -769,6 +818,8 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         source_health=source_result.health,
         manual_selections=load_manual_selections(exports_dir),
         new_keys={tender.unique_key for tender in first_seen},
+        regional_tenders=regional_tenders,
+        customer_rows=customer_rows,
     )
     json_path = export_json(actionable, exports_dir / "latest.json")
     new_json_path = export_json(new_actionable, exports_dir / "new_tenders.json")
@@ -790,23 +841,6 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         unique_count=len(deduplication.tenders),
         new_count=len(new_actionable),
         profile=args.profile,
-    )
-    google_result = GoogleSheetsRegistry(
-        GoogleSheetsConfig.from_env(base_dir)
-    ).sync(
-        actionable,
-        new_actionable,
-        source_result,
-        generated_at=current_time,
-        profile=args.profile,
-        raw_count=len(raw_tenders),
-        unique_count=len(deduplication.tenders),
-        customer_candidates=list(
-            {
-                tender.unique_key: tender
-                for tender in [*storage.fetch_customer_candidates(), *evaluated]
-            }.values()
-        ),
     )
     notification_config = NotificationConfig.from_env()
     storage.upsert_many(

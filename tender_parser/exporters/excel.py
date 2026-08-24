@@ -17,6 +17,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
 from tender_parser.models import TenderRecord
+from tender_parser.customers import CUSTOMER_HEADERS
 from tender_parser.direct_links import documents_destination
 from tender_parser.run_report import SourceHealth
 
@@ -120,6 +121,8 @@ TAB_COLORS = {
     "На проверку": "FAB219",
     "Широкий хвост": "86B6EF",
     "Отсеянные": "9AA0A6",
+    "Все региональные": "6F42C1",
+    "Потенциальные заказчики": "00897B",
 }
 
 DATA_SHEETS = {"Мой отбор", "Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"}
@@ -262,6 +265,40 @@ def load_manual_selections(exports_dir: Path) -> dict[SelectionKey, SelectionVal
         finally:
             workbook.close()
     return selections
+
+
+def load_customer_rows(exports_dir: Path) -> list[list[object]]:
+    """Load editable customer fields from the latest local report."""
+
+    if not exports_dir.exists():
+        return []
+    candidates = sorted(
+        exports_dir.glob("tenders_*.xlsx"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )[:3]
+    from openpyxl import load_workbook
+
+    for candidate in candidates:
+        try:
+            workbook = load_workbook(candidate, read_only=True, data_only=False)
+        except Exception:
+            continue
+        try:
+            if "Потенциальные заказчики" not in workbook.sheetnames:
+                continue
+            values = workbook["Потенциальные заказчики"].iter_rows(values_only=True)
+            headers = [str(value or "").strip() for value in next(values, [])]
+            if headers[: len(CUSTOMER_HEADERS)] != CUSTOMER_HEADERS:
+                continue
+            return [
+                list(row[: len(CUSTOMER_HEADERS)])
+                for row in values
+                if any(value not in (None, "") for value in row)
+            ]
+        finally:
+            workbook.close()
+    return []
 
 
 def _selection_for(
@@ -408,6 +445,35 @@ def _append_rows(
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}{last_row}"
     sheet.freeze_panes = "E2"
     choice_validation.add(f"{choice_column}2:{choice_column}{last_row}")
+
+
+def _append_customer_rows(sheet: Worksheet, rows: list[list[object]]) -> None:
+    sheet.append(CUSTOMER_HEADERS)
+    _style_header(sheet, len(CUSTOMER_HEADERS))
+    sheet.freeze_panes = "A2"
+    last_row = max(1, len(rows) + 1)
+    sheet.auto_filter.ref = (
+        f"A1:{get_column_letter(len(CUSTOMER_HEADERS))}{last_row}"
+    )
+    widths = [24, 48, 18, 22, 15, 42, 42, 30, 20, 32, 30, 32, 30, 18, 20, 36]
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    for values in rows:
+        padded = list(values[: len(CUSTOMER_HEADERS)])
+        padded.extend([""] * (len(CUSTOMER_HEADERS) - len(padded)))
+        sheet.append([_safe(value) for value in padded])
+        row = sheet.max_row
+        for column in range(1, len(CUSTOMER_HEADERS) + 1):
+            cell = sheet.cell(row=row, column=column)
+            cell.alignment = WRAP_TOP
+            cell.border = GRID_BORDER
+        for column in (11, 12, 13):
+            cell = sheet.cell(row=row, column=column)
+            value = str(cell.value or "").strip()
+            if value.startswith(("http://", "https://")):
+                cell.hyperlink = value
+                cell.font = LINK_FONT
+        sheet.row_dimensions[row].height = 32
 
 
 def _count_by(tenders: list[TenderRecord], key) -> list[tuple[str, int]]:
@@ -624,6 +690,8 @@ def export_excel(
     source_health: list[SourceHealth] | None = None,
     manual_selections: Mapping[SelectionKey, SelectionValue] | None = None,
     new_keys: set[str] | None = None,
+    regional_tenders: list[TenderRecord] | None = None,
+    customer_rows: list[list[object]] | None = None,
 ) -> Path:
     current = now or datetime.now()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -666,6 +734,18 @@ def export_excel(
     _append_rows(
         workbook.create_sheet("Отсеянные"), sort_for_review(excluded), current, manual_selections, new_keys
     )
+    if regional_tenders is not None:
+        _append_rows(
+            workbook.create_sheet("Все региональные"),
+            sort_for_review(regional_tenders),
+            current,
+            manual_selections,
+            new_keys,
+        )
+    if customer_rows is not None:
+        _append_customer_rows(
+            workbook.create_sheet("Потенциальные заказчики"), customer_rows
+        )
 
     for name, color in TAB_COLORS.items():
         if name in workbook.sheetnames:

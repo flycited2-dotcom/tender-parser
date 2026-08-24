@@ -364,6 +364,19 @@ class TenderStorage:
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def fetch_all_tenders(self) -> list[TenderRecord]:
+        """Return the accumulated procurement history for broad regional review."""
+
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM tenders
+                ORDER BY last_seen_at DESC, discovered_at DESC
+                """
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
     def fetch_pending_notifications(self, limit: int = 50) -> list[TenderRecord]:
         with closing(self._connect()) as conn:
             rows = conn.execute(

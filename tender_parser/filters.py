@@ -207,6 +207,13 @@ def _resolve_target_region(tender: TenderRecord) -> tuple[str | None, str | None
     return None, None
 
 
+def target_region(tender: TenderRecord) -> str | None:
+    """Return a confirmed target region without applying topic/price filters."""
+
+    region, _ = _resolve_target_region(tender)
+    return region
+
+
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     subject = _subject_searchable(tender)

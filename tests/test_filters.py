@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from tender_parser import config
-from tender_parser.filters import evaluate_tender
+from tender_parser.filters import evaluate_tender, target_region
 from tender_parser.models import TenderRecord
 
 
@@ -53,6 +53,16 @@ def test_evaluate_tender_excludes_stop_terms() -> None:
     assert result.filter_status == "excluded"
     assert "стоп-тема" in result.exclude_reason
     assert "лекарств" in result.exclude_reason
+
+
+def test_target_region_is_retained_for_medical_and_other_excluded_topics() -> None:
+    tender = make_tender(
+        title="Поставка лекарственных препаратов",
+        raw_text="Поставка лекарственных препаратов в Республику Крым",
+    )
+
+    assert evaluate_tender(tender, now=NOW).review_priority == "excluded"
+    assert target_region(tender) == "Республика Крым"
 
 
 def test_evaluate_tender_excludes_low_price() -> None:

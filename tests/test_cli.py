@@ -42,7 +42,7 @@ class FakeSource:
                 url="https://example.test/tender-1/",
                 source="fake",
                 tender_number="1",
-                customer="Заказчик",
+                customer='ГБУ РК "Тестовый заказчик"',
                 region="Республика Крым",
                 price=45_000.0,
                 deadline=datetime(2026, 5, 25, 10, 0),
@@ -387,7 +387,21 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
     assert (tmp_path / "exports" / "run_report.json").exists()
     excel_path = next((tmp_path / "exports").glob("tenders_*.xlsx"))
     workbook = load_workbook(excel_path)
-    assert workbook.sheetnames == ["Дашборд", "Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
+    assert workbook.sheetnames == [
+        "Дашборд",
+        "Новые",
+        "Горячие",
+        "На проверку",
+        "Широкий хвост",
+        "Отсеянные",
+        "Все региональные",
+        "Потенциальные заказчики",
+    ]
+    assert workbook["Все региональные"].max_row == 2
+    customers = workbook["Потенциальные заказчики"]
+    assert customers.max_row == 2
+    assert customers["B2"].value == 'ГБУ РК "Тестовый заказчик"'
+    assert customers["M2"].hyperlink.target == "https://example.test/tender-1/"
     assert "Поставка МФУ" in (tmp_path / "exports" / "latest.html").read_text(encoding="utf-8")
     assert "Поставка МФУ" in (tmp_path / "exports" / "notification.txt").read_text(
         encoding="utf-8"
