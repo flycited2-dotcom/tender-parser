@@ -375,7 +375,10 @@ RTS_MARKET_ENDPOINTS = [
 ]
 RTS_MAX_PAGES_PER_KEYWORD = 2
 RTS_TIMEOUT_SECONDS = 8
-RTS_QUERY_DELAY_SECONDS = 0.4
+# RTS rate-limits public market pages aggressively.  Keep the dedicated query
+# set small and leave enough time between searches to avoid a scheduler-driven
+# request burst.
+RTS_QUERY_DELAY_SECONDS = 6.0
 HTTP_TIMEOUT_SECONDS = 25
 ETP_GPB_TIMEOUT_SECONDS = 8
 ETP_GPB_MAX_ERRORS = 2
@@ -520,7 +523,6 @@ def _load_expanded_dictionary() -> None:
         }
     )
     SEARCH_QUERY_TERMS[:] = [str(term) for term in search_terms if str(term).strip()]
-    RTS_SEARCH_QUERIES[:] = SEARCH_QUERY_TERMS
     STOP_TERMS[:] = [str(term) for term in stop_terms if str(term).strip()]
     REGIONAL_SEARCH_QUERIES[:] = [
         f"{term} {region}"

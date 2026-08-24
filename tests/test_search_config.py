@@ -43,6 +43,7 @@ def test_generated_search_workbook_round_trips_current_dictionary() -> None:
 
 
 def test_apply_search_profile_changes_matching_and_minimum_price() -> None:
+    focused_rts_queries = list(config.RTS_SEARCH_QUERIES)
     custom = SearchProfile(
         category_keywords={"Спецтовары": ["термопринтер"]},
         search_terms=["термопринтер"],
@@ -66,6 +67,7 @@ def test_apply_search_profile_changes_matching_and_minimum_price() -> None:
         )
 
         assert config.SEARCH_QUERY_TERMS == ["термопринтер"]
+        assert config.RTS_SEARCH_QUERIES == focused_rts_queries
         assert result.filter_status == "excluded"
         assert "100000" in result.exclude_reason
     finally:

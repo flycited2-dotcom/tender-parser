@@ -84,7 +84,6 @@ def apply_search_profile(profile: SearchProfile) -> None:
     )
     config.STOP_TERMS[:] = profile.stop_terms
     config.SEARCH_QUERY_TERMS[:] = profile.search_terms
-    config.RTS_SEARCH_QUERIES[:] = profile.search_terms
     config.SEARCH_REGION_TERMS[:] = profile.regions
     regional = [f"{term} {region}" for term in profile.search_terms for region in profile.regions]
     config.REGIONAL_SEARCH_QUERIES[:] = regional

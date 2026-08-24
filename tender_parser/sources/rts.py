@@ -28,6 +28,8 @@ from tender_parser.text import normalize_text, parse_deadline, parse_price_rub
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RTS-Tender-Parser/0.1"
 BLOCKED_RESPONSE_MARKERS = [
+    "anti-ddos защита",
+    "проверяем ваш браузер",
     "превышен максимальный лимит скорости просмотра страниц",
     "регламент площадки не допускает использование ботов",
 ]
@@ -151,7 +153,17 @@ class RtsPublicSource:
         tenders: list[TenderRecord] = []
         for page_index in range(max_pages):
             url = build_search_url(keyword, page_index, active_endpoint.base_url)
-            response = get_with_retry(self.session, url, timeout=self.timeout_seconds)
+            try:
+                response = get_with_retry(self.session, url, timeout=self.timeout_seconds)
+            except requests.HTTPError as exc:
+                response = exc.response
+                if response is not None and is_blocked_response(
+                    str(response.url), str(response.text)
+                ):
+                    raise SourceBlockedError(
+                        "anti-DDoS: RTS-Tender requires an interactive browser check"
+                    ) from exc
+                raise
             if is_blocked_response(response.url, response.text):
                 raise SourceBlockedError(
                     "captcha: RTS-Tender ограничил скорость просмотра endpoint"

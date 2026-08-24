@@ -2,6 +2,7 @@ from pathlib import Path
 from urllib.parse import unquote, unquote_plus
 
 import pytest
+import requests
 
 from tender_parser.config import RTS_SEARCH_QUERIES, RTS_TIMEOUT_SECONDS
 from tender_parser.sources.rts import (
@@ -69,6 +70,26 @@ class CaptchaSession:
 
     def get(self, url: str, timeout: int) -> CaptchaResponse:
         return CaptchaResponse()
+
+
+class AntiDdosResponse:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.text = (
+            "<title>Anti-DDoS защита</title>"
+            "<h2>Включена Anti-DDoS защита. Проверяем ваш браузер.</h2>"
+        )
+
+    def raise_for_status(self) -> None:
+        raise requests.HTTPError("503 Server Error", response=self)  # type: ignore[arg-type]
+
+
+class AntiDdosSession:
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+
+    def get(self, url: str, timeout: int) -> AntiDdosResponse:
+        return AntiDdosResponse(url)
 
 
 class MarketResponse:
@@ -174,6 +195,13 @@ def test_fetch_keyword_raises_when_source_returns_captcha() -> None:
     source = RtsPublicSource(session=CaptchaSession())
 
     with pytest.raises(SourceBlockedError, match="captcha"):
+        source.fetch_keyword("компьютер")
+
+
+def test_fetch_keyword_classifies_503_antiddos_page_as_blocked() -> None:
+    source = RtsPublicSource(session=AntiDdosSession())
+
+    with pytest.raises(SourceBlockedError, match="anti-DDoS"):
         source.fetch_keyword("компьютер")
 
 
