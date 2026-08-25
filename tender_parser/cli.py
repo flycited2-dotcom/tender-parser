@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
@@ -66,6 +67,16 @@ from tender_parser.supplier_search import (
     export_supplier_search,
     search_case_products,
 )
+from tender_parser.outreach_candidates import (
+    build_legacy_horeca_suppression,
+    build_outreach_candidates,
+    write_outreach_handoff,
+)
+from tender_parser.outreach_google_sheets import (
+    GoogleOutreachSourceConfig,
+    GoogleSheetsOutreachReader,
+    OutreachSourceSnapshot,
+)
 from tender_parser.suppliers import (
     SupplierCatalog,
     export_supplier_matches,
@@ -100,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
             "supplier-search",
             "supplier-import",
             "customers-refresh",
+            "outreach-export",
             "case-init",
             "case-preflight",
             "case-products",
@@ -117,6 +129,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sender", default="", help="Sender email for supplier-import")
     parser.add_argument("--channel", default="manual", help="Import channel: gmail, telegram, manual")
     parser.add_argument("--message-id", default="", help="Source message ID for audit trail")
+    parser.add_argument(
+        "--input-json",
+        default="",
+        help="Read outreach source payload from a JSON file; use - for one JSON line on stdin",
+    )
+    parser.add_argument(
+        "--campaign-id",
+        default="",
+        help="Stable campaign identifier for an outreach dry-run",
+    )
     parser.add_argument("--case-id", default="", help="Tender case identifier")
     parser.add_argument("--title", default="", help="Tender title for case-init")
     parser.add_argument("--host", default="127.0.0.1", help="Control center bind address")
@@ -145,6 +167,70 @@ def ensure_dirs(base_dir: Path) -> tuple[Path, Path]:
     data_dir.mkdir(parents=True, exist_ok=True)
     exports_dir.mkdir(parents=True, exist_ok=True)
     return data_dir, exports_dir
+
+
+def _outreach_export_command(
+    base_dir: Path,
+    exports_dir: Path,
+    *,
+    input_json: str,
+    campaign_id: str,
+    now_value: str,
+) -> int:
+    try:
+        generated_at = datetime.fromisoformat(now_value) if now_value else datetime.now()
+        if input_json:
+            if input_json == "-":
+                raw_payload = sys.stdin.readline()
+            else:
+                input_path = Path(input_json)
+                if not input_path.is_absolute():
+                    input_path = base_dir / input_path
+                raw_payload = input_path.read_text(encoding="utf-8-sig")
+            snapshot = OutreachSourceSnapshot.from_payload(json.loads(raw_payload))
+        else:
+            snapshot = GoogleSheetsOutreachReader(
+                GoogleOutreachSourceConfig.from_env(base_dir)
+            ).read()
+
+        actual_campaign_id = (
+            campaign_id.strip()
+            or os.getenv("OUTREACH_CAMPAIGN_ID", "").strip()
+            or "tender-intro-v1"
+        )
+        suppression = build_legacy_horeca_suppression(
+            snapshot.horeca_rows,
+            snapshot.horeca_headers,
+        )
+        result = build_outreach_candidates(
+            snapshot.customer_rows,
+            suppression=suppression,
+            campaign_id=actual_campaign_id,
+        )
+        run_id = f"{actual_campaign_id}-{generated_at.strftime('%Y%m%dT%H%M%S')}"
+        handoff = write_outreach_handoff(
+            result,
+            exports_dir / "outreach",
+            generated_at=generated_at,
+            run_id=run_id,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"Ошибка dry-run экспорта: {exc}")
+        return 2
+
+    stats = handoff.stats
+    print(
+        "Dry-run обращений: "
+        f"всего {stats['total']}, "
+        f"готовы к проверке кампании {stats['ready_for_campaign_review']}, "
+        f"нужно проверить контакт {stats['needs_contact_review']}, "
+        f"стоп-лист {stats['suppressed']}, "
+        f"исключено {stats['excluded']}"
+    )
+    print(f"CSV: {handoff.csv_path}")
+    print(f"Manifest: {handoff.manifest_path}")
+    print("Отправка: запрещена; approved_for_send=false")
+    return 0
 
 
 def _all_keywords() -> list[str]:
@@ -549,6 +635,14 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     load_env_file(base_dir / ".env.local")
     if args.command == "check-env":
         return _check_env_command(base_dir)
+    if args.command == "outreach-export":
+        return _outreach_export_command(
+            base_dir,
+            exports_dir,
+            input_json=args.input_json,
+            campaign_id=args.campaign_id,
+            now_value=args.now,
+        )
     if args.command == "case-init":
         return _case_init_command(base_dir, args.case_id, args.title)
     if args.command == "case-preflight":
