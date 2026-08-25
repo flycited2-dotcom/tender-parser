@@ -17,12 +17,19 @@ var TenderOutreach = (function () {
       campaigns: "Кампании",
       stoplist: "Стоп-лист",
       events: "События",
+      dmarc: "DMARC",
     },
     properties: {
       testMode: "TENDER_OUTREACH_TEST_MODE",
       workingDraftsMode: "TENDER_OUTREACH_WORKING_DRAFTS_MODE",
       productionMode: "TENDER_OUTREACH_PRODUCTION_MODE",
       schedulerMode: "TENDER_OUTREACH_SCHEDULER_MODE",
+      autoPreparationMode: "TENDER_OUTREACH_AUTO_PREPARATION_MODE",
+      firstBatchReviewed: "TENDER_OUTREACH_FIRST_BATCH_REVIEWED",
+      mailboxMonitorMode: "TENDER_OUTREACH_MAILBOX_MONITOR_MODE",
+      dmarcMonitorMode: "TENDER_OUTREACH_DMARC_MONITOR_MODE",
+      processedDmarcIds: "TENDER_OUTREACH_PROCESSED_DMARC_IDS",
+      processedMailboxIds: "TENDER_OUTREACH_PROCESSED_MAILBOX_IDS",
       productionBatchLimit: "TENDER_OUTREACH_BATCH_LIMIT",
       testRecipient: "TENDER_OUTREACH_TEST_RECIPIENT",
       senderAlias: "TENDER_OUTREACH_FROM_ALIAS",
@@ -43,6 +50,10 @@ var TenderOutreach = (function () {
       statusSent: "отправлено",
       statusSendError: "ошибка отправки",
       stageSent: "отправлено",
+      statusBounced: "bounced",
+      stageBounced: "недоставка",
+      statusOptedOut: "не писать",
+      stageOptedOut: "отписка",
     },
     campaign: {
       testStatus: "тест",
@@ -51,13 +62,16 @@ var TenderOutreach = (function () {
       workingDraftApprovalPhrase: "WORK_DRAFTS_APPROVED",
       productionStatus: "одобрена",
       productionApprovalPhrase: "PRODUCTION_SEND_APPROVED",
+      ownerAuthorizedTenderPhrase: "PUBLIC_TENDER_OUTREACH_AUTHORIZED",
     },
     blockedSubjectPrefixes: ["[ЗАБЛОКИРОВАНО]", "[ЧЕРНОВИК"],
     maxHardTestDraftsPerRun: 5,
-    maxHardWorkingDraftsPerRun: 10,
+    maxHardWorkingDraftsPerRun: 20,
     maxHardSendsPerRun: 10,
     maxHardSendsPerDay: 50,
     defaultProductionBatchLimit: 5,
+    maxProcessedMessageIds: 300,
+    mailboxLookbackDays: 14,
   };
 
   var QUEUE_HEADERS = {
@@ -67,7 +81,10 @@ var TenderOutreach = (function () {
     organization: "Организация",
     region: "Регион",
     contactPerson: "Контактное лицо",
+    contactSource: "Источник контакта",
+    sourceTender: "Закупка-основание",
     decision: "Решение",
+    decisionReason: "Причина решения",
     mailingStatus: "Статус рассылки",
     sentAt: "Дата отправки",
     stage: "Этап",
@@ -324,7 +341,10 @@ var TenderOutreach = (function () {
       organization: String(row[index[QUEUE_HEADERS.organization]] || "").trim(),
       region: String(row[index[QUEUE_HEADERS.region]] || "").trim(),
       contactPerson: String(row[index[QUEUE_HEADERS.contactPerson]] || "").trim(),
+      contactSource: String(row[index[QUEUE_HEADERS.contactSource]] || "").trim(),
+      sourceTender: String(row[index[QUEUE_HEADERS.sourceTender]] || "").trim(),
       decision: String(row[index[QUEUE_HEADERS.decision]] || "").trim(),
+      decisionReason: String(row[index[QUEUE_HEADERS.decisionReason]] || "").trim(),
       mailingStatus: String(row[index[QUEUE_HEADERS.mailingStatus]] || "").trim(),
       sentAt: row[index[QUEUE_HEADERS.sentAt]],
       stage: String(row[index[QUEUE_HEADERS.stage]] || "").trim(),
@@ -365,15 +385,91 @@ var TenderOutreach = (function () {
     }
     if (stopEmails && stopEmails[candidate.email]) return "globally_suppressed";
     if (candidate.consentStatus !== "подтверждено") return "consent_not_confirmed";
-    if (
-      ["согласие получено", "входящий запрос", "действующий договор"].indexOf(
-        candidate.contactBasis
-      ) < 0
-    ) {
+    if (!hasConfirmedContactBasis(candidate)) {
       return "contact_basis_not_permitted";
     }
     if (!candidate.consentEvidence) return "consent_evidence_missing";
     if (!candidate.consentDate) return "consent_date_missing";
+    return "";
+  }
+
+  function hasConfirmedContactBasis(candidate) {
+    return ["согласие получено", "входящий запрос", "действующий договор"].indexOf(
+      candidate.contactBasis
+    ) >= 0;
+  }
+
+  function isHttpUrl(value) {
+    return /^https?:\/\/[^\s]+$/i.test(String(value || "").trim());
+  }
+
+  function campaignAuthorizesPublicTenderOutreach(campaign) {
+    return Boolean(
+      campaign &&
+      String(campaign.comment || "").indexOf(
+        CONFIG.campaign.ownerAuthorizedTenderPhrase
+      ) >= 0
+    );
+  }
+
+  function hasPublicTenderEvidence(candidate) {
+    return Boolean(
+      candidate &&
+      candidate.organization &&
+      candidate.email &&
+      isHttpUrl(candidate.sourceTender) &&
+      String(candidate.contactSource || "").trim()
+    );
+  }
+
+  function hasPermittedOutreachBasis(candidate, campaign) {
+    var confirmedConsent = Boolean(
+      candidate &&
+      candidate.consentStatus === "подтверждено" &&
+      hasConfirmedContactBasis(candidate) &&
+      candidate.consentEvidence &&
+      candidate.consentDate
+    );
+    return confirmedConsent || Boolean(
+      campaignAuthorizesPublicTenderOutreach(campaign) &&
+      hasPublicTenderEvidence(candidate)
+    );
+  }
+
+  function automatedDraftEligibility(
+    candidate,
+    campaign,
+    stopEmails,
+    template,
+    draftedEmails
+  ) {
+    var campaignReason = validateCampaignForWorkingDrafts(campaign) ||
+      validateCampaignForProduction(campaign);
+    if (campaignReason) return campaignReason;
+    if (!campaignAuthorizesPublicTenderOutreach(campaign)) {
+      return "public_tender_outreach_not_authorized";
+    }
+    if (isBlockedTemplate(template)) return "template_blocked";
+    if (!candidate.candidateId) return "candidate_id_missing";
+    if (!candidate.email) return "email_missing_or_invalid";
+    if (candidate.campaignId !== campaign.id) return "campaign_mismatch";
+    if (["needs_contact_review", CONFIG.queue.decisionReady].indexOf(candidate.decision) < 0) {
+      return "decision_not_eligible_for_automation";
+    }
+    if (
+      ["заблокировано", CONFIG.queue.statusQueued].indexOf(
+        normalizeLabel(candidate.mailingStatus)
+      ) < 0
+    ) {
+      return "mailing_status_not_available_for_preparation";
+    }
+    if (candidate.messageId || candidate.sentAt) return "already_sent";
+    if (candidate.draftId) return "draft_already_exists";
+    if (draftedEmails && draftedEmails[candidate.email]) {
+      return "email_already_has_draft";
+    }
+    if (stopEmails && stopEmails[candidate.email]) return "globally_suppressed";
+    if (!hasPublicTenderEvidence(candidate)) return "public_tender_evidence_missing";
     return "";
   }
 
@@ -424,16 +520,9 @@ var TenderOutreach = (function () {
     if (!candidate.draftId) return "draft_missing";
     if (candidate.messageId || candidate.sentAt) return "already_sent";
     if (stopEmails && stopEmails[candidate.email]) return "globally_suppressed";
-    if (candidate.consentStatus !== "подтверждено") return "consent_not_confirmed";
-    if (
-      ["согласие получено", "входящий запрос", "действующий договор"].indexOf(
-        candidate.contactBasis
-      ) < 0
-    ) {
-      return "contact_basis_not_permitted";
+    if (!hasPermittedOutreachBasis(candidate, campaign)) {
+      return "outreach_basis_not_permitted";
     }
-    if (!candidate.consentEvidence) return "consent_evidence_missing";
-    if (!candidate.consentDate) return "consent_date_missing";
     return "";
   }
 
@@ -841,6 +930,174 @@ var TenderOutreach = (function () {
     }
   }
 
+  function requireAutomatedPreparationConfiguration() {
+    var properties = PropertiesService.getScriptProperties();
+    if (properties.getProperty(CONFIG.properties.autoPreparationMode) !== "true") {
+      throw new Error("AUTO_PREPARATION_MODE не включён явно в свойствах скрипта");
+    }
+    return requireWorkingDraftConfiguration();
+  }
+
+  function existingPreparedByCampaign(rows, index) {
+    return rows.reduce(function (result, row) {
+      var candidate = candidateFromRow(row, index);
+      if (candidate.campaignId && candidate.draftId && !candidate.messageId && !candidate.sentAt) {
+        result[candidate.campaignId] = (result[candidate.campaignId] || 0) + 1;
+      }
+      return result;
+    }, {});
+  }
+
+  function previewAutomatedPreparation() {
+    var context = loadContext();
+    var draftedEmails = existingDraftEmails(context.queue.rows, context.queue.index);
+    var summary = { total: 0, eligibleForAutomatedDraft: 0, blocked: {} };
+    context.queue.rows.forEach(function (row) {
+      if (!row.some(function (value) { return String(value || "").trim(); })) return;
+      summary.total += 1;
+      var candidate = candidateFromRow(row, context.queue.index);
+      var reason = automatedDraftEligibility(
+        candidate,
+        context.campaigns[candidate.campaignId],
+        context.stopEmails,
+        context.template,
+        draftedEmails
+      );
+      if (!reason) {
+        summary.eligibleForAutomatedDraft += 1;
+        draftedEmails[candidate.email] = true;
+      } else {
+        summary.blocked[reason] = (summary.blocked[reason] || 0) + 1;
+      }
+    });
+    Logger.log(JSON.stringify(summary));
+    return summary;
+  }
+
+  function prepareAutomatedWorkingDrafts() {
+    var runtime = requireAutomatedPreparationConfiguration();
+    var lock = LockService.getScriptLock();
+    lock.waitLock(5000);
+    try {
+      var context = loadContext();
+      var created = [];
+      var preparedByCampaign = existingPreparedByCampaign(
+        context.queue.rows,
+        context.queue.index
+      );
+      var draftedEmails = existingDraftEmails(context.queue.rows, context.queue.index);
+
+      for (var rowOffset = 0; rowOffset < context.queue.rows.length; rowOffset += 1) {
+        if (created.length >= CONFIG.maxHardWorkingDraftsPerRun) break;
+        var row = context.queue.rows[rowOffset];
+        var candidate = candidateFromRow(row, context.queue.index);
+        var campaign = context.campaigns[candidate.campaignId];
+        var reason = automatedDraftEligibility(
+          candidate,
+          campaign,
+          context.stopEmails,
+          context.template,
+          draftedEmails
+        );
+        if (reason) continue;
+
+        var target = Math.min(
+          Math.max(Number(campaign.dailyLimit) || 0, 0),
+          CONFIG.maxHardWorkingDraftsPerRun
+        );
+        if (!target || (preparedByCampaign[candidate.campaignId] || 0) >= target) {
+          continue;
+        }
+
+        var sheetRow = rowOffset + 2;
+        var decisionColumn = context.queue.index[QUEUE_HEADERS.decision] + 1;
+        var reasonColumn = context.queue.index[QUEUE_HEADERS.decisionReason] + 1;
+        var statusColumn = context.queue.index[QUEUE_HEADERS.mailingStatus] + 1;
+        var stageColumn = context.queue.index[QUEUE_HEADERS.stage] + 1;
+        var draftColumn = context.queue.index[QUEUE_HEADERS.draftId] + 1;
+        var noteColumn = context.queue.index[QUEUE_HEADERS.note] + 1;
+        var approvedColumn = context.queue.index[QUEUE_HEADERS.approved] + 1;
+        var autoSendColumn = context.queue.index[QUEUE_HEADERS.autoSend] + 1;
+        var oldStatus = candidate.mailingStatus;
+
+        context.queueSheet.getRange(sheetRow, decisionColumn, 1, 2).setValues([[
+          CONFIG.queue.decisionReady,
+          "owner_authorized_public_tender_outreach",
+        ]]);
+        context.queueSheet.getRange(sheetRow, statusColumn).setValue(
+          CONFIG.queue.statusWorkingDraftCreating
+        );
+        context.queueSheet.getRange(sheetRow, approvedColumn, 1, 2).setValues([[true, true]]);
+        SpreadsheetApp.flush();
+        draftedEmails[candidate.email] = true;
+
+        try {
+          var subject = renderTemplate(context.template.subject, candidate);
+          var body = renderTemplate(context.template.body, candidate);
+          var options = { from: runtime.senderAlias };
+          if (runtime.senderName) options.name = runtime.senderName;
+          if (runtime.replyTo) options.replyTo = runtime.replyTo;
+          var draft = createDraftViaGmailApi(candidate.email, subject, body, options);
+          var draftId = String((draft && draft.id) || "");
+          if (!draftId) {
+            throw new Error("Gmail API не вернул ID автоматического черновика");
+          }
+
+          context.queueSheet.getRange(sheetRow, draftColumn).setValue(draftId);
+          context.queueSheet.getRange(sheetRow, statusColumn).setValue(
+            CONFIG.queue.statusWorkingDraft
+          );
+          context.queueSheet.getRange(sheetRow, stageColumn).setValue(
+            CONFIG.queue.stageWorkingDraft
+          );
+          context.queueSheet.getRange(sheetRow, noteColumn).setValue(
+            "Автоматически подготовлено по публичному контакту закупки; " +
+            "отправка ожидает разовой проверки первой партии"
+          );
+          appendEvent(
+            context.eventsSheet,
+            candidate.campaignId,
+            candidate.candidateId,
+            candidate.email,
+            "automated_working_draft_created",
+            oldStatus,
+            CONFIG.queue.statusWorkingDraft,
+            "source_tender=" + candidate.sourceTender
+          );
+          created.push(candidate.candidateId);
+          preparedByCampaign[candidate.campaignId] =
+            (preparedByCampaign[candidate.campaignId] || 0) + 1;
+        } catch (error) {
+          context.queueSheet.getRange(sheetRow, statusColumn).setValue(
+            CONFIG.queue.statusWorkingDraftError
+          );
+          context.queueSheet.getRange(sheetRow, autoSendColumn).setValue(false);
+          context.queueSheet.getRange(sheetRow, noteColumn).setValue(
+            String(error.message || error)
+          );
+          appendEvent(
+            context.eventsSheet,
+            candidate.campaignId,
+            candidate.candidateId,
+            candidate.email,
+            "automated_working_draft_failed",
+            CONFIG.queue.statusWorkingDraftCreating,
+            CONFIG.queue.statusWorkingDraftError,
+            String(error.message || error)
+          );
+        }
+      }
+
+      return {
+        created: created.length,
+        candidateIds: created,
+        targetPerCampaign: CONFIG.maxHardWorkingDraftsPerRun,
+      };
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
   function clampProductionBatchLimit(value) {
     var parsed = Math.floor(Number(value));
     if (!parsed || parsed < 1) parsed = CONFIG.defaultProductionBatchLimit;
@@ -956,6 +1213,9 @@ var TenderOutreach = (function () {
       properties.getProperty(CONFIG.properties.schedulerMode) !== "true"
     ) {
       return { sent: 0, skipped: "scheduler_disabled" };
+    }
+    if (properties.getProperty(CONFIG.properties.firstBatchReviewed) !== "true") {
+      return { sent: 0, skipped: "first_batch_review_pending" };
     }
 
     var runtime = requireProductionConfiguration(properties);
@@ -1096,6 +1356,498 @@ var TenderOutreach = (function () {
     }
   }
 
+  function approveAutomationAfterFirstBatchReview() {
+    var properties = PropertiesService.getScriptProperties();
+    requireProductionConfiguration(properties);
+    properties.setProperty(CONFIG.properties.firstBatchReviewed, "true");
+    return {
+      approved: true,
+      approvedAt: new Date().toISOString(),
+      schedulerMode: properties.getProperty(CONFIG.properties.schedulerMode),
+    };
+  }
+
+  function processedMessageSet(properties, propertyName) {
+    var raw = String(properties.getProperty(propertyName) || "");
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw).reduce(function (result, id) {
+        result[String(id)] = true;
+        return result;
+      }, {});
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function saveProcessedMessageSet(properties, propertyName, values) {
+    var ids = Object.keys(values).slice(-CONFIG.maxProcessedMessageIds);
+    properties.setProperty(propertyName, JSON.stringify(ids));
+  }
+
+  function gmailHeader(payload, name) {
+    var target = String(name || "").toLowerCase();
+    var headers = (payload && payload.headers) || [];
+    for (var index = 0; index < headers.length; index += 1) {
+      if (String(headers[index].name || "").toLowerCase() === target) {
+        return String(headers[index].value || "");
+      }
+    }
+    return "";
+  }
+
+  function decodeGmailText(data) {
+    if (!data) return "";
+    try {
+      return Utilities.newBlob(Utilities.base64DecodeWebSafe(data))
+        .getDataAsString("UTF-8");
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function collectGmailText(part, result) {
+    if (!part) return;
+    var mimeType = String(part.mimeType || "").toLowerCase();
+    if ((mimeType === "text/plain" || mimeType === "text/html") && part.body) {
+      result.push(decodeGmailText(part.body.data));
+    }
+    (part.parts || []).forEach(function (child) {
+      collectGmailText(child, result);
+    });
+  }
+
+  function gmailMessageText(message) {
+    var parts = [];
+    collectGmailText(message && message.payload, parts);
+    return parts.join("\n");
+  }
+
+  function collectAttachmentBlobs(part, messageId, result) {
+    if (!part) return;
+    var filename = String(part.filename || "").trim();
+    var body = part.body || {};
+    if (filename && (body.attachmentId || body.data)) {
+      var data = body.data;
+      if (!data && body.attachmentId) {
+        var attachment = Gmail.Users.Messages.Attachments.get(
+          "me",
+          messageId,
+          body.attachmentId
+        );
+        data = attachment && attachment.data;
+      }
+      if (data && String(data).length <= 8 * 1024 * 1024) {
+        result.push(Utilities.newBlob(
+          Utilities.base64DecodeWebSafe(data),
+          part.mimeType || "application/octet-stream",
+          filename
+        ));
+      }
+    }
+    (part.parts || []).forEach(function (child) {
+      collectAttachmentBlobs(child, messageId, result);
+    });
+  }
+
+  function xmlTextsFromBlob(blob) {
+    var name = String(blob.getName() || "").toLowerCase();
+    var type = String(blob.getContentType() || "").toLowerCase();
+    var blobs = [];
+    try {
+      if (/\.zip$/.test(name) || type.indexOf("zip") >= 0) {
+        blobs = Utilities.unzip(blob);
+      } else if (/\.gz$/.test(name) || type.indexOf("gzip") >= 0) {
+        blobs = [Utilities.ungzip(blob)];
+      } else {
+        blobs = [blob];
+      }
+    } catch (error) {
+      return [];
+    }
+    return blobs.reduce(function (result, item) {
+      var itemName = String(item.getName() || name).toLowerCase();
+      if (itemName && !/\.xml(?:\.txt)?$/.test(itemName) && itemName.indexOf("xml") < 0) {
+        return result;
+      }
+      var bytes = item.getBytes();
+      if (bytes.length > 4 * 1024 * 1024) return result;
+      var text = item.getDataAsString("UTF-8").trim();
+      if (text.indexOf("<feedback") >= 0 || text.indexOf(":feedback") >= 0) {
+        result.push(text);
+      }
+      return result;
+    }, []);
+  }
+
+  function xmlChild(element, name) {
+    if (!element) return null;
+    var children = element.getChildren();
+    for (var index = 0; index < children.length; index += 1) {
+      if (children[index].getName() === name) return children[index];
+    }
+    return null;
+  }
+
+  function xmlChildren(element, name) {
+    if (!element) return [];
+    return element.getChildren().filter(function (child) {
+      return child.getName() === name;
+    });
+  }
+
+  function xmlText(element, name) {
+    var child = xmlChild(element, name);
+    return child ? String(child.getText() || "").trim() : "";
+  }
+
+  function extractDmarcRowsFromXml(xmlText, messageId) {
+    var root = XmlService.parse(String(xmlText || "")).getRootElement();
+    if (root.getName() !== "feedback") return [];
+    var metadata = xmlChild(root, "report_metadata");
+    var policy = xmlChild(root, "policy_published");
+    var reportId = xmlText(metadata, "report_id");
+    var reporter = xmlText(metadata, "org_name");
+    var domain = xmlText(policy, "domain");
+    var dateRange = xmlChild(metadata, "date_range");
+    var beginValue = Number(xmlText(dateRange, "begin"));
+    var endValue = Number(xmlText(dateRange, "end"));
+    var begin = beginValue ? new Date(beginValue * 1000) : "";
+    var end = endValue ? new Date(endValue * 1000) : "";
+
+    return xmlChildren(root, "record").map(function (record) {
+      var row = xmlChild(record, "row");
+      var evaluated = xmlChild(row, "policy_evaluated");
+      var dkim = normalizeLabel(xmlText(evaluated, "dkim"));
+      var spf = normalizeLabel(xmlText(evaluated, "spf"));
+      return [
+        new Date(),
+        reporter,
+        domain,
+        reportId,
+        begin,
+        end,
+        xmlText(row, "source_ip"),
+        Number(xmlText(row, "count")) || 0,
+        xmlText(evaluated, "disposition"),
+        dkim,
+        spf,
+        dkim === "pass" || spf === "pass" ? "pass" : "fail",
+        String(messageId || ""),
+        "обработано",
+      ];
+    });
+  }
+
+  function ensureDmarcSheet(spreadsheet) {
+    var sheet = spreadsheet.getSheetByName(CONFIG.sheets.dmarc);
+    if (sheet) return sheet;
+    sheet = spreadsheet.insertSheet(CONFIG.sheets.dmarc);
+    var headers = [[
+      "Обработано",
+      "Источник отчёта",
+      "Домен",
+      "Report ID",
+      "Период с",
+      "Период по",
+      "IP отправителя",
+      "Писем",
+      "Disposition",
+      "DKIM",
+      "SPF",
+      "DMARC",
+      "Gmail Message ID",
+      "Статус",
+    ]];
+    sheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
+    sheet.setFrozenRows(1);
+    sheet.setHiddenGridlines(true);
+    sheet.getRange(1, 1, 1, headers[0].length)
+      .setBackground("#1e518e")
+      .setFontColor("#ffffff")
+      .setFontWeight("bold")
+      .setWrap(true);
+    sheet.setColumnWidths(1, headers[0].length, 120);
+    sheet.setColumnWidth(2, 180);
+    sheet.setColumnWidth(3, 180);
+    sheet.setColumnWidth(4, 220);
+    return sheet;
+  }
+
+  function existingDmarcKeys(sheet) {
+    if (sheet.getLastRow() < 2) return {};
+    return sheet.getRange(2, 4, sheet.getLastRow() - 1, 5).getValues()
+      .reduce(function (result, row) {
+        var key = [row[0], row[1], row[2], row[3], row[4]].join("|");
+        result[key] = true;
+        return result;
+      }, {});
+  }
+
+  function dmarcRowKey(row) {
+    return [row[3], row[4], row[5], row[6], row[7]].join("|");
+  }
+
+  function listGmailMessageIds(query, maxResults) {
+    var response = Gmail.Users.Messages.list("me", {
+      q: query,
+      maxResults: Math.min(Number(maxResults) || 100, 100),
+    });
+    return (response.messages || []).map(function (item) {
+      return String(item.id || "");
+    }).filter(Boolean);
+  }
+
+  function processDmarcReports() {
+    var properties = PropertiesService.getScriptProperties();
+    if (properties.getProperty(CONFIG.properties.dmarcMonitorMode) !== "true") {
+      return { processed: 0, rows: 0, skipped: "dmarc_monitor_disabled" };
+    }
+    var context = loadContext();
+    var sheet = ensureDmarcSheet(context.spreadsheet);
+    var existing = existingDmarcKeys(sheet);
+    var processed = processedMessageSet(properties, CONFIG.properties.processedDmarcIds);
+    var messageIds = listGmailMessageIds(
+      "newer_than:30d has:attachment (subject:\"Report Domain:\" OR subject:DMARC)",
+      100
+    );
+    var rows = [];
+    var handled = 0;
+    var failures = [];
+
+    messageIds.forEach(function (messageId) {
+      if (processed[messageId]) return;
+      try {
+        var message = Gmail.Users.Messages.get("me", messageId, { format: "full" });
+        var attachments = [];
+        collectAttachmentBlobs(message.payload, messageId, attachments);
+        attachments.forEach(function (blob) {
+          xmlTextsFromBlob(blob).forEach(function (xmlTextValue) {
+            extractDmarcRowsFromXml(xmlTextValue, messageId).forEach(function (row) {
+              var key = dmarcRowKey(row);
+              if (!existing[key]) {
+                existing[key] = true;
+                rows.push(row);
+              }
+            });
+          });
+        });
+        processed[messageId] = true;
+        handled += 1;
+      } catch (error) {
+        failures.push(messageId + ":" + String(error.message || error));
+      }
+    });
+    if (rows.length) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length)
+        .setValues(rows);
+    }
+    saveProcessedMessageSet(properties, CONFIG.properties.processedDmarcIds, processed);
+    return { processed: handled, rows: rows.length, failures: failures.slice(0, 5) };
+  }
+
+  function extractEmailsFromText(text) {
+    var matches = String(text || "").match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/ig) || [];
+    return matches.reduce(function (result, value) {
+      var email = normalizeEmail(value);
+      if (email) result[email] = true;
+      return result;
+    }, {});
+  }
+
+  function isOptOutText(text) {
+    return /(?:^|\s)(?:не\s+писать|отпис(?:ка|аться|ываюсь)|unsubscribe)(?:\s|$|[.!])/i
+      .test(String(text || ""));
+  }
+
+  function stoplistEmail(sheet, email, reason, oldStatus, oldStage) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var existing = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var index = 0; index < existing.length; index += 1) {
+        if (normalizeEmail(existing[index][0]) === email) return false;
+      }
+    }
+    sheet.appendRow([
+      email,
+      reason,
+      "Тендерная рассылка",
+      oldStatus || "",
+      oldStage || "",
+      new Date(),
+    ]);
+    return true;
+  }
+
+  function processMailboxSignals() {
+    var properties = PropertiesService.getScriptProperties();
+    if (properties.getProperty(CONFIG.properties.mailboxMonitorMode) !== "true") {
+      return { bounced: 0, optedOut: 0, skipped: "mailbox_monitor_disabled" };
+    }
+    var context = loadContext();
+    var processed = processedMessageSet(properties, CONFIG.properties.processedMailboxIds);
+    var lookback = CONFIG.mailboxLookbackDays;
+    var bounceIds = listGmailMessageIds(
+      "newer_than:" + lookback + "d (from:mailer-daemon OR subject:\"Delivery Status Notification\" OR subject:\"Undelivered Mail Returned to Sender\")",
+      100
+    );
+    var optOutIds = listGmailMessageIds(
+      "newer_than:" + lookback + "d -from:me (\"не писать\" OR отписаться OR unsubscribe)",
+      100
+    );
+    var bounceSet = bounceIds.reduce(function (result, id) {
+      result[id] = true;
+      return result;
+    }, {});
+    var allIds = bounceIds.concat(optOutIds).filter(function (id, index, values) {
+      return values.indexOf(id) === index && !processed[id];
+    });
+    var queueByEmail = {};
+    context.queue.rows.forEach(function (row, rowOffset) {
+      var candidate = candidateFromRow(row, context.queue.index);
+      if (!candidate.email) return;
+      if (!queueByEmail[candidate.email]) queueByEmail[candidate.email] = [];
+      queueByEmail[candidate.email].push({ candidate: candidate, rowOffset: rowOffset });
+    });
+    var stoplistSheet = requireSheet(context.spreadsheet, CONFIG.sheets.stoplist);
+    var bounced = 0;
+    var optedOut = 0;
+    var failures = [];
+
+    allIds.forEach(function (messageId) {
+      try {
+        var message = Gmail.Users.Messages.get("me", messageId, { format: "full" });
+        var payload = message.payload || {};
+        var subject = gmailHeader(payload, "Subject");
+        var from = gmailHeader(payload, "From");
+        var text = gmailMessageText(message);
+        var isBounce = Boolean(bounceSet[messageId]);
+        var addresses = isBounce
+          ? extractEmailsFromText(subject + "\n" + from + "\n" + text)
+          : extractEmailsFromText(from);
+        var isOptOut = !isBounce && isOptOutText(text);
+
+        Object.keys(addresses).forEach(function (email) {
+          (queueByEmail[email] || []).forEach(function (match) {
+            var candidate = match.candidate;
+            var sheetRow = match.rowOffset + 2;
+            var statusColumn = context.queue.index[QUEUE_HEADERS.mailingStatus] + 1;
+            var stageColumn = context.queue.index[QUEUE_HEADERS.stage] + 1;
+            var noteColumn = context.queue.index[QUEUE_HEADERS.note] + 1;
+            var autoSendColumn = context.queue.index[QUEUE_HEADERS.autoSend] + 1;
+            var newStatus = isBounce
+              ? CONFIG.queue.statusBounced
+              : CONFIG.queue.statusOptedOut;
+            var newStage = isBounce
+              ? CONFIG.queue.stageBounced
+              : CONFIG.queue.stageOptedOut;
+            if (!isBounce && !isOptOut) return;
+            context.queueSheet.getRange(sheetRow, statusColumn).setValue(newStatus);
+            context.queueSheet.getRange(sheetRow, stageColumn).setValue(newStage);
+            context.queueSheet.getRange(sheetRow, autoSendColumn).setValue(false);
+            context.queueSheet.getRange(sheetRow, noteColumn).setValue(
+              (isBounce ? "Автоматически обнаружена недоставка" : "Получен отказ «не писать»") +
+              "; Gmail message_id=" + messageId
+            );
+            stoplistEmail(
+              stoplistSheet,
+              email,
+              isBounce ? "bounced_tender" : "opted_out_tender",
+              candidate.mailingStatus,
+              candidate.stage
+            );
+            appendEvent(
+              context.eventsSheet,
+              candidate.campaignId,
+              candidate.candidateId,
+              candidate.email,
+              isBounce ? "delivery_bounced" : "recipient_opted_out",
+              candidate.mailingStatus,
+              newStatus,
+              "gmail_message_id=" + messageId
+            );
+            if (isBounce) bounced += 1;
+            else optedOut += 1;
+          });
+        });
+        processed[messageId] = true;
+      } catch (error) {
+        failures.push(messageId + ":" + String(error.message || error));
+      }
+    });
+    saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
+    return { bounced: bounced, optedOut: optedOut, failures: failures.slice(0, 5) };
+  }
+
+  function runNightlyPreparation() {
+    var result = {};
+    try {
+      result.mailbox = processMailboxSignals();
+    } catch (error) {
+      result.mailbox = { error: String(error.message || error) };
+    }
+    try {
+      result.dmarc = processDmarcReports();
+    } catch (error) {
+      result.dmarc = { error: String(error.message || error) };
+    }
+    try {
+      result.drafts = prepareAutomatedWorkingDrafts();
+    } catch (error) {
+      result.drafts = { error: String(error.message || error) };
+    }
+    Logger.log(JSON.stringify(result));
+    return result;
+  }
+
+  function installAutomationTriggers() {
+    var handlers = {
+      runTenderProductionSchedule: true,
+      runTenderNightlyPreparation: true,
+    };
+    ScriptApp.getProjectTriggers().forEach(function (trigger) {
+      if (handlers[trigger.getHandlerFunction()]) ScriptApp.deleteTrigger(trigger);
+    });
+    ScriptApp.newTrigger("runTenderProductionSchedule")
+      .timeBased()
+      .everyHours(1)
+      .create();
+    ScriptApp.newTrigger("runTenderNightlyPreparation")
+      .timeBased()
+      .atHour(3)
+      .nearMinute(15)
+      .everyDays(1)
+      .create();
+    return ScriptApp.getProjectTriggers().filter(function (trigger) {
+      return handlers[trigger.getHandlerFunction()];
+    }).map(function (trigger) {
+      return {
+        handler: trigger.getHandlerFunction(),
+        source: String(trigger.getTriggerSource()),
+        id: trigger.getUniqueId(),
+      };
+    });
+  }
+
+  function initializeAutomationForFirstReview() {
+    var properties = getProperties_();
+    var firstReviewSettings = {};
+    firstReviewSettings[CONFIG.properties.autoPreparationMode] = "true";
+    firstReviewSettings[CONFIG.properties.firstBatchReviewed] = "false";
+    firstReviewSettings[CONFIG.properties.mailboxMonitorMode] = "true";
+    firstReviewSettings[CONFIG.properties.dmarcMonitorMode] = "true";
+    properties.setProperties(firstReviewSettings, false);
+
+    var triggers = installAutomationTriggers();
+    var preparation = runNightlyPreparation();
+    return {
+      firstBatchReviewRequired: true,
+      sendingEnabled: false,
+      triggers: triggers,
+      preparation: preparation,
+    };
+  }
+
   function runProductionSchedule() {
     var result = sendProductionBatch(true);
     Logger.log(JSON.stringify(result));
@@ -1110,9 +1862,17 @@ var TenderOutreach = (function () {
       .addSeparator()
       .addItem("Проверить рабочие черновики", "previewTenderWorkingDrafts")
       .addItem("Создать рабочие черновики", "createTenderWorkingDrafts")
+      .addItem("Проверить автоматическую подготовку", "previewTenderAutomatedPreparation")
+      .addItem("Подготовить автоматическую партию", "prepareTenderAutomatedDrafts")
       .addSeparator()
       .addItem("Проверить production-партию", "previewTenderProductionBatch")
       .addItem("Отправить подтверждённую партию", "sendTenderProductionBatch")
+      .addItem("Одобрить автоматику после проверки", "approveTenderAutomationAfterReview")
+      .addSeparator()
+      .addItem("Обработать возвраты и отписки", "processTenderMailboxSignals")
+      .addItem("Обработать DMARC-отчёты", "processTenderDmarcReports")
+      .addItem("Установить триггеры автоматики", "installTenderAutomationTriggers")
+      .addItem("Подготовить запуск до первой проверки", "initializeTenderAutomationForFirstReview")
       .addToUi();
   }
 
@@ -1131,15 +1891,30 @@ var TenderOutreach = (function () {
     validateCampaignForProduction: validateCampaignForProduction,
     candidateEligibility: candidateEligibility,
     workingDraftEligibility: workingDraftEligibility,
+    automatedDraftEligibility: automatedDraftEligibility,
     productionSendEligibility: productionSendEligibility,
+    campaignAuthorizesPublicTenderOutreach: campaignAuthorizesPublicTenderOutreach,
+    hasPublicTenderEvidence: hasPublicTenderEvidence,
+    hasPermittedOutreachBasis: hasPermittedOutreachBasis,
     clampProductionBatchLimit: clampProductionBatchLimit,
     isScheduleOpen: isScheduleOpen,
+    extractEmailsFromText: extractEmailsFromText,
+    isOptOutText: isOptOutText,
+    extractDmarcRowsFromXml: extractDmarcRowsFromXml,
     previewQueue: previewQueue,
     previewWorkingQueue: previewWorkingQueue,
+    previewAutomatedPreparation: previewAutomatedPreparation,
     previewProductionQueue: previewProductionQueue,
     createTestDrafts: createTestDrafts,
     createWorkingDrafts: createWorkingDrafts,
+    prepareAutomatedWorkingDrafts: prepareAutomatedWorkingDrafts,
     sendProductionBatch: sendProductionBatch,
+    approveAutomationAfterFirstBatchReview: approveAutomationAfterFirstBatchReview,
+    processMailboxSignals: processMailboxSignals,
+    processDmarcReports: processDmarcReports,
+    runNightlyPreparation: runNightlyPreparation,
+    installAutomationTriggers: installAutomationTriggers,
+    initializeAutomationForFirstReview: initializeAutomationForFirstReview,
     runProductionSchedule: runProductionSchedule,
     onOpen: onOpen,
   };
@@ -1165,6 +1940,14 @@ function createTenderWorkingDrafts() {
   return TenderOutreach.createWorkingDrafts();
 }
 
+function previewTenderAutomatedPreparation() {
+  return TenderOutreach.previewAutomatedPreparation();
+}
+
+function prepareTenderAutomatedDrafts() {
+  return TenderOutreach.prepareAutomatedWorkingDrafts();
+}
+
 function previewTenderProductionBatch() {
   return TenderOutreach.previewProductionQueue();
 }
@@ -1175,6 +1958,30 @@ function sendTenderProductionBatch() {
 
 function runTenderProductionSchedule() {
   return TenderOutreach.runProductionSchedule();
+}
+
+function approveTenderAutomationAfterReview() {
+  return TenderOutreach.approveAutomationAfterFirstBatchReview();
+}
+
+function processTenderMailboxSignals() {
+  return TenderOutreach.processMailboxSignals();
+}
+
+function processTenderDmarcReports() {
+  return TenderOutreach.processDmarcReports();
+}
+
+function runTenderNightlyPreparation() {
+  return TenderOutreach.runNightlyPreparation();
+}
+
+function installTenderAutomationTriggers() {
+  return TenderOutreach.installAutomationTriggers();
+}
+
+function initializeTenderAutomationForFirstReview() {
+  return TenderOutreach.initializeAutomationForFirstReview();
 }
 
 if (typeof module !== "undefined" && module.exports) {

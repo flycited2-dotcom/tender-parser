@@ -34,6 +34,15 @@ function productionCampaign(overrides = {}) {
   });
 }
 
+function automatedCampaign(overrides = {}) {
+  return productionCampaign({
+    comment:
+      "WORK_DRAFTS_APPROVED; PRODUCTION_SEND_APPROVED; " +
+      "PUBLIC_TENDER_OUTREACH_AUTHORIZED",
+    ...overrides,
+  });
+}
+
 function candidate(overrides = {}) {
   return {
     candidateId: "candidate-1",
@@ -42,7 +51,10 @@ function candidate(overrides = {}) {
     organization: "ООО Пример",
     region: "Республика Крым",
     contactPerson: "",
+    contactSource: "https://zakupki.gov.ru/organization/1",
+    sourceTender: "https://zakupki.gov.ru/tender/1",
     decision: "ready_for_campaign_review",
+    decisionReason: "",
     mailingStatus: "в очереди",
     sentAt: "",
     stage: "",
@@ -178,7 +190,67 @@ test("working drafts remain row-approved, consent-gated and deduplicated", () =>
 });
 
 test("working draft batch has a conservative hard cap", () => {
-  assert.equal(outreach.CONFIG.maxHardWorkingDraftsPerRun, 10);
+  assert.equal(outreach.CONFIG.maxHardWorkingDraftsPerRun, 20);
+});
+
+test("automated preparation requires explicit campaign authorization and tender evidence", () => {
+  const publicCandidate = candidate({
+    decision: "needs_contact_review",
+    decisionReason: "contact_not_marked_ready",
+    mailingStatus: "заблокировано",
+    approved: false,
+    consentStatus: "неизвестно",
+    contactBasis: "не установлено",
+    consentEvidence: "",
+    consentDate: "",
+  });
+  assert.equal(
+    outreach.automatedDraftEligibility(
+      publicCandidate,
+      automatedCampaign(),
+      {},
+      template,
+      {}
+    ),
+    ""
+  );
+  assert.equal(
+    outreach.automatedDraftEligibility(
+      publicCandidate,
+      productionCampaign(),
+      {},
+      template,
+      {}
+    ),
+    "public_tender_outreach_not_authorized"
+  );
+  assert.equal(
+    outreach.automatedDraftEligibility(
+      { ...publicCandidate, sourceTender: "" },
+      automatedCampaign(),
+      {},
+      template,
+      {}
+    ),
+    "public_tender_evidence_missing"
+  );
+});
+
+test("production permits a reviewed public tender campaign without rewriting consent fields", () => {
+  const ready = candidate({
+    mailingStatus: "рабочий черновик",
+    stage: "рабочий черновик",
+    draftId: "draft-public-1",
+    autoSend: true,
+    contactBasis: "не установлено",
+    consentStatus: "неизвестно",
+    consentEvidence: "",
+    consentDate: "",
+  });
+  assert.equal(
+    outreach.productionSendEligibility(ready, automatedCampaign(), {}, template),
+    ""
+  );
 });
 
 test("production send requires its own campaign phrase and explicit row approval", () => {
@@ -275,6 +347,17 @@ test("HTML version emphasizes company identity and reply call to action", () => 
 
 test("mail headers cannot be extended through template values", () => {
   assert.equal(outreach.sanitizeHeader("Тема\r\nBcc: attacker@example.com"), "Тема Bcc: attacker@example.com");
+});
+
+test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
+  assert.deepEqual(
+    outreach.extractEmailsFromText(
+      "Final-Recipient: rfc822; SALES@Example.ru\nFrom: Mailer-Daemon@example.net"
+    ),
+    { "sales@example.ru": true, "mailer-daemon@example.net": true }
+  );
+  assert.equal(outreach.isOptOutText("Прошу больше не писать."), true);
+  assert.equal(outreach.isOptOutText("Спасибо, напишите завтра"), false);
 });
 
 test("audit event row follows the sheet header order", () => {
