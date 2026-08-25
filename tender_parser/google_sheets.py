@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +25,8 @@ from tender_parser.run_report import SourceFetchResult, canonical_source_name
 
 
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
+VALUE_RANGE_CHUNK_ROWS = 200
+VALUE_BATCH_MAX_BYTES = 1_500_000
 LEGACY_DATA_HEADERS = [
     "Ключ",
     "Новая",
@@ -292,7 +295,11 @@ class GoogleSheetsRegistry:
                 for sheet in metadata.get("sheets", [])
             }
             if REGIONAL_SHEET not in available_sheets:
-                self._create_data_sheet(session, REGIONAL_SHEET)
+                self._create_data_sheet(
+                    session,
+                    REGIONAL_SHEET,
+                    row_count=max(1000, len(regional_tenders or []) + 10),
+                )
                 available_sheets.add(REGIONAL_SHEET)
             active_headers = _read_headers(
                 self._get_values(
@@ -451,6 +458,7 @@ class GoogleSheetsRegistry:
                 active_count=len(current_rows),
                 new_count=len(fresh_rows),
             )
+            self._ensure_data_rows(session, metadata, values_by_sheet)
             self._replace_values(
                 session,
                 values_by_sheet,
@@ -632,7 +640,9 @@ class GoogleSheetsRegistry:
             raise ValueError("invalid spreadsheet metadata")
         return payload
 
-    def _create_data_sheet(self, session: object, title: str) -> None:
+    def _create_data_sheet(
+        self, session: object, title: str, *, row_count: int = 1000
+    ) -> None:
         response = session.post(  # type: ignore[attr-defined]
             f"{SHEETS_API}/{self.config.spreadsheet_id}:batchUpdate",
             json={
@@ -642,7 +652,7 @@ class GoogleSheetsRegistry:
                             "properties": {
                                 "title": title,
                                 "gridProperties": {
-                                    "rowCount": 1000,
+                                    "rowCount": max(1000, row_count),
                                     "columnCount": len(DATA_HEADERS),
                                     "frozenRowCount": 1,
                                 },
@@ -658,6 +668,44 @@ class GoogleSheetsRegistry:
                     }
                 ]
             },
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
+
+    def _ensure_data_rows(
+        self,
+        session: object,
+        metadata: dict,
+        values_by_sheet: dict[str, list[list[object]]],
+    ) -> None:
+        requests_payload: list[dict[str, object]] = []
+        for sheet in metadata.get("sheets", []):
+            properties = sheet.get("properties", {})
+            title = str(properties.get("title", ""))
+            sheet_id = properties.get("sheetId")
+            row_count = properties.get("gridProperties", {}).get("rowCount")
+            needed = len(values_by_sheet.get(title, [])) + 1
+            if (
+                title not in values_by_sheet
+                or sheet_id is None
+                or not isinstance(row_count, int)
+                or row_count >= needed
+            ):
+                continue
+            requests_payload.append(
+                {
+                    "appendDimension": {
+                        "sheetId": int(sheet_id),
+                        "dimension": "ROWS",
+                        "length": needed - row_count,
+                    }
+                }
+            )
+        if not requests_payload:
+            return
+        response = session.post(  # type: ignore[attr-defined]
+            f"{SHEETS_API}/{self.config.spreadsheet_id}:batchUpdate",
+            json={"requests": requests_payload},
             timeout=self.config.timeout_seconds,
         )
         response.raise_for_status()
@@ -733,39 +781,42 @@ class GoogleSheetsRegistry:
                     "values": [DATA_HEADERS],
                 }
             )
-            data.append(
-                {
-                    "range": f"'{sheet}'!A2:{DATA_LAST_COLUMN}{len(rows) + 1}",
-                    "values": rows,
-                }
+            data.extend(
+                _chunked_value_updates(
+                    sheet,
+                    rows,
+                    last_column=DATA_LAST_COLUMN,
+                    start_row=2,
+                )
             )
         if history_rows:
-            data.append(
-                {
-                    "range": f"'История запусков'!A2:L{len(history_rows) + 1}",
-                    "values": history_rows,
-                }
+            data.extend(
+                _chunked_value_updates(
+                    "История запусков",
+                    history_rows,
+                    last_column="L",
+                    start_row=2,
+                )
             )
         if summary_rows and SUMMARY_SHEET in available_sheets:
-            data.append(
-                {
-                    "range": f"'{SUMMARY_SHEET}'!A1:H{len(summary_rows)}",
-                    "values": summary_rows,
-                }
+            data.extend(
+                _chunked_value_updates(
+                    SUMMARY_SHEET,
+                    summary_rows,
+                    last_column="H",
+                    start_row=1,
+                )
             )
         if customer_rows and CUSTOMER_SHEET in available_sheets:
-            data.append(
-                {
-                    "range": f"'{CUSTOMER_SHEET}'!A2:P{len(customer_rows) + 1}",
-                    "values": [_safe_customer_row(row) for row in customer_rows],
-                }
+            data.extend(
+                _chunked_value_updates(
+                    CUSTOMER_SHEET,
+                    [_safe_customer_row(row) for row in customer_rows],
+                    last_column="P",
+                    start_row=2,
+                )
             )
-        response = session.post(  # type: ignore[attr-defined]
-            f"{SHEETS_API}/{self.config.spreadsheet_id}/values:batchUpdate",
-            json={"valueInputOption": "USER_ENTERED", "data": data},
-            timeout=self.config.timeout_seconds,
-        )
-        response.raise_for_status()
+        self._post_value_batches(session, data)
 
         clear_specs = [
             (sheet, DATA_LAST_COLUMN, len(rows) + 2)
@@ -789,6 +840,36 @@ class GoogleSheetsRegistry:
                 timeout=self.config.timeout_seconds,
             )
             response.raise_for_status()
+
+    def _post_value_batches(
+        self, session: object, updates: list[dict[str, object]]
+    ) -> None:
+        batch: list[dict[str, object]] = []
+        batch_bytes = 0
+        for update in updates:
+            update_bytes = len(
+                json.dumps(update, ensure_ascii=False, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            )
+            if batch and batch_bytes + update_bytes > VALUE_BATCH_MAX_BYTES:
+                self._post_value_batch(session, batch)
+                batch = []
+                batch_bytes = 0
+            batch.append(update)
+            batch_bytes += update_bytes
+        if batch:
+            self._post_value_batch(session, batch)
+
+    def _post_value_batch(
+        self, session: object, updates: list[dict[str, object]]
+    ) -> None:
+        response = session.post(  # type: ignore[attr-defined]
+            f"{SHEETS_API}/{self.config.spreadsheet_id}/values:batchUpdate",
+            json={"valueInputOption": "USER_ENTERED", "data": updates},
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
 
     def _resize_tables(
         self,
@@ -1278,6 +1359,27 @@ def _history_row(
         "Есть ошибки" if bad_items else "Успешно",
         "; ".join(f"{item.source}: {item.detail or item.status}" for item in bad_items),
     ]
+
+
+def _chunked_value_updates(
+    sheet: str,
+    rows: list[list[object]],
+    *,
+    last_column: str,
+    start_row: int,
+) -> list[dict[str, object]]:
+    updates: list[dict[str, object]] = []
+    for offset in range(0, len(rows), VALUE_RANGE_CHUNK_ROWS):
+        chunk = rows[offset : offset + VALUE_RANGE_CHUNK_ROWS]
+        first_row = start_row + offset
+        last_row = first_row + len(chunk) - 1
+        updates.append(
+            {
+                "range": f"'{sheet}'!A{first_row}:{last_column}{last_row}",
+                "values": chunk,
+            }
+        )
+    return updates
 
 
 def _pad(row: list[object], length: int) -> list[object]:

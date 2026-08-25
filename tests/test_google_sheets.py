@@ -6,6 +6,7 @@ from tender_parser.google_sheets import (
     GoogleSheetsRegistry,
     LEGACY_DATA_HEADERS,
     _migrate_existing_row,
+    _chunked_value_updates,
     _record_row,
     _row_source_id,
     _safe_customer_row,
@@ -116,6 +117,40 @@ def test_disabled_registry_does_not_call_google() -> None:
     )
 
     assert result.status == "disabled"
+
+
+def test_large_sheet_is_split_into_bounded_row_ranges() -> None:
+    rows = [[index] for index in range(401)]
+
+    updates = _chunked_value_updates(
+        "Все региональные", rows, last_column="AC", start_row=2
+    )
+
+    assert [item["range"] for item in updates] == [
+        "'Все региональные'!A2:AC201",
+        "'Все региональные'!A202:AC401",
+        "'Все региональные'!A402:AC402",
+    ]
+    assert sum(len(item["values"]) for item in updates) == 401
+
+
+def test_value_updates_are_posted_in_size_bounded_batches(monkeypatch) -> None:
+    session = FakeSession()
+    registry = GoogleSheetsRegistry(
+        GoogleSheetsConfig(enabled=True, spreadsheet_id="sheet-1"),
+        session=session,
+    )
+    monkeypatch.setattr("tender_parser.google_sheets.VALUE_BATCH_MAX_BYTES", 200)
+    updates = [
+        {"range": f"'Test'!A{index}:A{index}", "values": [["x" * 100]]}
+        for index in range(1, 4)
+    ]
+
+    registry._post_value_batches(session, updates)
+
+    posts = [payload for url, payload in session.posts if url.endswith("values:batchUpdate")]
+    assert len(posts) == 3
+    assert all(len(payload["data"]) == 1 for payload in posts)
 
 
 def test_sync_preserves_selection_archives_missing_and_resizes_table() -> None:
