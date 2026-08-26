@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from tender_parser.config import HTTP_TIMEOUT_SECONDS
 from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
+from tender_parser.regions import detect_region
 from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import parse_price_rub
 
@@ -46,6 +47,7 @@ def parse_search_payload(payload: dict[str, object]) -> list[TenderRecord]:
                 source="torgi82",
                 tender_number=tender_number,
                 customer=customer,
+                region=detect_region(raw_text),
                 price=_parse_price(_as_text(item.get("price"))),
                 deadline=_parse_datetime(_as_text(item.get("gdEndDate"))),
                 status=_extract_state(item),

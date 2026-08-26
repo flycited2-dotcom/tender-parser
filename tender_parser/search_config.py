@@ -88,10 +88,19 @@ def apply_search_profile(profile: SearchProfile) -> None:
     regional = [f"{term} {region}" for term in profile.search_terms for region in profile.regions]
     config.REGIONAL_SEARCH_QUERIES[:] = regional
     # Эти имена исторически могли перестать быть алиасами после импорта/рефакторинга.
-    config.ROSTENDER_SEARCH_QUERIES[:] = regional
-    config.ETP_GPB_SEARCH_QUERIES[:] = regional
+    config.ROSTENDER_SEARCH_QUERIES[:] = [
+        *config.CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *regional,
+    ]
+    config.ETP_GPB_SEARCH_QUERIES[:] = [
+        *config.CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *regional,
+    ]
     config.EIS_SEARCH_QUERIES[:] = regional
-    config.B2B_SEARCH_QUERIES[:] = profile.search_terms
+    config.B2B_SEARCH_QUERIES[:] = [
+        *config.CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *profile.search_terms,
+    ]
     config.MIN_PRICE_RUB = profile.min_price_rub
 
 

@@ -37,7 +37,7 @@ def test_parse_market_page_extracts_public_tenders() -> None:
     assert tenders[0].title == "Поставка МФУ и принтеров для офиса"
     assert tenders[0].customer == 'ООО "Крымский заказчик"'
     assert tenders[0].price is None
-    assert tenders[0].region is None
+    assert tenders[0].region == "Крым"
     assert tenders[0].published_at == datetime(2026, 6, 23, 10, 15)
     assert tenders[0].deadline == datetime(2026, 6, 30, 12, 0)
     assert tenders[0].url == "https://www.b2b-center.ru/market/mfu/tender-4499001/"

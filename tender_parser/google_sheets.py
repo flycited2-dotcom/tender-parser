@@ -93,6 +93,7 @@ SOURCE_LABELS = {
     "sberbank-ast": "Сбербанк-АСТ",
     "tender-pro": "Tender.Pro",
     "torgi82": "Торги-82",
+    "tektorg": "ТЭК-Торг",
     "crimea-small-purchases": "Малые закупки Крыма",
     "sevastopol-small-purchases": "Малые закупки Севастополя",
     "b2b-center": "B2B-Center",
@@ -113,6 +114,7 @@ SOURCE_LABELS = {
     "SberbankAstSource": "Сбербанк-АСТ",
     "TenderProSource": "Tender.Pro",
     "Torgi82Source": "Торги-82",
+    "TektorgSource": "ТЭК-Торг",
     "CrimeaSmallPurchasesSource": "Малые закупки Крыма",
     "SevastopolSmallPurchasesAdapter": "Малые закупки Севастополя",
     "B2BCenterSource": "B2B-Center",
@@ -134,7 +136,9 @@ SOURCE_URLS = {
     "tender-pro": "https://www.tender.pro/",
     "TenderProSource": "https://www.tender.pro/",
     "torgi82": "https://torgi82.ru/",
+    "tektorg": "https://www.tektorg.ru/",
     "Torgi82Source": "https://torgi82.ru/",
+    "TektorgSource": "https://www.tektorg.ru/",
     "crimea-small-purchases": "https://zrk.rk.gov.ru/smallpurchases/",
     "CrimeaSmallPurchasesSource": "https://zrk.rk.gov.ru/smallpurchases/",
     "sevastopol-small-purchases": (
@@ -335,7 +339,7 @@ class GoogleSheetsRegistry:
             customer_existing = (
                 self._get_values(
                     session,
-                    f"'{CUSTOMER_SHEET}'!A2:P1000",
+                    f"'{CUSTOMER_SHEET}'!A2:P",
                     value_render_option="FORMULA",
                 )
                 if CUSTOMER_SHEET in available_sheets
@@ -458,7 +462,10 @@ class GoogleSheetsRegistry:
                 active_count=len(current_rows),
                 new_count=len(fresh_rows),
             )
-            self._ensure_data_rows(session, metadata, values_by_sheet)
+            capacity_rows = dict(values_by_sheet)
+            if CUSTOMER_SHEET in available_sheets:
+                capacity_rows[CUSTOMER_SHEET] = customer_rows
+            self._ensure_data_rows(session, metadata, capacity_rows)
             self._replace_values(
                 session,
                 values_by_sheet,
@@ -533,7 +540,7 @@ class GoogleSheetsRegistry:
                 raise ValueError(f"нет вкладки {CUSTOMER_SHEET}")
             existing = self._get_values(
                 session,
-                f"'{CUSTOMER_SHEET}'!A2:P1000",
+                f"'{CUSTOMER_SHEET}'!A2:P",
                 value_render_option="FORMULA",
             )
             rows = build_customer_registry(tenders, existing)
@@ -543,6 +550,7 @@ class GoogleSheetsRegistry:
                 generated_at=generated_at,
                 max_fetches=max_fetches,
             )
+            self._ensure_data_rows(session, metadata, {CUSTOMER_SHEET: rows})
             data = [
                 {"range": f"'{CUSTOMER_SHEET}'!A1:P1", "values": [CUSTOMER_HEADERS]},
                 {
@@ -556,17 +564,16 @@ class GoogleSheetsRegistry:
                 timeout=self.config.timeout_seconds,
             )
             response.raise_for_status()
-            if len(rows) + 2 <= 1000:
-                clear_range = quote(
-                    f"'{CUSTOMER_SHEET}'!A{len(rows) + 2}:P1000", safe=""
-                )
-                response = session.post(  # type: ignore[attr-defined]
-                    f"{SHEETS_API}/{self.config.spreadsheet_id}/values/"
-                    f"{clear_range}:clear",
-                    json={},
-                    timeout=self.config.timeout_seconds,
-                )
-                response.raise_for_status()
+            clear_range = quote(
+                f"'{CUSTOMER_SHEET}'!A{len(rows) + 2}:P", safe=""
+            )
+            response = session.post(  # type: ignore[attr-defined]
+                f"{SHEETS_API}/{self.config.spreadsheet_id}/values/"
+                f"{clear_range}:clear",
+                json={},
+                timeout=self.config.timeout_seconds,
+            )
+            response.raise_for_status()
         except (OSError, ValueError, requests.RequestException) as exc:
             return CustomerRegistrySyncResult(
                 status="error",
@@ -828,10 +835,11 @@ class GoogleSheetsRegistry:
         if CUSTOMER_SHEET in available_sheets:
             clear_specs.append((CUSTOMER_SHEET, "P", len(customer_rows) + 2))
         for sheet, columns, first_unused_row in clear_specs:
-            if first_unused_row > 1000:
+            if first_unused_row > 1000 and sheet != CUSTOMER_SHEET:
                 continue
+            last_row = "" if sheet == CUSTOMER_SHEET else "1000"
             clear_range = quote(
-                f"'{sheet}'!A{first_unused_row}:{columns}1000", safe=""
+                f"'{sheet}'!A{first_unused_row}:{columns}{last_row}", safe=""
             )
             response = session.post(  # type: ignore[attr-defined]
                 f"{SHEETS_API}/{self.config.spreadsheet_id}/values/"

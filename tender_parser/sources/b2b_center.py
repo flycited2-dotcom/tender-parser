@@ -149,6 +149,7 @@ def parse_market_page(html: str, source_url: str) -> list[TenderRecord]:
                 source=B2B_SOURCE_NAME,
                 tender_number=number_match.group(1),
                 customer=_text(cells[1]) or None,
+                region=detect_region(raw_text),
                 deadline=_parse_datetime(_text(cells[3])),
                 published_at=_parse_datetime(_text(cells[2])),
                 status="Актуально",

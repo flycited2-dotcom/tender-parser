@@ -86,7 +86,7 @@ class ZakazRfSource:
     ) -> None:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
-        self.queries = queries or list(config.SEARCH_QUERY_TERMS)
+        self.queries = queries or ["", *config.SEARCH_QUERY_TERMS]
         self.regions = target_regions(regions or config.SEARCH_REGION_TERMS)
         self.timeout_seconds = timeout_seconds
         self.max_errors = max_errors

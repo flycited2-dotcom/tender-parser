@@ -1,7 +1,11 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-from tender_parser.sources.sberbank_ast import build_search_xml, parse_search_payload
+from tender_parser.sources.sberbank_ast import (
+    SberbankAstSource,
+    build_search_xml,
+    parse_search_payload,
+)
 
 
 TABLE_XML = """
@@ -46,3 +50,7 @@ def test_parse_search_payload_extracts_procedure() -> None:
     assert items[0].price == 38_386.02
     assert items[0].deadline == datetime(2026, 8, 17, 8, 15)
     assert items[0].published_at == datetime(2026, 8, 8, 14, 50)
+
+
+def test_default_queries_start_with_broad_regional_customer_discovery() -> None:
+    assert SberbankAstSource().queries[0] == ""

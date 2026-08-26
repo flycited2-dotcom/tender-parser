@@ -5,6 +5,15 @@ from pathlib import Path
 
 MIN_PRICE_RUB = 30_000
 
+# Canonical regions used by broad customer-discovery searches on platforms
+# where a separate region filter is unavailable.
+CUSTOMER_DISCOVERY_REGION_QUERIES = [
+    "Республика Крым",
+    "Севастополь",
+    "Запорожская область",
+    "Херсонская область",
+]
+
 REGION_TERMS = [
     "Симферополь",
     "Севастополь",
@@ -432,6 +441,7 @@ SEARCH_QUERY_TERMS = [
 ]
 
 RTS_SEARCH_QUERIES = [
+    *CUSTOMER_DISCOVERY_REGION_QUERIES,
     "мфу",
     "принтер",
     "картридж",
@@ -471,15 +481,15 @@ REGIONAL_SEARCH_QUERIES = [
     for region in SEARCH_REGION_TERMS
 ]
 
-B2B_SEARCH_QUERIES = SEARCH_QUERY_TERMS
+B2B_SEARCH_QUERIES = [*CUSTOMER_DISCOVERY_REGION_QUERIES, *SEARCH_QUERY_TERMS]
 # Эти публичные выдачи не ограничены целевыми регионами на стороне площадки.
 # Карточка попадает в активный реестр только после подтверждения региона в
 # названии, адресе поставки, документах или структурированном поле региона.
 STRICT_TARGET_REGION_SOURCES = {"b2b-center", "tender-pro"}
 B2B_MAX_DETAILS = 25
 B2B_DETAIL_DELAY_SECONDS = 0.8
-ROSTENDER_SEARCH_QUERIES = REGIONAL_SEARCH_QUERIES
-ETP_GPB_SEARCH_QUERIES = REGIONAL_SEARCH_QUERIES
+ROSTENDER_SEARCH_QUERIES = [*CUSTOMER_DISCOVERY_REGION_QUERIES, *REGIONAL_SEARCH_QUERIES]
+ETP_GPB_SEARCH_QUERIES = [*CUSTOMER_DISCOVERY_REGION_QUERIES, *REGIONAL_SEARCH_QUERIES]
 EIS_SEARCH_QUERIES = REGIONAL_SEARCH_QUERIES
 
 TENDER_PRO_API_KEY = "1732ede4de680a0c93d81f01d7bac7d1"
@@ -529,8 +539,15 @@ def _load_expanded_dictionary() -> None:
         for term in SEARCH_QUERY_TERMS
         for region in SEARCH_REGION_TERMS
     ]
-    ROSTENDER_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
-    ETP_GPB_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
+    B2B_SEARCH_QUERIES[:] = [*CUSTOMER_DISCOVERY_REGION_QUERIES, *SEARCH_QUERY_TERMS]
+    ROSTENDER_SEARCH_QUERIES[:] = [
+        *CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *REGIONAL_SEARCH_QUERIES,
+    ]
+    ETP_GPB_SEARCH_QUERIES[:] = [
+        *CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *REGIONAL_SEARCH_QUERIES,
+    ]
     EIS_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
 
 

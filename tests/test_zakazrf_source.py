@@ -1,7 +1,7 @@
 from datetime import datetime
 from urllib.parse import unquote_plus
 
-from tender_parser.sources.zakazrf import build_search_url, parse_search_page
+from tender_parser.sources.zakazrf import ZakazRfSource, build_search_url, parse_search_page
 
 
 SAMPLE_HTML = """
@@ -44,3 +44,7 @@ def test_parse_search_page_extracts_notification() -> None:
     assert items[0].price == 101_030.0
     assert items[0].deadline == datetime(2026, 8, 18, 8, 0)
     assert items[0].published_at == datetime(2026, 8, 7)
+
+
+def test_default_queries_start_with_broad_regional_customer_discovery() -> None:
+    assert ZakazRfSource().queries[0] == ""

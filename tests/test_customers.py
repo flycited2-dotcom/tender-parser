@@ -119,3 +119,21 @@ def test_registry_uses_structured_public_tektorg_contacts_without_overwriting_ma
     assert rows[0][7:10] == ["office@example.test", "+7 978 000-00-00", "Иванов Иван"]
     assert rows[0][11] == "https://www.tektorg.ru/44-fz/procedures/101"
     assert rows[0][14] == "Новый"
+
+
+def test_registry_keeps_non_thematic_customer_from_any_source() -> None:
+    medical = tender(
+        title="Поставка медицинского оборудования",
+        source="sberbank-ast",
+        customer='ГБУЗ РК "Городская больница"',
+        region="Республика Крым",
+        filter_status="excluded",
+        review_priority="excluded",
+        exclude_reason="стоп-тема: медицин",
+    )
+
+    rows = build_customer_registry([medical], [])
+
+    assert len(rows) == 1
+    assert rows[0][1] == 'ГБУЗ РК "Городская больница"'
+    assert rows[0][3] == "Республика Крым"

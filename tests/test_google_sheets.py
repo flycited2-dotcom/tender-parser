@@ -134,6 +134,38 @@ def test_large_sheet_is_split_into_bounded_row_ranges() -> None:
     assert sum(len(item["values"]) for item in updates) == 401
 
 
+def test_customer_sheet_capacity_grows_beyond_old_thousand_row_limit() -> None:
+    session = FakeSession()
+    registry = GoogleSheetsRegistry(
+        GoogleSheetsConfig(enabled=True, spreadsheet_id="sheet-1"),
+        session=session,
+    )
+    metadata = {
+        "sheets": [
+            {
+                "properties": {
+                    "sheetId": 7,
+                    "title": "Потенциальные заказчики",
+                    "gridProperties": {"rowCount": 1000},
+                }
+            }
+        ]
+    }
+
+    registry._ensure_data_rows(
+        session,
+        metadata,
+        {"Потенциальные заказчики": [[index] for index in range(1500)]},
+    )
+
+    request = session.posts[-1][1]["requests"][0]["appendDimension"]
+    assert request == {
+        "sheetId": 7,
+        "dimension": "ROWS",
+        "length": 501,
+    }
+
+
 def test_value_updates_are_posted_in_size_bounded_batches(monkeypatch) -> None:
     session = FakeSession()
     registry = GoogleSheetsRegistry(

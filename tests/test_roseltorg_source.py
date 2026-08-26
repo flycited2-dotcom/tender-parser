@@ -1,7 +1,12 @@
 from datetime import datetime
 from urllib.parse import unquote_plus
 
-from tender_parser.sources.roseltorg import build_search_url, parse_search_page, target_regions
+from tender_parser.sources.roseltorg import (
+    RoseltorgSource,
+    build_search_url,
+    parse_search_page,
+    target_regions,
+)
 
 
 SAMPLE_HTML = """
@@ -45,3 +50,7 @@ def test_parse_search_page_extracts_card() -> None:
     assert items[0].price == 780_760.0
     assert items[0].deadline == datetime(2026, 8, 14, 9, 0)
     assert items[0].url == "https://www.roseltorg.ru/procedure/0875300029426000218/1"
+
+
+def test_default_queries_start_with_broad_regional_customer_discovery() -> None:
+    assert RoseltorgSource().queries[0] == ""

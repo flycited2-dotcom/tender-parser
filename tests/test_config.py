@@ -18,12 +18,27 @@ def test_regional_search_matrix_covers_all_product_and_region_pairs() -> None:
 
 def test_public_source_query_lists_share_the_regional_matrix() -> None:
     assert config.EIS_SEARCH_QUERIES == config.REGIONAL_SEARCH_QUERIES
-    assert config.ETP_GPB_SEARCH_QUERIES == config.REGIONAL_SEARCH_QUERIES
-    assert config.ROSTENDER_SEARCH_QUERIES == config.REGIONAL_SEARCH_QUERIES
+    assert config.ETP_GPB_SEARCH_QUERIES == [
+        *config.CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *config.REGIONAL_SEARCH_QUERIES,
+    ]
+    assert config.ROSTENDER_SEARCH_QUERIES == [
+        *config.CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *config.REGIONAL_SEARCH_QUERIES,
+    ]
 
 
-def test_b2b_queries_do_not_require_region_in_listing_title() -> None:
-    assert config.B2B_SEARCH_QUERIES == config.SEARCH_QUERY_TERMS
+def test_b2b_queries_include_customer_discovery_regions_and_product_terms() -> None:
+    assert config.B2B_SEARCH_QUERIES == [
+        *config.CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *config.SEARCH_QUERY_TERMS,
+    ]
+    assert config.B2B_SEARCH_QUERIES[:4] == [
+        "Республика Крым",
+        "Севастополь",
+        "Запорожская область",
+        "Херсонская область",
+    ]
     assert "мфу" in config.B2B_SEARCH_QUERIES
     assert "картридж" in config.B2B_SEARCH_QUERIES
     assert "сетевое оборудование" in config.B2B_SEARCH_QUERIES
