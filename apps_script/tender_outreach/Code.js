@@ -1830,7 +1830,7 @@ var TenderOutreach = (function () {
   }
 
   function initializeAutomationForFirstReview() {
-    var properties = getProperties_();
+    var properties = PropertiesService.getScriptProperties();
     var firstReviewSettings = {};
     firstReviewSettings[CONFIG.properties.autoPreparationMode] = "true";
     firstReviewSettings[CONFIG.properties.firstBatchReviewed] = "false";
@@ -1922,6 +1922,10 @@ var TenderOutreach = (function () {
 
 function onOpen() {
   return TenderOutreach.onOpen();
+}
+
+function authorizeTenderReadonly() {
+  return Gmail.Users.Messages.list("me", { maxResults: 1 });
 }
 
 function previewTenderOutreach() {
