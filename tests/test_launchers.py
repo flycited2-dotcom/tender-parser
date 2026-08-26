@@ -99,6 +99,8 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in poisk_text
     assert "etp.gpb.ru/#log/maillist/223" in poisk_text
     assert "lk.roseltorg.ru" in poisk_text
+    assert "44.sberbank-ast.ru/tradezone/Supplier/ESPurchaseList.aspx" in poisk_text
+    assert "utp.sberbank-ast.ru/Trade/List/BidListClose" in poisk_text
     assert "C:\\RTSBrowser\\rts-chromium.exe" in poisk_text
     assert "--remote-debugging-port=9222" in poisk_text
     assert "python -m tender_parser rts-watch" in poisk_text
@@ -115,6 +117,8 @@ def test_rts_cabinet_launchers_use_isolated_browser_profile() -> None:
     assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in open_text
     assert "etp.gpb.ru/#log/maillist/223" in open_text
     assert "lk.roseltorg.ru" in open_text
+    assert "44.sberbank-ast.ru/tradezone/Supplier/ESPurchaseList.aspx" in open_text
+    assert "utp.sberbank-ast.ru/Trade/List/BidListClose" in open_text
     assert "python -m tender_parser run --profile rts-cabinet" in collect_text
 
 
