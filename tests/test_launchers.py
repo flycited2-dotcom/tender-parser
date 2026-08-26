@@ -24,6 +24,16 @@ def test_daily_scheduler_accepts_profile_argument() -> None:
     assert "-RestartCount 3" in text
 
 
+def test_workday_scheduler_configures_four_collection_times() -> None:
+    text = (ROOT / "Настроить_рабочие_запуски.ps1").read_text(encoding="utf-8")
+
+    for value in ("08:00", "11:00", "15:00", "18:00"):
+        assert value in text
+    assert "StartWhenAvailable" in text
+    assert "RestartCount 3" in text
+    assert "ScheduleTime $time" in text
+
+
 def test_resilient_runner_guards_duplicate_and_tracks_success() -> None:
     text = (ROOT / "run_tender_parser_resilient.ps1").read_text(encoding="utf-8")
 
@@ -87,6 +97,8 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     assert "rts-tender.ru/poisk/search?id=7a2edb26-ab8d-4fee-86b4-56514059add7" in poisk_text
     assert "223.rts-tender.ru/supplier/auction/Trade/Search.aspx" in poisk_text
     assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in poisk_text
+    assert "etp.gpb.ru/#log/maillist/223" in poisk_text
+    assert "lk.roseltorg.ru" in poisk_text
     assert "C:\\RTSBrowser\\rts-chromium.exe" in poisk_text
     assert "--remote-debugging-port=9222" in poisk_text
     assert "python -m tender_parser rts-watch" in poisk_text
@@ -101,6 +113,8 @@ def test_rts_cabinet_launchers_use_isolated_browser_profile() -> None:
     assert "RTSCollectorProfile" in open_text
     assert "rts-chromium.exe" in open_text
     assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in open_text
+    assert "etp.gpb.ru/#log/maillist/223" in open_text
+    assert "lk.roseltorg.ru" in open_text
     assert "python -m tender_parser run --profile rts-cabinet" in collect_text
 
 

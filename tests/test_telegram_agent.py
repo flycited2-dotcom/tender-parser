@@ -9,10 +9,29 @@ from tender_parser.telegram_agent import (
     CatalogSearchTool,
     TelegramAgentSettings,
     TenderDatabaseSearchTool,
+    _latest_tender_report,
+    _launch_collector_browser,
     _thread_id_from_jsonl,
     split_message,
     telegram_html,
 )
+
+
+def test_latest_tender_report_selects_newest_excel(tmp_path: Path) -> None:
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    older = exports / "tenders_2026-08-25.xlsx"
+    newer = exports / "tenders_2026-08-26.xlsx"
+    older.write_bytes(b"old")
+    newer.write_bytes(b"new")
+    older.touch()
+    newer.touch()
+
+    assert _latest_tender_report(tmp_path) == newer
+
+
+def test_collector_browser_requires_launcher(tmp_path: Path) -> None:
+    assert _launch_collector_browser(tmp_path) is False
 
 
 def test_agent_uses_dedicated_telegram_credentials(

@@ -690,6 +690,59 @@ def configure_logging(base_dir: Path) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
+def _run_tender_refresh(base_dir: Path) -> int:
+    runner = base_dir / "run_tender_parser_resilient.ps1"
+    powershell = (
+        Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        / "System32"
+        / "WindowsPowerShell"
+        / "v1.0"
+        / "powershell.exe"
+    )
+    completed = subprocess.run(
+        [
+            str(powershell),
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+            "-Profile",
+            "fast",
+            "-ScheduleTime",
+            "08:00",
+            "-Force",
+        ],
+        cwd=base_dir,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        check=False,
+    )
+    return completed.returncode
+
+
+def _launch_collector_browser(base_dir: Path) -> bool:
+    launcher = base_dir / "Открыть_RTS_кабинет_Chrome.bat"
+    if not launcher.is_file():
+        return False
+    subprocess.Popen(
+        [str(launcher)],
+        cwd=base_dir,
+        shell=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return True
+
+
+def _latest_tender_report(base_dir: Path) -> Path | None:
+    reports = sorted(
+        (base_dir / "exports").glob("tenders_*.xlsx"),
+        key=lambda path: (path.stat().st_mtime, path.name),
+        reverse=True,
+    )
+    return reports[0] if reports else None
+
+
 def build_application(settings: TelegramAgentSettings) -> Any:
     from telegram import KeyboardButton, ReplyKeyboardMarkup
     from telegram.constants import ChatAction, ParseMode
@@ -703,12 +756,15 @@ def build_application(settings: TelegramAgentSettings) -> Any:
     )
     runtime_state = AgentRuntimeState(settings.base_dir / "data" / "telegram_agent_state.json")
     transcriber = LocalWhisperTranscriber(settings.whisper_model)
+    refresh_lock = asyncio.Lock()
     keyboard = ReplyKeyboardMarkup(
         [
             [KeyboardButton("🔎 Новый поиск"), KeyboardButton("🛑 Отмена")],
+            [KeyboardButton("🔄 Обновить тендеры"), KeyboardButton("📎 Последний отчёт")],
+            [KeyboardButton("🌐 Открыть площадки"), KeyboardButton("🩺 Статус")],
             [KeyboardButton("▶️ Запустить агента"), KeyboardButton("⏸ Выключить агента")],
-            [KeyboardButton("🔄 Перезагрузка диалога"), KeyboardButton("🩺 Статус")],
-            [KeyboardButton("🆔 Чат Codex"), KeyboardButton("📄 Загрузить ТЗ")],
+            [KeyboardButton("🔄 Перезагрузка диалога"), KeyboardButton("🆔 Чат Codex")],
+            [KeyboardButton("📄 Загрузить ТЗ")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -762,6 +818,60 @@ def build_application(settings: TelegramAgentSettings) -> Any:
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard,
         )
+
+    async def fresh_tenders(update: Any, context: Any) -> None:
+        if not authorized(update):
+            await deny(update)
+            return
+        if refresh_lock.locked():
+            await update.effective_message.reply_text(
+                "⏳ Сбор уже выполняется.", reply_markup=keyboard
+            )
+            return
+        async with refresh_lock:
+            await update.effective_message.reply_text(
+                "🔄 Запустил свежий сбор. Итоговый Excel и сводка придут после завершения.",
+                reply_markup=keyboard,
+            )
+            code = await asyncio.to_thread(_run_tender_refresh, settings.base_dir)
+            if code == 0:
+                await update.effective_message.reply_text(
+                    "✅ Сбор завершён, таблица и отчёт обновлены.", reply_markup=keyboard
+                )
+            else:
+                await update.effective_message.reply_text(
+                    f"⚠️ Сбор сформировал отчёт, но одна из доставок завершилась с кодом {code}. "
+                    "Планировщик повторит попытку.",
+                    reply_markup=keyboard,
+                )
+
+    async def latest_report(update: Any, context: Any) -> None:
+        if not authorized(update):
+            await deny(update)
+            return
+        report = _latest_tender_report(settings.base_dir)
+        if report is None:
+            await update.effective_message.reply_text("Excel-отчёт ещё не сформирован.")
+            return
+        with report.open("rb") as handle:
+            await update.effective_message.reply_document(
+                document=handle,
+                filename=report.name,
+                caption="Последний отчёт тендерного парсера",
+                reply_markup=keyboard,
+            )
+
+    async def open_platforms(update: Any, context: Any) -> None:
+        if not authorized(update):
+            await deny(update)
+            return
+        opened = await asyncio.to_thread(_launch_collector_browser, settings.base_dir)
+        message = (
+            "🌐 Открыл отдельный Chromium со вкладками РТС и ЕАТ на рабочем компьютере."
+            if opened
+            else "⚠️ Не найден файл запуска браузера площадок."
+        )
+        await update.effective_message.reply_text(message, reply_markup=keyboard)
 
     async def agent_on(update: Any, context: Any) -> None:
         if not authorized(update):
@@ -1013,6 +1123,9 @@ def build_application(settings: TelegramAgentSettings) -> Any:
     application.add_handler(CommandHandler("help", start))
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("fresh", fresh_tenders))
+    application.add_handler(CommandHandler("report", latest_report))
+    application.add_handler(CommandHandler("browser", open_platforms))
     application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(CommandHandler("agent_on", agent_on))
@@ -1023,6 +1136,9 @@ def build_application(settings: TelegramAgentSettings) -> Any:
     application.add_handler(MessageHandler(filters.Regex(r"^▶️ Запустить агента$"), agent_on))
     application.add_handler(MessageHandler(filters.Regex(r"^⏸ Выключить агента$"), agent_off))
     application.add_handler(MessageHandler(filters.Regex(r"^🔄 Перезагрузка диалога$"), reset))
+    application.add_handler(MessageHandler(filters.Regex(r"^🔄 Обновить тендеры$"), fresh_tenders))
+    application.add_handler(MessageHandler(filters.Regex(r"^📎 Последний отчёт$"), latest_report))
+    application.add_handler(MessageHandler(filters.Regex(r"^🌐 Открыть площадки$"), open_platforms))
     application.add_handler(MessageHandler(filters.Regex(r"^🩺 Статус$"), status))
     application.add_handler(MessageHandler(filters.Regex(r"^🆔 Чат Codex$"), chat_info))
     application.add_handler(MessageHandler(filters.Regex(r"^📄 Загрузить ТЗ$"), document_help))
