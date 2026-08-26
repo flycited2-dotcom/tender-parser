@@ -97,7 +97,7 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     assert "rts-tender.ru/poisk/search?id=7a2edb26-ab8d-4fee-86b4-56514059add7" in poisk_text
     assert "223.rts-tender.ru/supplier/auction/Trade/Search.aspx" in poisk_text
     assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in poisk_text
-    assert "etp.gpb.ru/#log/maillist/223" in poisk_text
+    assert 'call "%~dp0open_gpb_yandex.bat"' in poisk_text
     assert "lk.roseltorg.ru" in poisk_text
     assert "44.sberbank-ast.ru/tradezone/Supplier/ESPurchaseList.aspx" in poisk_text
     assert "utp.sberbank-ast.ru/Trade/List/BidListClose" in poisk_text
@@ -115,11 +115,29 @@ def test_rts_cabinet_launchers_use_isolated_browser_profile() -> None:
     assert "RTSCollectorProfile" in open_text
     assert "rts-chromium.exe" in open_text
     assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in open_text
-    assert "etp.gpb.ru/#log/maillist/223" in open_text
+    assert 'call "%~dp0open_gpb_yandex.bat"' in open_text
     assert "lk.roseltorg.ru" in open_text
     assert "44.sberbank-ast.ru/tradezone/Supplier/ESPurchaseList.aspx" in open_text
     assert "utp.sberbank-ast.ru/Trade/List/BidListClose" in open_text
     assert "python -m tender_parser run --profile rts-cabinet" in collect_text
+
+
+def test_gpb_cabinet_uses_yandex_browser_for_cryptopro_compatibility() -> None:
+    helper_text = (ROOT / "open_gpb_yandex.bat").read_text(encoding="utf-8")
+
+    assert "YandexBrowser\\Application\\browser.exe" in helper_text
+    assert "etp.gpb.ru/#log/maillist/223" in helper_text
+    assert 'start "ETP GPB - Yandex Browser"' in helper_text
+
+    for launcher_name in (
+        "Открыть_RTS_кабинет_Chrome.bat",
+        "Поиск_RTS_другие_площадки.bat",
+    ):
+        launcher_text = (ROOT / launcher_name).read_text(encoding="utf-8")
+        chromium_line = next(
+            line for line in launcher_text.splitlines() if 'start "Tender Collector Browser"' in line
+        )
+        assert "etp.gpb.ru" not in chromium_line
 
 
 def test_isolated_rts_task_has_hard_timeout_and_scheduler_retries() -> None:
