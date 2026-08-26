@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from tender_parser.browser.rts_watcher import badge_text, collect_from_page, save_snapshot
@@ -92,6 +93,34 @@ def test_poll_page_snapshots_poisk_once_per_url(tmp_path: Path) -> None:
 
     snapshots = list((tmp_path / "diag").glob("*.html"))
     assert len(snapshots) == 1
+
+
+def test_poll_page_records_healthy_session(tmp_path: Path) -> None:
+    from tender_parser.browser.rts_watcher import RtsCabinetWatcher
+
+    html = (FIXTURES / "rts_cabinet_results_sample.html").read_text(encoding="utf-8")
+    watcher = RtsCabinetWatcher(tmp_path / "tenders.db")
+    accumulator = RtsAccumulator(tmp_path / "tenders.db")
+
+    watcher._poll_page(FakePage(RESULTS_URL, html), accumulator)
+
+    health = json.loads((tmp_path / "rts_watcher_health.json").read_text(encoding="utf-8"))
+    assert health["status"] == "results"
+    assert health["accumulated_total"] > 0
+
+
+def test_poll_page_records_login_without_reloading(tmp_path: Path) -> None:
+    from tender_parser.browser.rts_watcher import RtsCabinetWatcher
+
+    html = (FIXTURES / "rts_cabinet_login_sample.html").read_text(encoding="utf-8")
+    watcher = RtsCabinetWatcher(tmp_path / "tenders.db")
+    page = FakePage("https://223.rts-tender.ru/login", html)
+
+    watcher._poll_page(page, RtsAccumulator(tmp_path / "tenders.db"))
+
+    health = json.loads((tmp_path / "rts_watcher_health.json").read_text(encoding="utf-8"))
+    assert health["status"] == "login"
+    assert page.badges == ["Требуется ручной вход в RTS"]
 
 
 def test_save_snapshot_writes_once_per_content(tmp_path: Path) -> None:

@@ -84,18 +84,21 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     watch_text = (ROOT / "Автосбор_RTS_кабинета.bat").read_text(encoding="utf-8")
     assert "python -m tender_parser rts-watch" in watch_text
     poisk_text = (ROOT / "Поиск_RTS_другие_площадки.bat").read_text(encoding="utf-8")
-    assert "rts-tender.ru/poisk/search?id=0926554c-d570-4b2b-b397-606a9c045f4c" in poisk_text
+    assert "rts-tender.ru/poisk/search?id=7a2edb26-ab8d-4fee-86b4-56514059add7" in poisk_text
+    assert "223.rts-tender.ru/supplier/auction/Trade/Search.aspx" in poisk_text
+    assert "C:\\RTSBrowser\\rts-chromium.exe" in poisk_text
     assert "--remote-debugging-port=9222" in poisk_text
     assert "python -m tender_parser rts-watch" in poisk_text
 
 
-def test_rts_cabinet_launchers_use_isolated_chrome_profile() -> None:
+def test_rts_cabinet_launchers_use_isolated_browser_profile() -> None:
     open_text = (ROOT / "Открыть_RTS_кабинет_Chrome.bat").read_text(encoding="utf-8")
     collect_text = (ROOT / "Собрать_RTS_кабинет.bat").read_text(encoding="utf-8")
 
     assert "--remote-debugging-address=127.0.0.1" in open_text
     assert "--remote-debugging-port=9222" in open_text
-    assert "browser_profiles\\rts_chrome" in open_text
+    assert "RTSCollectorProfile" in open_text
+    assert "rts-chromium.exe" in open_text
     assert "python -m tender_parser run --profile rts-cabinet" in collect_text
 
 

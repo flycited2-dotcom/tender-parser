@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -73,13 +75,14 @@ class RtsCabinetWatcher:
         self,
         db_path: Path,
         debug_url: str = "http://127.0.0.1:9222",
-        poll_seconds: float = 2.0,
+        poll_seconds: float | None = None,
         diagnostics_dir: Path | None = None,
     ) -> None:
         self.db_path = db_path
         self.debug_url = debug_url
-        self.poll_seconds = poll_seconds
+        self.poll_seconds = poll_seconds or float(os.getenv("RTS_WATCH_POLL_SECONDS", "8"))
         self.diagnostics_dir = diagnostics_dir or db_path.parent.parent / "diagnostics"
+        self.health_path = db_path.parent / "rts_watcher_health.json"
         self._snapshot_hashes: set[str] = set()
         self._snapshot_urls: set[str] = set()
 
@@ -132,6 +135,17 @@ class RtsCabinetWatcher:
                 self._poll_page(page, accumulator)
             sleep(self.poll_seconds)
 
+    def _write_health(self, status: str, url: str, **details: object) -> None:
+        payload = {
+            "checked_at": datetime.now().isoformat(timespec="seconds"),
+            "status": status,
+            "url": url,
+            **details,
+        }
+        temporary = self.health_path.with_suffix(self.health_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.health_path)
+
     def _poll_page(self, page, accumulator: RtsAccumulator) -> None:
         try:
             url = page.url
@@ -154,9 +168,16 @@ class RtsCabinetWatcher:
         try:
             if result is not None:
                 added, total = result
+                self._write_health("results", url, added=added, accumulated_total=total)
                 if added:
                     print(f"+{added} новых строк, всего в накопителе: {total}", flush=True)
                 page.evaluate(BADGE_JS, badge_text(added, total))
+                return
+            state = detect_cabinet_state(html, url)
+            if state in {"login", "blocked"}:
+                self._write_health(state, url)
+                label = "Требуется ручной вход в RTS" if state == "login" else "RTS показал CAPTCHA/антибот"
+                page.evaluate(BADGE_JS, label)
                 return
             if "/poisk" in url and detect_cabinet_state(html, url) not in {"login", "blocked"}:
                 if url not in self._snapshot_urls and len(self._snapshot_urls) < MAX_SNAPSHOTS_PER_SESSION:
