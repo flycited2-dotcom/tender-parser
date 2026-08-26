@@ -96,3 +96,26 @@ def test_registry_repairs_eis_highlight_splits_in_organization_name() -> None:
     )
 
     assert rows[0][1] == "ГБУ ЗАПОРОЖСКОЙ ОБЛАСТИ"
+
+
+def test_registry_uses_structured_public_tektorg_contacts_without_overwriting_manual_data() -> None:
+    item = tender(
+        source="tektorg",
+        raw_text=(
+            "Поставка кондиционеров\n"
+            "TEKTORG_INN=9100000001\n"
+            "TEKTORG_LEGAL_ADDRESS=Республика Крым, Симферополь\n"
+            "TEKTORG_EMAIL=office@example.test\n"
+            "TEKTORG_PHONE=+7 978 000-00-00\n"
+            "TEKTORG_CONTACT_PERSON=Иванов Иван\n"
+            "TEKTORG_CONTACT_SOURCE=https://www.tektorg.ru/44-fz/procedures/101"
+        ),
+    )
+
+    rows = build_customer_registry([item], [])
+
+    assert rows[0][4] == "9100000001"
+    assert rows[0][5] == "Республика Крым, Симферополь"
+    assert rows[0][7:10] == ["office@example.test", "+7 978 000-00-00", "Иванов Иван"]
+    assert rows[0][11] == "https://www.tektorg.ru/44-fz/procedures/101"
+    assert rows[0][14] == "Новый"

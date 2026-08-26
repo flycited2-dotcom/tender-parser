@@ -28,6 +28,7 @@ from tender_parser.sources.roseltorg import RoseltorgSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
+from tender_parser.sources.tektorg import TektorgSource
 from tender_parser.sources.torgi82 import Torgi82Source
 from tender_parser.sources.sberbank_ast import SberbankAstSource
 from tender_parser.sources.sevastopol_small_purchases import SevastopolSmallPurchasesAdapter
@@ -187,14 +188,15 @@ def test_build_default_source_uses_composite_source() -> None:
     assert isinstance(first_layer.sources[3], SberbankAstSource)
     assert isinstance(first_layer.sources[4], TenderProSource)
     assert isinstance(first_layer.sources[5], Torgi82Source)
-    assert isinstance(first_layer.sources[6], CrimeaSmallPurchasesSource)
-    assert isinstance(first_layer.sources[7], SevastopolSmallPurchasesAdapter)
-    assert isinstance(first_layer.sources[8], B2BCenterSource)
-    assert isinstance(first_layer.sources[9], EatIntegrationSource)
-    assert isinstance(first_layer.sources[10], EisRegionalXmlSource)
-    assert isinstance(first_layer.sources[11], EisZakupkiSource)
-    assert isinstance(first_layer.sources[12], RostenderSource)
-    assert isinstance(first_layer.sources[13], RtsPublicSource)
+    assert isinstance(first_layer.sources[6], TektorgSource)
+    assert isinstance(first_layer.sources[7], CrimeaSmallPurchasesSource)
+    assert isinstance(first_layer.sources[8], SevastopolSmallPurchasesAdapter)
+    assert isinstance(first_layer.sources[9], B2BCenterSource)
+    assert isinstance(first_layer.sources[10], EatIntegrationSource)
+    assert isinstance(first_layer.sources[11], EisRegionalXmlSource)
+    assert isinstance(first_layer.sources[12], EisZakupkiSource)
+    assert isinstance(first_layer.sources[13], RostenderSource)
+    assert isinstance(first_layer.sources[14], RtsPublicSource)
     assert len(source.sources) == 1
 
 
@@ -210,6 +212,7 @@ def test_build_fast_profile_includes_eis_after_native_tls_fix() -> None:
         "SberbankAstSource",
         "TenderProSource",
         "Torgi82Source",
+        "TektorgSource",
         "CrimeaSmallPurchasesSource",
         "SevastopolSmallPurchasesAdapter",
         "B2BCenterSource",

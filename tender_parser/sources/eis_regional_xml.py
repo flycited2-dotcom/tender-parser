@@ -22,8 +22,9 @@ from tender_parser.sources.rts import SourceFetchError
 from tender_parser.text import normalize_text, parse_price_rub
 
 
-# Массовая выгрузка открытых данных ЕИС. Доступ к ней и назначение ЕИС
-# документированы Федеральным казначейством:
+# Историческая массовая выгрузка открытых данных ЕИС. Оператор объявил закрытие
+# FTP после 01.07.2024 и переход на СОИ; модуль сохраняется для локальных
+# архивов и выключен по умолчанию. Назначение ЕИС документировано Казначейством:
 # https://roskazna.gov.ru/gis/eis-zakupki-gov-ru
 # Описание актуальных форматов 44-ФЗ публикуется самой ЕИС:
 # https://zakupki.gov.ru/epz/main/public/document/view.html?sectionId=6&pageNo=1&categories=FZ44&_categories=on

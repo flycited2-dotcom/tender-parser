@@ -26,6 +26,7 @@ PLATFORM_SOURCE_NAMES = {
     "eat-berezka": "ЕАТ «Берёзка»",
     "tender-pro": "Tender.Pro",
     "torgi82": "Торги-82",
+    "tektorg": "ТЭК-Торг",
     "crimea-small-purchases": "Малые закупки Крыма",
 }
 

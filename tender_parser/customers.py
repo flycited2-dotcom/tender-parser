@@ -125,9 +125,25 @@ def build_customer_registry(
         row[1] = clean_customer_name(tender.customer or "")
         row[2] = organization_type(str(row[1]))
         row[3] = customer_region(tender)
+        source_contact = _source_contact_fields(tender)
+        for column, field_name in (
+            (4, "inn"),
+            (5, "legal_address"),
+            (6, "postal_address"),
+            (7, "email"),
+            (8, "phone"),
+            (9, "contact_person"),
+            (11, "source_url"),
+        ):
+            if not row[column] and source_contact.get(field_name):
+                row[column] = source_contact[field_name]
         row[12] = tender.url
         if not row[14] or str(row[14]) not in CONTACT_STATUSES:
-            row[14] = CONTACT_STATUS_DEFAULT
+            row[14] = (
+                "Новый"
+                if source_contact.get("email") or source_contact.get("phone")
+                else CONTACT_STATUS_DEFAULT
+            )
         result[key] = row
 
     return sorted(
@@ -293,3 +309,25 @@ def clean_customer_name(value: str) -> str:
 
 def _pad(row: list[object]) -> list[object]:
     return [*row[: len(CUSTOMER_HEADERS)], *([""] * max(0, len(CUSTOMER_HEADERS) - len(row)))]
+
+
+def _source_contact_fields(tender: TenderRecord) -> dict[str, str]:
+    """Read explicit structured fields emitted by trusted public adapters."""
+
+    if "TEKTORG_" not in tender.raw_text:
+        return {}
+    marker_to_field = {
+        "TEKTORG_INN": "inn",
+        "TEKTORG_LEGAL_ADDRESS": "legal_address",
+        "TEKTORG_POSTAL_ADDRESS": "postal_address",
+        "TEKTORG_EMAIL": "email",
+        "TEKTORG_PHONE": "phone",
+        "TEKTORG_CONTACT_PERSON": "contact_person",
+        "TEKTORG_CONTACT_SOURCE": "source_url",
+    }
+    result: dict[str, str] = {}
+    for marker, field_name in marker_to_field.items():
+        match = re.search(rf"(?m)^{re.escape(marker)}=([^\r\n]+)$", tender.raw_text)
+        if match:
+            result[field_name] = " ".join(match.group(1).split())
+    return result

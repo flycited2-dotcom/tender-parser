@@ -81,6 +81,7 @@ def parse_search_page(html: str, source_url: str) -> list[TenderRecord]:
             or None
         )
         raw_text = card.get_text(" ", strip=True)
+        procurement_law = _procurement_law(tender_number, raw_text)
         tenders.append(
             TenderRecord(
                 title=title,
@@ -95,9 +96,26 @@ def parse_search_page(html: str, source_url: str) -> list[TenderRecord]:
                 published_at=_parse_date(_data_value(card, "Размещено"), end_of_day=False),
                 discovered_at=datetime.now(),
                 raw_text=raw_text,
+                source_confidence=1.0,
+                official_number=tender_number,
+                official_url=url,
+                official_source=EIS_SOURCE_NAME,
+                procurement_law=procurement_law,
+                resolution_method="source-native",
+                resolution_confidence=1.0,
             )
         )
     return tenders
+
+
+def _procurement_law(number: str, text: str) -> str | None:
+    digits = "".join(character for character in number if character.isdigit())
+    normalized = text.casefold()
+    if "44-фз" in normalized or len(digits) == 19:
+        return "44-ФЗ"
+    if "223-фз" in normalized or (len(digits) == 11 and digits.startswith("3")):
+        return "223-ФЗ"
+    return None
 
 
 class EisZakupkiSource:

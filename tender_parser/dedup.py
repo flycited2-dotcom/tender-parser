@@ -12,6 +12,7 @@ from tender_parser.text import normalize_text
 SOURCE_PRIORITY = {
     "eis-regional-xml": 110,
     "eis-zakupki": 100,
+    "tektorg": 97,
     "roseltorg": 95,
     "zakazrf": 95,
     "sberbank-ast": 95,
@@ -271,7 +272,9 @@ def _merge_tenders(left: TenderRecord, right: TenderRecord) -> TenderRecord:
         "deadline": preferred.deadline or alternate.deadline,
         "status": preferred.status or alternate.status,
         "published_at": preferred.published_at or alternate.published_at,
-        "raw_text": preferred.raw_text or alternate.raw_text,
+        # Keep structured public contacts/documents contributed by an official
+        # platform even when the EIS card wins source priority.
+        "raw_text": _merge_raw_text(preferred.raw_text, alternate.raw_text),
     }
     # Keep the preferred source's official resolution, but fill every missing
     # field from the alternate card.  Source-local tender_number/url remain the
@@ -290,6 +293,16 @@ def _merge_tenders(left: TenderRecord, right: TenderRecord) -> TenderRecord:
 
 def _source_rank(source: str) -> int:
     return SOURCE_PRIORITY.get(source, 40)
+
+
+def _merge_raw_text(preferred: str, alternate: str) -> str:
+    if not preferred:
+        return alternate
+    if not alternate or alternate in preferred:
+        return preferred
+    if preferred in alternate:
+        return alternate
+    return f"{preferred}\n{alternate}"
 
 
 def _sort_key(tender: TenderRecord) -> tuple[datetime, str]:

@@ -52,6 +52,10 @@ def test_parse_search_page_extracts_eis_cards() -> None:
     assert tenders[0].deadline == datetime(2026, 6, 4, 23, 59)
     assert tenders[0].published_at == datetime(2026, 5, 27, 0, 0)
     assert tenders[0].url.startswith("https://zakupki.gov.ru/epz/order/notice/")
+    assert tenders[0].official_number == "0275100000326000101"
+    assert tenders[0].official_url == tenders[0].url
+    assert tenders[0].procurement_law == "44-ФЗ"
+    assert tenders[0].source_confidence == 1.0
     assert tenders[1].region == "Симферополь"
 
 

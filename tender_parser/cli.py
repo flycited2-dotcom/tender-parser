@@ -63,6 +63,7 @@ from tender_parser.sources.roseltorg import RoseltorgSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
 from tender_parser.sources.tender_pro import TenderProSource
+from tender_parser.sources.tektorg import TektorgSource
 from tender_parser.sources.torgi82 import Torgi82Source
 from tender_parser.sources.sberbank_ast import SberbankAstSource
 from tender_parser.sources.sevastopol_small_purchases import SevastopolSmallPurchasesAdapter
@@ -212,6 +213,7 @@ def build_source_for_profile(
                         SberbankAstSource(),
                         TenderProSource(),
                         Torgi82Source(),
+                        TektorgSource.from_env(),
                         CrimeaSmallPurchasesSource(),
                         SevastopolSmallPurchasesAdapter(),
                         B2BCenterSource(),
@@ -236,6 +238,7 @@ def build_source_for_profile(
                     SberbankAstSource(),
                     TenderProSource(),
                     Torgi82Source(),
+                    TektorgSource.from_env(),
                     CrimeaSmallPurchasesSource(),
                     SevastopolSmallPurchasesAdapter(),
                     B2BCenterSource(),

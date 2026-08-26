@@ -129,6 +129,26 @@ def test_official_number_can_join_multiple_distinct_sources() -> None:
     assert result.tenders[0].official_number == "32616290638"
 
 
+def test_eis_preference_keeps_tektorg_public_contact_markers() -> None:
+    eis = _tender(
+        source="eis-zakupki",
+        number="0174100000626000005",
+        raw_text="Официальная карточка ЕИС",
+    )
+    platform = _tender(
+        source="tektorg",
+        number="TEK-101",
+        official_number="0174100000626000005",
+        raw_text="Карточка ТЭК-Торг\nTEKTORG_EMAIL=office@example.test",
+    )
+
+    result = deduplicate_tenders([platform, eis])
+
+    assert len(result.tenders) == 1
+    assert result.tenders[0].source == "eis-zakupki"
+    assert "TEKTORG_EMAIL=office@example.test" in result.tenders[0].raw_text
+
+
 def test_conflicting_official_numbers_block_exact_card_merge() -> None:
     first = _tender(
         source="eis-zakupki",
