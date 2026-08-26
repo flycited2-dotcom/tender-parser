@@ -8,7 +8,7 @@ from urllib.parse import urlencode, urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from tender_parser.config import EIS_MAX_ERRORS, EIS_SEARCH_QUERIES, EIS_TIMEOUT_SECONDS
+from tender_parser.config import EIS_MAX_ERRORS, EIS_TIMEOUT_SECONDS
 from tender_parser.http import get_with_retry
 from tender_parser.models import TenderRecord
 from tender_parser.regions import detect_region
@@ -19,6 +19,12 @@ from tender_parser.text import normalize_text, parse_price_rub
 EIS_SEARCH_URL = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
 EIS_SOURCE_NAME = "eis-zakupki"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.2"
+EIS_REGIONAL_MAX_PAGES = 50
+
+# Сохранённый пользователем поиск ЕИС: 44-ФЗ + 223-ФЗ, подача заявок,
+# Республика Крым, Севастополь, Запорожская и Херсонская области. Получаем
+# короткие карточки без предметного запроса, чтобы не потерять новые категории.
+EIS_TARGET_CUSTOMER_PLACE = "OKER39,90000000000,91000000000,95000000000,92000000000"
 
 
 def build_search_url(query: str, page: int = 1) -> str:
@@ -37,6 +43,24 @@ def build_search_url(query: str, page: int = 1) -> str:
     return f"{EIS_SEARCH_URL}?{urlencode(params)}"
 
 
+def build_regional_search_url(page: int = 1) -> str:
+    params = {
+        "morphology": "on",
+        "sortBy": "UPDATE_DATE",
+        "pageNumber": str(page),
+        "sortDirection": "false",
+        "recordsPerPage": "_50",
+        "showLotsInfoHidden": "false",
+        "fz44": "on",
+        "fz223": "on",
+        "af": "on",
+        "currencyIdGeneral": "-1",
+        "customerPlace": EIS_TARGET_CUSTOMER_PLACE,
+        "customerPlaceCodes": ",,,,",
+    }
+    return f"{EIS_SEARCH_URL}?{urlencode(params)}"
+
+
 def parse_search_page(html: str, source_url: str) -> list[TenderRecord]:
     soup = BeautifulSoup(html, "html.parser")
     tenders: list[TenderRecord] = []
@@ -44,10 +68,18 @@ def parse_search_page(html: str, source_url: str) -> list[TenderRecord]:
         title = _field_text(card, "Объект закупки")
         tender_number = _extract_number(card)
         url = _extract_url(card, source_url)
-        if not title or not tender_number or not url:
+        if not tender_number or not url:
             continue
+        # Часть закупок по ч. 12 ст. 93 в краткой выдаче не показывает предмет.
+        # Они всё равно нужны в полном региональном листе и для реестра заказчиков.
+        if not title:
+            title = f"Закупка ЕИС № {tender_number}"
 
-        customer = _field_text(card, "Заказчик") or None
+        customer = (
+            _field_text(card, "Заказчик")
+            or _field_text(card, "Организация, осуществляющая размещение")
+            or None
+        )
         raw_text = card.get_text(" ", strip=True)
         tenders.append(
             TenderRecord(
@@ -74,6 +106,7 @@ class EisZakupkiSource:
         session: requests.Session | None = None,
         queries: list[str] | None = None,
         max_pages_per_query: int = 1,
+        regional_max_pages: int = EIS_REGIONAL_MAX_PAGES,
         timeout_seconds: int = EIS_TIMEOUT_SECONDS,
         max_errors: int = EIS_MAX_ERRORS,
     ) -> None:
@@ -81,12 +114,17 @@ class EisZakupkiSource:
         if session is None:
             self.session.trust_env = False
         self.session.headers.update({"User-Agent": USER_AGENT})
-        self.queries = queries or EIS_SEARCH_QUERIES
+        self.regional_mode = queries is None
+        self.queries = list(queries) if queries is not None else []
         self.max_pages_per_query = max_pages_per_query
+        self.regional_max_pages = regional_max_pages
         self.timeout_seconds = timeout_seconds
         self.max_errors = max_errors
 
     def fetch_keywords(self, keywords: Iterable[str]) -> list[TenderRecord]:
+        if self.regional_mode:
+            return self._fetch_regional_listing()
+
         collected: list[TenderRecord] = []
         seen: set[str] = set()
         errors: list[str] = []
@@ -108,6 +146,34 @@ class EisZakupkiSource:
                     collected.append(tender)
             if len(errors) >= self.max_errors:
                 break
+
+        if not collected and errors:
+            raise SourceFetchError(f"ЕИС zakupki.gov.ru недоступен: {'; '.join(errors)}")
+        return collected
+
+    def _fetch_regional_listing(self) -> list[TenderRecord]:
+        collected: list[TenderRecord] = []
+        seen: set[str] = set()
+        errors: list[str] = []
+        for page in range(1, self.regional_max_pages + 1):
+            url = build_regional_search_url(page)
+            try:
+                response = get_with_retry(self.session, url, timeout=self.timeout_seconds)
+            except requests.RequestException as exc:
+                errors.append(f"региональная выдача, страница {page}: {exc}")
+                if len(errors) >= self.max_errors:
+                    break
+                continue
+
+            page_tenders = parse_search_page(response.text, source_url=url)
+            if not page_tenders:
+                break
+            for tender in page_tenders:
+                dedupe_key = tender.tender_number or tender.unique_key
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                collected.append(tender)
 
         if not collected and errors:
             raise SourceFetchError(f"ЕИС zakupki.gov.ru недоступен: {'; '.join(errors)}")

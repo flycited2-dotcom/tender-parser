@@ -192,6 +192,20 @@ REGION_BUCKETS: dict[str, str] = {
     "Херсонская область": "kherson",
 }
 
+def region_priority_rank(*texts: str | None) -> int:
+    """Return the target-region priority: Crimea/Sevastopol, then new regions."""
+
+    values = [value for value in texts if value and value.strip()]
+    if not values:
+        return 3
+    combined = " ".join(values)
+    canonical = detect_region(combined)
+    if canonical in {"Симферополь", "Севастополь", "Республика Крым", "Крым"}:
+        return 0
+    if canonical in {"Запорожская область", "Херсонская область"}:
+        return 1
+    return 2
+
 
 def detect_region(text: str | None) -> str | None:
     normalized = normalize_text(text)

@@ -9,6 +9,7 @@ from pathlib import Path
 from time import sleep
 
 from tender_parser.rts_accumulator import RtsAccumulator
+from tender_parser.sources.eat_browser import parse_eat_listing_page
 from tender_parser.sources.rts_cabinet import detect_cabinet_state, parse_cabinet_page
 from tender_parser.sources.rts_poisk import parse_poisk_page
 
@@ -37,6 +38,11 @@ BADGE_JS = """
 
 def collect_from_page(html: str, url: str, accumulator: RtsAccumulator) -> tuple[int, int] | None:
     """Добавляет видимую выдачу кабинета или поиска в накопитель; None, если результатов нет."""
+    if "agregatoreat.ru" in url:
+        tenders = parse_eat_listing_page(html, url)
+        if not tenders:
+            return None
+        return accumulator.add_many(tenders)
     if "/poisk" in url:
         tenders = parse_poisk_page(html, url)
         if not tenders:
@@ -50,10 +56,10 @@ def collect_from_page(html: str, url: str, accumulator: RtsAccumulator) -> tuple
     return accumulator.add_many(tenders)
 
 
-def badge_text(added: int, total: int) -> str:
+def badge_text(added: int, total: int, source: str = "RTS") -> str:
     if added:
-        return f"Накопитель RTS: {total} строк (+{added} новых)"
-    return f"Накопитель RTS: {total} строк (страница уже добавлена)"
+        return f"Накопитель {source}: {total} строк (+{added} новых)"
+    return f"Накопитель {source}: {total} строк (страница уже добавлена)"
 
 
 def save_snapshot(html: str, url: str, diagnostics_dir: Path, seen_hashes: set[str]) -> Path | None:
@@ -90,7 +96,7 @@ class RtsCabinetWatcher:
         from playwright.sync_api import sync_playwright
 
         accumulator = RtsAccumulator(self.db_path)
-        print("Автосбор RTS запущен. Листайте выдачу в Chrome — страницы добавляются сами.", flush=True)
+        print("Автосбор RTS и ЕАТ запущен. Листайте выдачу в Chrome — страницы добавляются сами.", flush=True)
         print("Остановить: Ctrl+C или закрыть это окно.", flush=True)
         try:
             with sync_playwright() as playwright:
@@ -126,7 +132,7 @@ class RtsCabinetWatcher:
                     page
                     for context in browser.contexts
                     for page in context.pages
-                    if "rts-tender.ru" in page.url
+                    if "rts-tender.ru" in page.url or "agregatoreat.ru" in page.url
                 ]
             except Exception:
                 print(f"Связь с Chrome потеряна; повтор через {RECONNECT_DELAY_SECONDS:.0f} сек.", flush=True)
@@ -168,10 +174,28 @@ class RtsCabinetWatcher:
         try:
             if result is not None:
                 added, total = result
-                self._write_health("results", url, added=added, accumulated_total=total)
+                source_label = "ЕАТ" if "agregatoreat.ru" in url else "RTS"
+                self._write_health(
+                    "results",
+                    url,
+                    source=source_label,
+                    added=added,
+                    accumulated_total=total,
+                )
                 if added:
                     print(f"+{added} новых строк, всего в накопителе: {total}", flush=True)
-                page.evaluate(BADGE_JS, badge_text(added, total))
+                page.evaluate(BADGE_JS, badge_text(added, total, source_label))
+                return
+            if "agregatoreat.ru" in url:
+                if "login.agregatoreat.ru" in url or "/login" in url:
+                    self._write_health("login", url, source="ЕАТ")
+                    page.evaluate(BADGE_JS, "Требуется ручной вход в ЕАТ")
+                    return
+                if url not in self._snapshot_urls and len(self._snapshot_urls) < MAX_SNAPSHOTS_PER_SESSION:
+                    saved = save_snapshot(html, url, self.diagnostics_dir, self._snapshot_hashes)
+                    if saved:
+                        self._snapshot_urls.add(url)
+                page.evaluate(BADGE_JS, "ЕАТ: на странице пока нет распознанных карточек")
                 return
             state = detect_cabinet_state(html, url)
             if state in {"login", "blocked"}:

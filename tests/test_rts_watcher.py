@@ -43,6 +43,29 @@ def test_collect_from_page_skips_login_page(tmp_path: Path) -> None:
     assert accumulator.load_all() == []
 
 
+def test_collect_from_page_adds_visible_eat_cards(tmp_path: Path) -> None:
+    html = """
+    <app-purchase-card>
+      <h3 id="tradeNumber"><a href="/lk/supplier/eat/announcement/card-1">EAT-1</a></h3>
+      <div id="purchaseStateDescription">Подача предложений</div>
+      <p id="subject">Поставка МФУ</p>
+      <span id="organizerInfoNameLink">Заказчик</span>
+      <p id="deliveryAddress">г. Севастополь</p>
+      <h1 id="contractPrice">100 000,00 ₽</h1>
+    </app-purchase-card>
+    """
+    accumulator = RtsAccumulator(tmp_path / "tenders.db")
+
+    result = collect_from_page(
+        html,
+        "https://agregatoreat.ru/lk/supplier/eat/purchases/active/all",
+        accumulator,
+    )
+
+    assert result == (1, 1)
+    assert accumulator.load_all()[0].source == "eat-berezka"
+
+
 def test_badge_text_reports_totals() -> None:
     assert badge_text(12, 112) == "Накопитель RTS: 112 строк (+12 новых)"
     assert badge_text(0, 112) == "Накопитель RTS: 112 строк (страница уже добавлена)"

@@ -86,6 +86,7 @@ def test_rts_accumulator_launchers_call_expected_commands() -> None:
     poisk_text = (ROOT / "Поиск_RTS_другие_площадки.bat").read_text(encoding="utf-8")
     assert "rts-tender.ru/poisk/search?id=7a2edb26-ab8d-4fee-86b4-56514059add7" in poisk_text
     assert "223.rts-tender.ru/supplier/auction/Trade/Search.aspx" in poisk_text
+    assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in poisk_text
     assert "C:\\RTSBrowser\\rts-chromium.exe" in poisk_text
     assert "--remote-debugging-port=9222" in poisk_text
     assert "python -m tender_parser rts-watch" in poisk_text
@@ -99,6 +100,7 @@ def test_rts_cabinet_launchers_use_isolated_browser_profile() -> None:
     assert "--remote-debugging-port=9222" in open_text
     assert "RTSCollectorProfile" in open_text
     assert "rts-chromium.exe" in open_text
+    assert "agregatoreat.ru/lk/supplier/eat/purchases/active/all" in open_text
     assert "python -m tender_parser run --profile rts-cabinet" in collect_text
 
 

@@ -19,6 +19,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from tender_parser.models import TenderRecord
 from tender_parser.customers import CUSTOMER_HEADERS
 from tender_parser.direct_links import documents_destination
+from tender_parser.regions import region_priority_rank
 from tender_parser.run_report import SourceHealth
 
 
@@ -207,6 +208,11 @@ def sort_for_review(tenders: list[TenderRecord]) -> list[TenderRecord]:
         tenders,
         key=lambda tender: (
             PRIORITY_ORDER.get(tender.review_priority, 4),
+            region_priority_rank(
+                tender.delivery_region_evidence,
+                tender.region,
+                tender.title,
+            ),
             tender.deadline is None,
             tender.deadline or datetime.max,
             tender.price is None,

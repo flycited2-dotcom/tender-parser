@@ -6,6 +6,7 @@ import requests
 
 from tender_parser.sources.eis import (
     EisZakupkiSource,
+    build_regional_search_url,
     build_search_url,
     parse_search_page,
 )
@@ -26,6 +27,18 @@ def test_build_search_url_uses_eis_public_search_filters() -> None:
     assert "af=on" in url
 
 
+def test_build_regional_search_url_uses_saved_target_regions_and_laws() -> None:
+    url = build_regional_search_url(page=3)
+    decoded = unquote(url)
+
+    assert "pageNumber=3" in url
+    assert "fz44=on" in url
+    assert "fz223=on" in url
+    assert "af=on" in url
+    assert "customerPlace=OKER39,90000000000,91000000000,95000000000,92000000000" in decoded
+    assert "searchString" not in url
+
+
 def test_parse_search_page_extracts_eis_cards() -> None:
     tenders = parse_search_page(SAMPLE_HTML, source_url="https://zakupki.gov.ru/epz/order/extendedsearch/results.html")
 
@@ -40,6 +53,28 @@ def test_parse_search_page_extracts_eis_cards() -> None:
     assert tenders[0].published_at == datetime(2026, 5, 27, 0, 0)
     assert tenders[0].url.startswith("https://zakupki.gov.ru/epz/order/notice/")
     assert tenders[1].region == "Симферополь"
+
+
+def test_parse_search_page_keeps_regional_card_without_visible_subject() -> None:
+    html = """
+    <div class="search-registry-entry-block">
+      <div class="registry-entry__header-mid__number">
+        <a href="/epz/order/notice/ezt20/view/common-info.html?regNumber=0374500002126000026">
+          № 0374500002126000026
+        </a>
+      </div>
+      <div class="registry-entry__body-block">
+        <div class="registry-entry__body-title">Заказчик</div>
+        <div class="registry-entry__body-value">ГБОУ города Севастополя</div>
+      </div>
+    </div>
+    """
+
+    tenders = parse_search_page(html, "https://zakupki.gov.ru/epz/order/extendedsearch/results.html")
+
+    assert len(tenders) == 1
+    assert tenders[0].title == "Закупка ЕИС № 0374500002126000026"
+    assert tenders[0].customer == "ГБОУ города Севастополя"
 
 
 class SearchResponse:
@@ -69,6 +104,26 @@ def test_fetch_keywords_uses_configured_queries_and_deduplicates() -> None:
     assert len(tenders) == 2
     assert len(session.requested_urls) == 2
     assert "searchString=%D0%BC%D1%84%D1%83+%D0%BA%D1%80%D1%8B%D0%BC" in session.requested_urls[0]
+
+
+def test_default_source_collects_saved_regional_listing_until_empty() -> None:
+    class RegionalSession(SearchSession):
+        def get(self, url: str, timeout: int) -> SearchResponse:
+            self.requested_urls.append(url)
+            response = SearchResponse()
+            if "pageNumber=2" in url:
+                response.text = "<html></html>"
+            return response
+
+    session = RegionalSession()
+    source = EisZakupkiSource(session=session, regional_max_pages=50)
+
+    tenders = source.fetch_keywords(["ignored"])
+
+    assert len(tenders) == 2
+    assert len(session.requested_urls) == 2
+    assert "customerPlace=OKER39%2C90000000000%2C91000000000%2C95000000000%2C92000000000" in session.requested_urls[0]
+    assert "searchString" not in session.requested_urls[0]
 
 
 class TimeoutSession:

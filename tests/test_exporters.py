@@ -416,6 +416,35 @@ def test_sort_for_review_orders_by_priority_deadline_price_and_discovery() -> No
     assert [item.tender_number for item in result] == ["1", "2", "3"]
 
 
+def test_sort_for_review_prioritizes_crimea_before_new_target_regions() -> None:
+    crimea = replace(
+        make_tender("matched"),
+        tender_number="crimea",
+        region="Республика Крым",
+        deadline=datetime(2026, 5, 30),
+    )
+    zaporizhzhia = replace(
+        make_tender("matched"),
+        tender_number="zaporizhzhia",
+        region="Запорожская область",
+        deadline=datetime(2026, 5, 25),
+    )
+    kherson = replace(
+        make_tender("matched"),
+        tender_number="kherson",
+        region="Херсонская область",
+        deadline=datetime(2026, 5, 20),
+    )
+
+    result = sort_for_review([kherson, zaporizhzhia, crimea])
+
+    assert [item.tender_number for item in result] == [
+        "crimea",
+        "kherson",
+        "zaporizhzhia",
+    ]
+
+
 def test_export_json_writes_matched_tenders(tmp_path: Path) -> None:
     output = tmp_path / "latest.json"
     export_json([make_tender("matched")], output)
