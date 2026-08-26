@@ -247,6 +247,14 @@ var TenderOutreach = (function () {
     );
   }
 
+  function updateDraftViaGmailApi(draftId, to, subject, plainBody, options) {
+    return Gmail.Users.Drafts.update(
+      { message: { raw: buildRawDraftMessage(to, subject, plainBody, options) } },
+      "me",
+      String(draftId || "")
+    );
+  }
+
   function hashEmail(email) {
     var normalized = normalizeEmail(email);
     if (!normalized) return "";
@@ -1098,6 +1106,81 @@ var TenderOutreach = (function () {
     }
   }
 
+  function refreshPreparedWorkingDrafts() {
+    var properties = PropertiesService.getScriptProperties();
+    if (properties.getProperty(CONFIG.properties.firstBatchReviewed) === "true") {
+      throw new Error("Нельзя обновлять подготовленные черновики после активации отправки");
+    }
+    var runtime = requireWorkingDraftConfiguration();
+    var lock = LockService.getScriptLock();
+    lock.waitLock(5000);
+    try {
+      var context = loadContext();
+      var updated = [];
+      var failed = [];
+      var noteColumn = context.queue.index[QUEUE_HEADERS.note] + 1;
+
+      for (var rowOffset = 0; rowOffset < context.queue.rows.length; rowOffset += 1) {
+        if (updated.length >= CONFIG.maxHardWorkingDraftsPerRun) break;
+        var candidate = candidateFromRow(context.queue.rows[rowOffset], context.queue.index);
+        if (normalizeLabel(candidate.mailingStatus) !== CONFIG.queue.statusWorkingDraft) continue;
+        if (!candidate.draftId || candidate.sentAt || candidate.messageId || candidate.threadId) continue;
+
+        var campaign = context.campaigns[candidate.campaignId];
+        var reason = productionSendEligibility(
+          candidate,
+          campaign,
+          context.stopEmails,
+          context.template
+        );
+        if (reason) continue;
+
+        var subject = renderTemplate(context.template.subject, candidate);
+        var body = renderTemplate(context.template.body, candidate);
+        var options = { from: runtime.senderAlias };
+        if (runtime.senderName) options.name = runtime.senderName;
+        if (runtime.replyTo) options.replyTo = runtime.replyTo;
+
+        try {
+          var draft = updateDraftViaGmailApi(
+            candidate.draftId,
+            candidate.email,
+            subject,
+            body,
+            options
+          );
+          if (!draft || String(draft.id || "") !== candidate.draftId) {
+            throw new Error("Gmail API не подтвердил обновление черновика");
+          }
+          context.queueSheet.getRange(rowOffset + 2, noteColumn).setValue(
+            "Черновик обновлён по финально утверждённому шаблону; отправка ожидает активации"
+          );
+          appendEvent(
+            context.eventsSheet,
+            candidate.campaignId,
+            candidate.candidateId,
+            candidate.email,
+            "working_draft_refreshed",
+            CONFIG.queue.statusWorkingDraft,
+            CONFIG.queue.statusWorkingDraft,
+            "draft_id=" + candidate.draftId
+          );
+          updated.push(candidate.candidateId);
+        } catch (error) {
+          failed.push({
+            candidateId: candidate.candidateId,
+            draftId: candidate.draftId,
+            error: String(error.message || error),
+          });
+        }
+      }
+
+      return { updated: updated.length, candidateIds: updated, failed: failed };
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
   function clampProductionBatchLimit(value) {
     var parsed = Math.floor(Number(value));
     if (!parsed || parsed < 1) parsed = CONFIG.defaultProductionBatchLimit;
@@ -1864,6 +1947,7 @@ var TenderOutreach = (function () {
       .addItem("Создать рабочие черновики", "createTenderWorkingDrafts")
       .addItem("Проверить автоматическую подготовку", "previewTenderAutomatedPreparation")
       .addItem("Подготовить автоматическую партию", "prepareTenderAutomatedDrafts")
+      .addItem("Обновить подготовленные черновики", "refreshTenderPreparedDrafts")
       .addSeparator()
       .addItem("Проверить production-партию", "previewTenderProductionBatch")
       .addItem("Отправить подтверждённую партию", "sendTenderProductionBatch")
@@ -1908,6 +1992,7 @@ var TenderOutreach = (function () {
     createTestDrafts: createTestDrafts,
     createWorkingDrafts: createWorkingDrafts,
     prepareAutomatedWorkingDrafts: prepareAutomatedWorkingDrafts,
+    refreshPreparedWorkingDrafts: refreshPreparedWorkingDrafts,
     sendProductionBatch: sendProductionBatch,
     approveAutomationAfterFirstBatchReview: approveAutomationAfterFirstBatchReview,
     processMailboxSignals: processMailboxSignals,
@@ -1950,6 +2035,10 @@ function previewTenderAutomatedPreparation() {
 
 function prepareTenderAutomatedDrafts() {
   return TenderOutreach.prepareAutomatedWorkingDrafts();
+}
+
+function refreshTenderPreparedDrafts() {
+  return TenderOutreach.refreshPreparedWorkingDrafts();
 }
 
 function previewTenderProductionBatch() {
