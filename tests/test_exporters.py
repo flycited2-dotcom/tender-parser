@@ -53,7 +53,14 @@ def test_export_excel_creates_expected_sheets(tmp_path: Path) -> None:
     )
 
     workbook = load_workbook(output)
-    assert workbook.sheetnames == ["Дашборд", "Горячие", "На проверку", "Широкий хвост", "Отсеянные"]
+    assert workbook.sheetnames == [
+        "Дашборд",
+        "Горячие",
+        "На проверку",
+        "Широкий хвост",
+        "Отсеянные",
+        "ЭТП — test",
+    ]
     hot_sheet = workbook["Горячие"]
     assert hot_sheet["A1"].value == "приоритет"
     assert hot_sheet["B1"].value == "новый"
@@ -114,16 +121,55 @@ def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> Non
     export_excel([make_tender("matched")], [], [], [], output, now=NOW)
 
     sheet = load_workbook(output)["Горячие"]
+    headers = [cell.value for cell in sheet[1]]
     assert sheet.auto_filter.ref is not None
     assert sheet.freeze_panes == "E2"
     assert sheet["D2"].hyperlink.target == "https://example.test/tender-1/"
-    assert sheet["F2"].value == 45_000.0
-    assert "₽" in sheet["F2"].number_format
-    assert sheet["G2"].value == datetime(2026, 5, 25, 10, 0)
+    assert sheet.cell(2, headers.index("регион") + 1).value == "Республика Крым"
+    assert sheet.cell(2, headers.index("город") + 1).value is None
+    assert sheet.cell(2, headers.index("торговая площадка") + 1).value == "test"
+    price_cell = sheet.cell(2, headers.index("сумма") + 1)
+    assert price_cell.value == 45_000.0
+    assert "₽" in price_cell.number_format
+    assert sheet.cell(2, headers.index("срок_подачи") + 1).value == datetime(2026, 5, 25, 10, 0)
     assert sheet["A2"].fill.start_color.rgb == "FFFBE0D6"
     assert sheet["C2"].value == 6
     assert sheet["C2"].fill.start_color.rgb == "FFFEECCA"
     assert len(sheet.data_validations.dataValidation) == 1
+
+
+def test_dashboard_links_to_prefiltered_platform_sheets(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    sber = replace(
+        make_tender("matched"),
+        tender_number="sber-1",
+        region="Республика Крым, г. Симферополь",
+        platform_url="https://utp.sberbank-ast.ru/Trade/NBT/PurchaseView/42/0/0/0",
+    )
+    rts = replace(
+        make_tender("review"),
+        tender_number="rts-1",
+        region="Севастополь",
+        platform_url="https://www.rts-tender.ru/auctionsearch/ctl/procDetail/1",
+    )
+
+    export_excel([sber], [rts], [], [], output, now=NOW, regional_tenders=[sber, rts])
+
+    workbook = load_workbook(output)
+    dashboard = workbook["Дашборд"]
+    platform_row = next(
+        cell.row for cell in dashboard["A"] if cell.value == "Сбербанк-АСТ"
+    )
+    destination = dashboard.cell(platform_row, 1).hyperlink.target
+    assert destination == "#'ЭТП — Сбербанк-АСТ'!A1"
+    assert dashboard.cell(platform_row, 3).hyperlink.target == destination
+    platform_sheet = workbook["ЭТП — Сбербанк-АСТ"]
+    headers = [cell.value for cell in platform_sheet[1]]
+    assert platform_sheet.max_row == 2
+    assert platform_sheet.cell(2, headers.index("регион") + 1).value == "Республика Крым"
+    assert platform_sheet.cell(2, headers.index("город") + 1).value == "Симферополь"
+    assert platform_sheet.cell(2, headers.index("торговая площадка") + 1).value == "Сбербанк-АСТ"
+    assert platform_sheet.auto_filter.ref is not None
 
 
 def test_export_excel_builds_dashboard_with_kpi_and_sources(tmp_path: Path) -> None:

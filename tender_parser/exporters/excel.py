@@ -18,8 +18,8 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from tender_parser.models import TenderRecord
 from tender_parser.customers import CUSTOMER_HEADERS
-from tender_parser.direct_links import documents_destination
-from tender_parser.regions import region_priority_rank
+from tender_parser.direct_links import documents_destination, platform_display_name
+from tender_parser.regions import detect_city, detect_region, region_priority_rank
 from tender_parser.run_report import SourceHealth
 
 
@@ -29,6 +29,8 @@ HEADERS = [
     "дней_до_срока",
     "название",
     "регион",
+    "город",
+    "торговая площадка",
     "сумма",
     "срок_подачи",
     "заказчик",
@@ -63,6 +65,8 @@ COLUMN_WIDTHS = {
     "дней_до_срока": 9,
     "название": 55,
     "регион": 20,
+    "город": 18,
+    "торговая площадка": 24,
     "сумма": 16,
     "срок_подачи": 17,
     "заказчик": 32,
@@ -130,6 +134,7 @@ DATA_SHEETS = {"Мой отбор", "Новые", "Горячие", "На про
 # Порядок чтения отметок: листы данных раньше агрегата «Мой отбор»,
 # чтобы правка пользователя на «Горячих» побеждала устаревшую копию.
 DATA_SHEET_READ_ORDER = ["Новые", "Горячие", "На проверку", "Широкий хвост", "Отсеянные", "Мой отбор"]
+PLATFORM_SHEET_PREFIX = "ЭТП — "
 PICKED_CHOICES = ("✅", "🤔")
 
 
@@ -203,6 +208,52 @@ def _days_left(deadline: datetime | None, now: datetime) -> int | None:
     return (deadline.date() - now.date()).days
 
 
+def _tender_city(tender: TenderRecord) -> str:
+    for text in (
+        tender.delivery_region_evidence,
+        tender.region,
+        tender.raw_text,
+        tender.title,
+    ):
+        city = detect_city(text)
+        if city:
+            return city
+    return ""
+
+
+def _tender_region(tender: TenderRecord) -> str:
+    for text in (
+        tender.delivery_region_evidence,
+        tender.region,
+        tender.raw_text,
+        tender.title,
+    ):
+        region = detect_region(text)
+        if region in {"Симферополь", "Республика Крым", "Крым"}:
+            return "Республика Крым"
+        if region:
+            return region
+    return tender.region or ""
+
+
+def _platform_sheet_names(tenders: list[TenderRecord]) -> dict[str, str]:
+    labels = sorted({platform_display_name(tender) for tender in tenders})
+    used: set[str] = set()
+    result: dict[str, str] = {}
+    for label in labels:
+        safe_label = "".join("-" if char in "[]:*?/\\" else char for char in label)
+        base = f"{PLATFORM_SHEET_PREFIX}{safe_label}"[:31].rstrip()
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            marker = f" {suffix}"
+            candidate = f"{base[: 31 - len(marker)]}{marker}"
+            suffix += 1
+        used.add(candidate)
+        result[label] = candidate
+    return result
+
+
 def sort_for_review(tenders: list[TenderRecord]) -> list[TenderRecord]:
     return sorted(
         tenders,
@@ -245,7 +296,10 @@ def load_manual_selections(exports_dir: Path) -> dict[SelectionKey, SelectionVal
             print(f"Не удалось прочитать отметки из {candidate.name} — файл пропущен")
             continue
         try:
-            for name in DATA_SHEET_READ_ORDER:
+            platform_sheets = [
+                name for name in workbook.sheetnames if name.startswith(PLATFORM_SHEET_PREFIX)
+            ]
+            for name in [*DATA_SHEET_READ_ORDER, *platform_sheets]:
                 if name not in workbook.sheetnames:
                     continue
                 sheet = workbook[name]
@@ -359,7 +413,9 @@ def _append_rows(
                     "🆕" if new_keys and tender.unique_key in new_keys else "",
                     days if days is not None else "",
                     tender.title,
-                    tender.region or "",
+                    _tender_region(tender),
+                    _tender_city(tender),
+                    platform_display_name(tender),
                     _safe_price(tender.price),
                     tender.deadline,
                     tender.customer or "",
@@ -534,6 +590,8 @@ def _build_dashboard(
     new_count: int | None,
     now: datetime,
     source_health: list[SourceHealth] | None,
+    navigation_tenders: list[TenderRecord],
+    platform_sheet_names: Mapping[str, str],
 ) -> None:
     sheet.column_dimensions["A"].width = 55
     for letter in "BCDEF":
@@ -562,6 +620,25 @@ def _build_dashboard(
         value_cell.font = Font(bold=True, size=16, color=KPI_HOT_COLOR if label == "Горячие" else None)
 
     row = 7
+    row = _dashboard_section(sheet, row, "Закупки по торговым площадкам")
+    platform_headers = ["Торговая площадка", "Закупок", "Открыть отбор"]
+    for index, header in enumerate(platform_headers, start=1):
+        sheet.cell(row=row, column=index, value=header)
+    _style_header(sheet, len(platform_headers), row=row)
+    platforms = _count_by(navigation_tenders, platform_display_name)
+    for name, count in platforms:
+        row += 1
+        destination = platform_sheet_names[name].replace("'", "''")
+        platform_cell = sheet.cell(row=row, column=1, value=name)
+        platform_cell.hyperlink = f"#'{destination}'!A1"
+        platform_cell.font = LINK_FONT
+        sheet.cell(row=row, column=2, value=count)
+        open_cell = sheet.cell(row=row, column=3, value="Показать закупки")
+        open_cell.hyperlink = f"#'{destination}'!A1"
+        open_cell.font = LINK_FONT
+        _border_row(sheet, row, len(platform_headers))
+
+    row += 2
     row = _dashboard_section(sheet, row, "Actionable по источникам")
     header_row = row
     sheet.cell(row=row, column=1, value="Источник")
@@ -653,7 +730,7 @@ def _build_dashboard(
         if tender.url:
             title_cell.hyperlink = tender.url
             title_cell.font = LINK_FONT
-        sheet.cell(row=row, column=2, value=tender.region or "")
+        sheet.cell(row=row, column=2, value=_tender_region(tender))
         price_cell = sheet.cell(row=row, column=3, value=tender.price)
         price_cell.number_format = PRICE_FORMAT
         deadline_cell = sheet.cell(row=row, column=4, value=tender.deadline)
@@ -703,6 +780,13 @@ def export_excel(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
 
+    navigation_tenders = (
+        list(regional_tenders)
+        if regional_tenders is not None
+        else [*hot, *review, *wide, *excluded]
+    )
+    platform_sheet_names = _platform_sheet_names(navigation_tenders)
+
     dashboard = workbook.active
     dashboard.title = "Дашборд"
     _build_dashboard(
@@ -714,6 +798,8 @@ def export_excel(
         new_count=len(new_tenders) if new_tenders is not None else None,
         now=current,
         source_health=source_health,
+        navigation_tenders=navigation_tenders,
+        platform_sheet_names=platform_sheet_names,
     )
 
     picked = [
@@ -748,6 +834,21 @@ def export_excel(
             manual_selections,
             new_keys,
         )
+    for platform, sheet_name in platform_sheet_names.items():
+        platform_tenders = [
+            tender
+            for tender in navigation_tenders
+            if platform_display_name(tender) == platform
+        ]
+        platform_sheet = workbook.create_sheet(sheet_name)
+        _append_rows(
+            platform_sheet,
+            sort_for_review(platform_tenders),
+            current,
+            manual_selections,
+            new_keys,
+        )
+        platform_sheet.sheet_properties.tabColor = CHART_BAR_COLOR
     if customer_rows is not None:
         _append_customer_rows(
             workbook.create_sheet("Потенциальные заказчики"), customer_rows

@@ -398,6 +398,7 @@ def test_run_with_fake_source_creates_database_and_exports(tmp_path: Path) -> No
         "Широкий хвост",
         "Отсеянные",
         "Все региональные",
+        "ЭТП — fake",
         "Потенциальные заказчики",
     ]
     assert workbook["Все региональные"].max_row == 2

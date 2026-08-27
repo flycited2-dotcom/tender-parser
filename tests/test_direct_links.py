@@ -6,6 +6,7 @@ from tender_parser.direct_links import (
     documents_destination,
     normalize_direct_links,
     parse_eis_card_links,
+    platform_display_name,
 )
 from tender_parser.models import TenderRecord
 
@@ -65,6 +66,23 @@ def test_native_sources_expose_direct_eis_and_platform_destinations() -> None:
     assert normalized_eis.procurement_law == "44-ФЗ"
     assert normalized_gpb.platform_number == "0375200001526000132"
     assert normalized_gpb.platform_url == gpb.url
+
+
+def test_platform_display_name_prefers_direct_platform_url_and_knows_source_classes() -> None:
+    resolved = TenderRecord(
+        title="МФУ",
+        url=EIS_URL,
+        source="EisZakupkiSource",
+        platform_url="https://utp.sberbank-ast.ru/Trade/NBT/PurchaseView/42/0/0/0",
+    )
+    tektorg = TenderRecord(
+        title="Кабель",
+        url="https://unknown.example.test/card/1",
+        source="TektorgSource",
+    )
+
+    assert platform_display_name(resolved) == "Сбербанк-АСТ"
+    assert platform_display_name(tektorg) == "ТЭК-Торг"
 
 
 def test_rts_poisk_promotes_exact_eis_destination() -> None:

@@ -30,7 +30,66 @@ PLATFORM_SOURCE_NAMES = {
     "crimea-small-purchases": "Малые закупки Крыма",
 }
 
+SOURCE_DISPLAY_NAMES = {
+    **PLATFORM_SOURCE_NAMES,
+    "eis-zakupki": "ЕИС",
+    "eis-regional-xml": "ЕИС",
+    "rts-background-snapshot": "РТС-тендер",
+    "rts-poisk": "РТС-тендер",
+    "rostender": "РосТендер",
+    "rostender-resolution": "РосТендер",
+    "sevastopol-small-purchases": "Малые закупки Севастополя",
+    "ImportFolderSource": "Локальный импорт",
+    "EtpGpbApiSource": "ЭТП ГПБ",
+    "RoseltorgSource": "Росэлторг",
+    "ZakazRfSource": "Заказ РФ",
+    "SberbankAstSource": "Сбербанк-АСТ",
+    "TenderProSource": "Tender.Pro",
+    "Torgi82Source": "Торги-82",
+    "TektorgSource": "ТЭК-Торг",
+    "CrimeaSmallPurchasesSource": "Малые закупки Крыма",
+    "SevastopolSmallPurchasesAdapter": "Малые закупки Севастополя",
+    "B2BCenterSource": "B2B-Center",
+    "EatIntegrationSource": "ЕАТ «Берёзка»",
+    "EisZakupkiSource": "ЕИС",
+    "EisRegionalXmlSource": "ЕИС",
+    "RostenderSource": "РосТендер",
+}
+
+PLATFORM_HOST_NAMES = {
+    "zakupki.gov.ru": "ЕИС",
+    "rts-tender.ru": "РТС-тендер",
+    "agregatoreat.ru": "ЕАТ «Берёзка»",
+    "etp.gpb.ru": "ЭТП ГПБ",
+    "sberbank-ast.ru": "Сбербанк-АСТ",
+    "roseltorg.ru": "Росэлторг",
+    "zakazrf.ru": "Заказ РФ",
+    "tektorg.ru": "ТЭК-Торг",
+    "b2b-center.ru": "B2B-Center",
+    "tender.pro": "Tender.Pro",
+    "torgi82.ru": "Торги-82",
+    "zrk.rk.gov.ru": "Малые закупки Крыма",
+    "rks.sevzakaz.ru": "Малые закупки Севастополя",
+    "rostender.info": "РосТендер",
+}
+
 MIXED_AGGREGATOR_SOURCES = {"rts-poisk"}
+
+
+def platform_display_name(record: TenderRecord) -> str:
+    """Return the real ETP when known, otherwise a clear source fallback."""
+
+    for candidate in (record.platform_url, record.official_url, record.url):
+        host = (urlparse(candidate or "").hostname or "").casefold()
+        for domain, label in PLATFORM_HOST_NAMES.items():
+            if host == domain or host.endswith(f".{domain}"):
+                return label
+    source = SOURCE_DISPLAY_NAMES.get(record.source)
+    if source:
+        return source
+    if record.official_source:
+        return record.official_source.strip()
+    return record.source.strip() or "Не определена"
 
 
 @dataclass(frozen=True)

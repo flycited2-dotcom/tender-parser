@@ -1,9 +1,18 @@
 from tender_parser.regions import (
+    detect_city,
     detect_delivery_region,
     detect_non_target_region,
     detect_region,
     region_bucket,
 )
+
+
+def test_detect_city_extracts_target_city_separately_from_region() -> None:
+    assert detect_city("Республика Крым, г. Симферополь, ул. Ленина") == "Симферополь"
+    assert detect_city("Запорожская область, г. Мелитополь") == "Мелитополь"
+    assert detect_city("Херсонская область, Новая Каховка") == "Новая Каховка"
+    assert detect_city("Республика Крым") is None
+    assert detect_city("Москва, ул. Крымский Вал") is None
 
 
 def test_detect_region_finds_crimean_cities() -> None:
