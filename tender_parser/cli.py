@@ -36,6 +36,7 @@ from tender_parser.notifications import (
     build_daily_run_summary,
     export_notification_digest,
 )
+from tender_parser.outreach_queue import OutreachQueueConfig, OutreachQueueSynchronizer
 from tender_parser.run_report import (
     SourceFetchResult,
     SourceHealth,
@@ -809,6 +810,10 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
             now=lambda: current_time,
         ).enrich(customer_rows, customer_candidates)
 
+    outreach_queue_result = OutreachQueueSynchronizer(
+        OutreachQueueConfig.from_env(base_dir)
+    ).sync(customer_rows)
+
     date_stamp = current_time.strftime("%Y-%m-%d")
     excel_path = export_excel(
         hot,
@@ -920,6 +925,10 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
     if document_result is not None:
         print(f"Telegram-Excel: {document_result.status} {document_result.detail}")
     print(f"Google Sheets: {google_result.status} {google_result.detail}")
+    print(
+        "Очередь рассылки: "
+        f"{outreach_queue_result.status} {outreach_queue_result.detail}"
+    )
     print(
         "Прямые ссылки: "
         f"проверено {link_enricher.last_report.checked}, "
