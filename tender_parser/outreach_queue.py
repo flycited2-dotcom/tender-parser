@@ -15,6 +15,7 @@ SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 QUEUE_SHEET = "Очередь"
 STOPLIST_SHEET = "Стоп-лист"
 EVENTS_SHEET = "События"
+DASHBOARD_SHEET = "Дашборд"
 DEFAULT_CAMPAIGN_ID = "tender-intro-v1"
 
 QUEUE_HEADERS = [
@@ -155,6 +156,15 @@ class OutreachQueueSynchronizer:
                     timeout=self.config.timeout_seconds,
                 )
                 response.raise_for_status()
+            self._update_dashboard(
+                session,
+                queue_values,
+                plan,
+                customer_count=sum(
+                    bool(str(_cell(row, 0) or "").strip()) for row in customer_rows
+                ),
+                stoplist_count=len(stop_emails),
+            )
             self._append_event(session, plan)
             return OutreachQueueSyncResult(
                 status="synced",
@@ -209,6 +219,55 @@ class OutreachQueueSynchronizer:
             f"{events_append_range}:append",
             params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"},
             json={"values": event},
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
+
+    def _update_dashboard(
+        self,
+        session: object,
+        queue_values: Sequence[Sequence[object]],
+        plan: QueueSyncPlan,
+        *,
+        customer_count: int,
+        stoplist_count: int,
+    ) -> None:
+        rows = [list(row) for row in queue_values[1:]]
+        for update in plan.updates:
+            offset = update.row_number - 2
+            while len(rows) <= offset:
+                rows.append([])
+            rows[offset] = update.values
+        rows.extend(plan.appends)
+        index = {name: position for position, name in enumerate(QUEUE_HEADERS)}
+        actual = [row for row in rows if str(_cell(row, index["ID кандидата"]) or "").strip()]
+        decision = lambda row: str(_cell(row, index["Решение"]) or "").strip()
+        status = lambda row: str(_cell(row, index["Статус рассылки"]) or "").strip()
+        eligible = sum(
+            bool(normalize_email(_cell(row, index["Email"])))
+            and decision(row) in {"needs_contact_review", "ready_for_campaign_review"}
+            and status(row) in {"заблокировано", "в очереди"}
+            and bool(str(_cell(row, index["Источник контакта"]) or "").strip())
+            and str(_cell(row, index["Закупка-основание"]) or "").lower().startswith(("http://", "https://"))
+            for row in actual
+        )
+        dashboard_values = [[value] for value in [
+            customer_count,
+            sum(decision(row) == "needs_contact_review" for row in actual),
+            sum(decision(row) == "suppressed" for row in actual),
+            stoplist_count,
+            sum(decision(row) == "excluded" for row in actual),
+            eligible,
+            "АКТИВНА",
+            True,
+            sum(str(_cell(row, index["Статус согласия"]) or "").strip().casefold() == "подтверждено" for row in actual),
+            0,
+        ]]
+        dashboard_range = quote(f"'{DASHBOARD_SHEET}'!B2:B11", safe="")
+        response = session.put(  # type: ignore[attr-defined]
+            f"{SHEETS_API}/{self.config.spreadsheet_id}/values/" + dashboard_range,
+            params={"valueInputOption": "RAW"},
+            json={"values": dashboard_values},
             timeout=self.config.timeout_seconds,
         )
         response.raise_for_status()
