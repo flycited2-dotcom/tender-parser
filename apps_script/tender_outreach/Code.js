@@ -11,6 +11,7 @@ var TenderOutreach = (function () {
 
   var CONFIG = {
     spreadsheetId: "1Dos070wEj_zwymVn46i4mcC4fWMLpDsZVmC7KkX8HSQ",
+    heroContentId: "tenderOutreachHero",
     sheets: {
       queue: "Очередь",
       template: "Шаблон",
@@ -35,6 +36,7 @@ var TenderOutreach = (function () {
       senderAlias: "TENDER_OUTREACH_FROM_ALIAS",
       senderName: "TENDER_OUTREACH_SENDER_NAME",
       replyTo: "TENDER_OUTREACH_REPLY_TO",
+      visualTemplateMode: "TENDER_OUTREACH_VISUAL_TEMPLATE_MODE",
     },
     queue: {
       decisionReady: "ready_for_campaign_review",
@@ -193,6 +195,107 @@ var TenderOutreach = (function () {
       "</div>";
   }
 
+  function linkedAndEmphasizedHtml(text) {
+    return escapeHtml(String(text || ""))
+      .replace(/https?:\/\/[^\s<]+/g, function (url) {
+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" ' +
+          'style="color:#0b5cab;text-decoration:underline">' + url + "</a>";
+      })
+      .replace(/ООО «Технолайн Трейд»/g, "<strong>ООО «Технолайн Трейд»</strong>")
+      .replace(
+        /Направьте нам запрос, техническое задание или спецификацию ответным письмом/g,
+        "<strong>Направьте нам запрос, техническое задание или спецификацию ответным письмом</strong>"
+      )
+      .replace(/\r?\n/g, "<br>");
+  }
+
+  function buildResponsiveHtml(text, options) {
+    options = options || {};
+    var replyTo = normalizeEmail(options.replyTo || options.from);
+    var replySubject = encodeURIComponent("Запрос на расчёт поставки");
+    var replyBody = encodeURIComponent(
+      "Добрый день! Направляем запрос / техническое задание для расчёта."
+    );
+    var optOutSubject = encodeURIComponent("Не писать");
+    var optOutBody = encodeURIComponent(
+      "Прошу больше не направлять предложения на этот адрес."
+    );
+    var replyHref = "mailto:" + replyTo + "?subject=" + replySubject + "&body=" + replyBody;
+    var optOutHref = "mailto:" + replyTo + "?subject=" + optOutSubject + "&body=" + optOutBody;
+    var paragraphs = String(text || "").split(/\r?\n\s*\r?\n/);
+    var content = [];
+    var heroInserted = false;
+    var ctaInserted = false;
+
+    paragraphs.forEach(function (paragraph, index) {
+      var value = String(paragraph || "").trim();
+      if (!value) return;
+      if (/^Если вы больше не хотите получать сообщения/i.test(value)) return;
+
+      var style = "margin:0 0 17px;font-size:15px;line-height:1.58;color:#273444";
+      if (/^Каталог техники:/i.test(value)) {
+        style = "margin:22px 0 18px;padding-top:17px;border-top:1px solid #e4e9ee;" +
+          "font-size:13px;line-height:1.7;color:#526171";
+      } else if (/^С уважением/i.test(value)) {
+        style = "margin:24px 0 0;font-size:14px;line-height:1.55;color:#273444";
+      }
+      content.push('<p style="' + style + '">' + linkedAndEmphasizedHtml(value) + "</p>");
+
+      if (!heroInserted && index >= 1 && options.heroContentId) {
+        content.push(
+          '<div class="hero-wrap" style="margin:22px 0 24px">' +
+            '<img src="cid:' + escapeHtml(options.heroContentId) + '" width="600" ' +
+            'alt="Комплексные поставки оборудования и товаров" ' +
+            'style="display:block;width:100%;max-width:600px;height:auto;border:0;border-radius:10px">' +
+          "</div>"
+        );
+        heroInserted = true;
+      }
+
+      if (!ctaInserted && /^Направьте нам запрос/i.test(value)) {
+        content.push(
+          '<table role="presentation" cellspacing="0" cellpadding="0" border="0" ' +
+            'class="cta-table" style="margin:23px 0 8px"><tr>' +
+            '<td class="cta-cell" style="padding:0 10px 10px 0">' +
+              '<a href="' + escapeHtml(replyHref) + '" style="display:inline-block;background:#0b5cab;' +
+              'color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;' +
+              'padding:13px 20px;border-radius:7px">Направить спецификацию</a>' +
+            "</td>" +
+            '<td class="cta-cell" style="padding:0 0 10px">' +
+              '<a href="https://simfer.com.ru" target="_blank" rel="noopener noreferrer" ' +
+              'style="display:inline-block;border:1px solid #0b5cab;color:#0b5cab;' +
+              'text-decoration:none;font-size:15px;font-weight:bold;padding:12px 20px;' +
+              'border-radius:7px">Перейти на сайт</a>' +
+            "</td></tr></table>"
+        );
+        ctaInserted = true;
+      }
+    });
+
+    return '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<style>@media screen and (max-width:600px){.email-card{width:100%!important}' +
+      '.email-content{padding:22px 18px!important}.cta-cell{display:block!important;' +
+      'width:100%!important;padding:0 0 10px!important}.cta-cell a{display:block!important;' +
+      'text-align:center!important}.hero-wrap{margin-left:-18px!important;margin-right:-18px!important}' +
+      '.hero-wrap img{border-radius:0!important}}</style></head>' +
+      '<body style="margin:0;padding:0;background:#f3f5f7">' +
+      '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" ' +
+      'style="background:#f3f5f7"><tr><td align="center" style="padding:18px 8px">' +
+      '<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" ' +
+      'class="email-card" style="width:600px;max-width:600px;background:#ffffff;border-radius:12px;' +
+      'box-shadow:0 2px 10px rgba(24,39,55,.08);overflow:hidden">' +
+      '<tr><td style="background:#173c5e;padding:18px 28px;color:#ffffff;font-family:Arial,sans-serif;' +
+      'font-size:17px;font-weight:bold;letter-spacing:.35px">ТЕХНОЛАЙН ТРЕЙД</td></tr>' +
+      '<tr><td class="email-content" style="padding:28px;font-family:Arial,sans-serif">' +
+      content.join("") +
+      '<div style="margin-top:24px;padding-top:15px;border-top:1px solid #e4e9ee;' +
+      'font-size:11px;line-height:1.5;color:#7a8794">Если вы больше не хотите получать ' +
+      'сообщения от нашей компании, <a href="' + escapeHtml(optOutHref) + '" ' +
+      'style="color:#667788;text-decoration:underline">сообщите нам одним письмом</a> — ' +
+      'адрес будет внесён в стоп-лист.</div>' +
+      "</td></tr></table></td></tr></table></body></html>";
+  }
+
   function sanitizeHeader(value) {
     return String(value || "").replace(/[\r\n]+/g, " ").trim();
   }
@@ -212,44 +315,113 @@ var TenderOutreach = (function () {
     return (encoded.match(/.{1,76}/g) || [""]).join("\r\n");
   }
 
+  function base64MimeBytes(value) {
+    var encoded = Utilities.base64Encode(value || []);
+    return (encoded.match(/.{1,76}/g) || [""]).join("\r\n");
+  }
+
+  var cachedHeroImage;
+
+  function loadHeroImage() {
+    if (cachedHeroImage) return cachedHeroImage;
+    if (typeof TENDER_OUTREACH_HERO_BASE64 === "undefined") {
+      throw new Error("В проекте отсутствует встроенное изображение письма");
+    }
+    cachedHeroImage = {
+      contentId: CONFIG.heroContentId,
+      contentType: "image/jpeg",
+      filename: "tender-outreach-hero.jpg",
+      bytes: Utilities.base64Decode(TENDER_OUTREACH_HERO_BASE64),
+    };
+    return cachedHeroImage;
+  }
+
+  function visualTemplateEnabled() {
+    return PropertiesService.getScriptProperties().getProperty(
+      CONFIG.properties.visualTemplateMode
+    ) === "true";
+  }
+
   function buildRawDraftMessage(to, subject, plainBody, options) {
-    var boundary = "tender-outreach-" + Utilities.getUuid();
+    options = options || {};
+    var alternativeBoundary = "tender-outreach-alt-" + Utilities.getUuid();
+    var relatedBoundary = "tender-outreach-related-" + Utilities.getUuid();
     var fromEmail = normalizeEmail(options.from);
     var fromHeader = fromEmail;
     if (options.name) fromHeader = encodeMimeHeader(options.name) + " <" + fromEmail + ">";
+    var htmlBody = options.htmlBody || plainTextToHtml(plainBody);
+    var inlineImage = options.inlineImage;
     var headers = [
       "From: " + fromHeader,
       "To: " + normalizeEmail(to),
       "Subject: " + encodeMimeHeader(subject),
       "MIME-Version: 1.0",
-      'Content-Type: multipart/alternative; boundary="' + boundary + '"',
+      'Content-Type: multipart/' + (inlineImage ? "related" : "alternative") +
+        '; boundary="' + (inlineImage ? relatedBoundary : alternativeBoundary) + '"',
     ];
     if (options.replyTo) headers.splice(2, 0, "Reply-To: " + normalizeEmail(options.replyTo));
+    if (options.unsubscribeEmail) {
+      headers.splice(3, 0, "List-Unsubscribe: <mailto:" +
+        normalizeEmail(options.unsubscribeEmail) + "?subject=unsubscribe>");
+    }
 
-    var raw = headers.join("\r\n") + "\r\n\r\n" +
-      "--" + boundary + "\r\n" +
+    var alternative = "--" + alternativeBoundary + "\r\n" +
       "Content-Type: text/plain; charset=UTF-8\r\n" +
       "Content-Transfer-Encoding: base64\r\n\r\n" +
       base64MimeBody(plainBody) + "\r\n" +
-      "--" + boundary + "\r\n" +
+      "--" + alternativeBoundary + "\r\n" +
       "Content-Type: text/html; charset=UTF-8\r\n" +
       "Content-Transfer-Encoding: base64\r\n\r\n" +
-      base64MimeBody(plainTextToHtml(plainBody)) + "\r\n" +
-      "--" + boundary + "--";
+      base64MimeBody(htmlBody) + "\r\n" +
+      "--" + alternativeBoundary + "--";
+
+    var raw = headers.join("\r\n") + "\r\n\r\n";
+    if (inlineImage) {
+      raw += "--" + relatedBoundary + "\r\n" +
+        'Content-Type: multipart/alternative; boundary="' + alternativeBoundary + '"\r\n\r\n' +
+        alternative + "\r\n" +
+        "--" + relatedBoundary + "\r\n" +
+        "Content-Type: " + sanitizeHeader(inlineImage.contentType) + "\r\n" +
+        "Content-Transfer-Encoding: base64\r\n" +
+        "Content-ID: <" + sanitizeHeader(inlineImage.contentId) + ">\r\n" +
+        'Content-Disposition: inline; filename="' +
+          sanitizeHeader(inlineImage.filename) + '"\r\n\r\n' +
+        base64MimeBytes(inlineImage.bytes) + "\r\n" +
+        "--" + relatedBoundary + "--";
+    } else {
+      raw += alternative;
+    }
 
     return Utilities.base64EncodeWebSafe(raw, Utilities.Charset.UTF_8).replace(/=+$/, "");
   }
 
+  function prepareDraftOptions(plainBody, options) {
+    var prepared = {};
+    Object.keys(options || {}).forEach(function (key) { prepared[key] = options[key]; });
+    if (prepared.forceVisualTemplate || visualTemplateEnabled()) {
+      prepared.inlineImage = loadHeroImage();
+      prepared.htmlBody = buildResponsiveHtml(plainBody, {
+        from: prepared.from,
+        replyTo: prepared.replyTo,
+        heroContentId: prepared.inlineImage.contentId,
+      });
+      prepared.unsubscribeEmail = prepared.replyTo || prepared.from;
+    }
+    return prepared;
+  }
+
   function createDraftViaGmailApi(to, subject, plainBody, options) {
+    var prepared = prepareDraftOptions(plainBody, options);
     return Gmail.Users.Drafts.create(
-      { message: { raw: buildRawDraftMessage(to, subject, plainBody, options) } },
+      { message: { raw: buildRawDraftMessage(to, subject, plainBody, prepared) } },
       "me"
     );
   }
 
   function updateDraftViaGmailApi(draftId, to, subject, plainBody, options) {
+    var prepared = prepareDraftOptions(plainBody, options);
     return Gmail.Users.Drafts.update(
-      { message: { raw: buildRawDraftMessage(to, subject, plainBody, options) } },
+      { message: { raw: buildRawDraftMessage(to, subject, plainBody, prepared) } },
       "me",
       String(draftId || "")
     );
@@ -691,6 +863,53 @@ var TenderOutreach = (function () {
     var sender = requireSenderConfiguration(properties);
     sender.testRecipient = testRecipient;
     return sender;
+  }
+
+  function sendVisualTemplateTest() {
+    var runtime = requireTestConfiguration();
+    var context = loadContext();
+    var previewCandidate = null;
+    for (var rowOffset = 0; rowOffset < context.queue.rows.length; rowOffset += 1) {
+      var current = candidateFromRow(context.queue.rows[rowOffset], context.queue.index);
+      if (current.candidateId) {
+        previewCandidate = current;
+        break;
+      }
+    }
+    previewCandidate = previewCandidate || {
+      candidateId: "visual-preview",
+      campaignId: "tender-intro-v1",
+      email: runtime.testRecipient,
+      organization: "организации",
+      region: "",
+    };
+    var subject = "[ВИЗУАЛЬНЫЙ ТЕСТ] " + renderTemplate(
+      context.template.subject,
+      previewCandidate
+    );
+    var body = renderTemplate(context.template.body, previewCandidate);
+    var options = {
+      from: runtime.senderAlias,
+      forceVisualTemplate: true,
+    };
+    if (runtime.senderName) options.name = runtime.senderName;
+    if (runtime.replyTo) options.replyTo = runtime.replyTo;
+    var draft = createDraftViaGmailApi(runtime.testRecipient, subject, body, options);
+    if (!draft || !draft.id) throw new Error("Gmail API не вернул ID тестового черновика");
+    var sent = Gmail.Users.Drafts.send({ id: draft.id }, "me");
+    return {
+      recipient: runtime.testRecipient,
+      draftId: String(draft.id),
+      messageId: String((sent && sent.id) || ""),
+    };
+  }
+
+  function enableVisualTemplateForProduction() {
+    PropertiesService.getScriptProperties().setProperty(
+      CONFIG.properties.visualTemplateMode,
+      "true"
+    );
+    return { enabled: true };
   }
 
   function requireWorkingDraftConfiguration() {
@@ -1942,12 +2161,14 @@ var TenderOutreach = (function () {
       .createMenu("Тендерная рассылка")
       .addItem("Проверить очередь (без почты)", "previewTenderOutreach")
       .addItem("Создать тестовые черновики", "createTenderTestDrafts")
+      .addItem("Отправить визуальный тест себе", "sendTenderVisualTemplateTest")
       .addSeparator()
       .addItem("Проверить рабочие черновики", "previewTenderWorkingDrafts")
       .addItem("Создать рабочие черновики", "createTenderWorkingDrafts")
       .addItem("Проверить автоматическую подготовку", "previewTenderAutomatedPreparation")
       .addItem("Подготовить автоматическую партию", "prepareTenderAutomatedDrafts")
       .addItem("Обновить подготовленные черновики", "refreshTenderPreparedDrafts")
+      .addItem("Включить визуальный шаблон", "enableTenderVisualTemplate")
       .addSeparator()
       .addItem("Проверить production-партию", "previewTenderProductionBatch")
       .addItem("Отправить подтверждённую партию", "sendTenderProductionBatch")
@@ -1968,6 +2189,8 @@ var TenderOutreach = (function () {
     isBlockedTemplate: isBlockedTemplate,
     renderTemplate: renderTemplate,
     plainTextToHtml: plainTextToHtml,
+    buildResponsiveHtml: buildResponsiveHtml,
+    buildRawDraftMessage: buildRawDraftMessage,
     sanitizeHeader: sanitizeHeader,
     buildEventRow: buildEventRow,
     validateCampaignForTest: validateCampaignForTest,
@@ -1990,6 +2213,8 @@ var TenderOutreach = (function () {
     previewAutomatedPreparation: previewAutomatedPreparation,
     previewProductionQueue: previewProductionQueue,
     createTestDrafts: createTestDrafts,
+    sendVisualTemplateTest: sendVisualTemplateTest,
+    enableVisualTemplateForProduction: enableVisualTemplateForProduction,
     createWorkingDrafts: createWorkingDrafts,
     prepareAutomatedWorkingDrafts: prepareAutomatedWorkingDrafts,
     refreshPreparedWorkingDrafts: refreshPreparedWorkingDrafts,
@@ -2019,6 +2244,14 @@ function previewTenderOutreach() {
 
 function createTenderTestDrafts() {
   return TenderOutreach.createTestDrafts();
+}
+
+function sendTenderVisualTemplateTest() {
+  return TenderOutreach.sendVisualTemplateTest();
+}
+
+function enableTenderVisualTemplate() {
+  return TenderOutreach.enableVisualTemplateForProduction();
 }
 
 function previewTenderWorkingDrafts() {

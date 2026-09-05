@@ -345,6 +345,24 @@ test("HTML version emphasizes company identity and reply call to action", () => 
   );
 });
 
+test("responsive visual HTML contains CID image, mobile layout and working calls to action", () => {
+  const html = outreach.buildResponsiveHtml(
+    "Добрый день!\n\nУважаемые коллеги!\n\n" +
+      "Направьте нам запрос, техническое задание или спецификацию ответным письмом.\n\n" +
+      "Каталог техники: https://simfer.com.ru",
+    {
+      from: "alexey.gurinenko@simfer.com.ru",
+      replyTo: "alexey.gurinenko@simfer.com.ru",
+      heroContentId: "tenderOutreachHero",
+    }
+  );
+  assert.match(html, /cid:tenderOutreachHero/);
+  assert.match(html, /@media screen and \(max-width:600px\)/);
+  assert.match(html, /Направить спецификацию/);
+  assert.match(html, /href="https:\/\/simfer\.com\.ru"/);
+  assert.match(html, /subject=%D0%9D%D0%B5%20%D0%BF%D0%B8%D1%81%D0%B0%D1%82%D1%8C/);
+});
+
 test("mail headers cannot be extended through template values", () => {
   assert.equal(outreach.sanitizeHeader("Тема\r\nBcc: attacker@example.com"), "Тема Bcc: attacker@example.com");
 });
