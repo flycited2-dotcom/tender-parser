@@ -38,6 +38,9 @@ var TenderOutreach = (function () {
       replyTo: "TENDER_OUTREACH_REPLY_TO",
       visualTemplateMode: "TENDER_OUTREACH_VISUAL_TEMPLATE_MODE",
     },
+    // The owner approved the final visual treatment on 05.09.2026. An
+    // explicit script property of "false" remains an immediate rollback.
+    defaultVisualTemplateEnabled: true,
     queue: {
       decisionReady: "ready_for_campaign_review",
       statusQueued: "в очереди",
@@ -199,8 +202,12 @@ var TenderOutreach = (function () {
     return escapeHtml(String(text || ""))
       .replace(/https?:\/\/[^\s<]+/g, function (url) {
         return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" ' +
-          'style="color:#0b5cab;text-decoration:underline">' + url + "</a>";
+          'style="color:#80620f;text-decoration:underline;font-weight:600">' + url + "</a>";
       })
+      // Gmail can recognise a bare 10-digit INN as a telephone number. A
+      // zero-width separator preserves the visible value and stops that
+      // unwanted phone link in the HTML version of the email.
+      .replace(/(ИНН\s+\d{5})(\d{5})/g, "$1&#8203;$2")
       .replace(/ООО «Технолайн Трейд»/g, "<strong>ООО «Технолайн Трейд»</strong>")
       .replace(
         /Направьте нам запрос, техническое задание или спецификацию ответным письмом/g,
@@ -255,17 +262,19 @@ var TenderOutreach = (function () {
       if (!ctaInserted && /^Направьте нам запрос/i.test(value)) {
         content.push(
           '<table role="presentation" cellspacing="0" cellpadding="0" border="0" ' +
-            'class="cta-table" style="margin:23px 0 8px"><tr>' +
-            '<td class="cta-cell" style="padding:0 10px 10px 0">' +
-              '<a href="' + escapeHtml(replyHref) + '" style="display:inline-block;background:#0b5cab;' +
-              'color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;' +
-              'padding:13px 20px;border-radius:7px">Направить спецификацию</a>' +
+            'class="cta-table" align="center" style="margin:25px auto 7px"><tr>' +
+            '<td class="cta-cell" style="padding:0 5px 10px">' +
+              '<a href="' + escapeHtml(replyHref) + '" class="cta-button" style="display:inline-block;' +
+              'width:244px;box-sizing:border-box;background:#d4af37;color:#111522;text-decoration:none;' +
+              'font-size:14px;line-height:20px;font-weight:bold;text-align:center;padding:14px 14px;' +
+              'border-radius:999px;letter-spacing:.1px">Направить спецификацию</a>' +
             "</td>" +
-            '<td class="cta-cell" style="padding:0 0 10px">' +
+            '<td class="cta-cell" style="padding:0 5px 10px">' +
               '<a href="https://simfer.com.ru" target="_blank" rel="noopener noreferrer" ' +
-              'style="display:inline-block;border:1px solid #0b5cab;color:#0b5cab;' +
-              'text-decoration:none;font-size:15px;font-weight:bold;padding:12px 20px;' +
-              'border-radius:7px">Перейти на сайт</a>' +
+              'class="cta-button" style="display:inline-block;width:244px;box-sizing:border-box;' +
+              'background:#3a414b;color:#ffffff;text-decoration:none;font-size:14px;line-height:20px;' +
+              'font-weight:bold;text-align:center;padding:14px 14px;border-radius:999px;letter-spacing:.1px">' +
+              'Перейти на сайт</a>' +
             "</td></tr></table>"
         );
         ctaInserted = true;
@@ -275,23 +284,27 @@ var TenderOutreach = (function () {
     return '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<style>@media screen and (max-width:600px){.email-card{width:100%!important}' +
       '.email-content{padding:22px 18px!important}.cta-cell{display:block!important;' +
-      'width:100%!important;padding:0 0 10px!important}.cta-cell a{display:block!important;' +
-      'text-align:center!important}.hero-wrap{margin-left:-18px!important;margin-right:-18px!important}' +
+      'width:100%!important;padding:0 0 10px!important}.cta-table{width:100%!important}.cta-cell a{' +
+      'display:block!important;width:100%!important;text-align:center!important}.hero-wrap{' +
+      'margin-left:-18px!important;margin-right:-18px!important}' +
       '.hero-wrap img{border-radius:0!important}}</style></head>' +
-      '<body style="margin:0;padding:0;background:#f3f5f7">' +
+      '<body style="margin:0;padding:0;background:#f5f6f8">' +
       '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" ' +
-      'style="background:#f3f5f7"><tr><td align="center" style="padding:18px 8px">' +
+      'style="background:#f5f6f8"><tr><td align="center" style="padding:18px 8px">' +
       '<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" ' +
-      'class="email-card" style="width:600px;max-width:600px;background:#ffffff;border-radius:12px;' +
-      'box-shadow:0 2px 10px rgba(24,39,55,.08);overflow:hidden">' +
-      '<tr><td style="background:#173c5e;padding:18px 28px;color:#ffffff;font-family:Arial,sans-serif;' +
-      'font-size:17px;font-weight:bold;letter-spacing:.35px">ТЕХНОЛАЙН ТРЕЙД</td></tr>' +
+      'class="email-card" style="width:600px;max-width:600px;background:#ffffff;border-radius:18px;' +
+      'box-shadow:0 12px 32px rgba(42,48,58,.09);overflow:hidden">' +
+      '<tr><td style="background:#3a414b;padding:20px 28px 18px;border-bottom:4px solid #d4af37;' +
+      'color:#ffffff;font-family:Arial,sans-serif">' +
+      '<div style="font-size:17px;line-height:21px;font-weight:bold;letter-spacing:.55px">ТЕХНОЛАЙН ТРЕЙД</div>' +
+      '<div style="margin-top:4px;font-size:11px;line-height:15px;color:#d1d5db;letter-spacing:.2px">' +
+      'ПОСТАВКИ ДЛЯ БИЗНЕСА · КОМПЛЕКТАЦИЯ · ГОСЗАКАЗ</div></td></tr>' +
       '<tr><td class="email-content" style="padding:28px;font-family:Arial,sans-serif">' +
       content.join("") +
       '<div style="margin-top:24px;padding-top:15px;border-top:1px solid #e4e9ee;' +
       'font-size:11px;line-height:1.5;color:#7a8794">Если вы больше не хотите получать ' +
       'сообщения от нашей компании, <a href="' + escapeHtml(optOutHref) + '" ' +
-      'style="color:#667788;text-decoration:underline">сообщите нам одним письмом</a> — ' +
+      'style="color:#80620f;text-decoration:underline">сообщите нам одним письмом</a> — ' +
       'адрес будет внесён в стоп-лист.</div>' +
       "</td></tr></table></td></tr></table></body></html>";
   }
@@ -337,9 +350,12 @@ var TenderOutreach = (function () {
   }
 
   function visualTemplateEnabled() {
-    return PropertiesService.getScriptProperties().getProperty(
+    var configured = PropertiesService.getScriptProperties().getProperty(
       CONFIG.properties.visualTemplateMode
-    ) === "true";
+    );
+    if (configured === "true") return true;
+    if (configured === "false") return false;
+    return CONFIG.defaultVisualTemplateEnabled === true;
   }
 
   function buildRawDraftMessage(to, subject, plainBody, options) {
@@ -399,6 +415,10 @@ var TenderOutreach = (function () {
     var prepared = {};
     Object.keys(options || {}).forEach(function (key) { prepared[key] = options[key]; });
     if (prepared.forceVisualTemplate || visualTemplateEnabled()) {
+      // A visual tender email always points replies and opt-outs at the
+      // visible corporate sender, never at the technical Gmail account that
+      // owns the script.
+      prepared.replyTo = normalizeEmail(prepared.from) || prepared.replyTo;
       prepared.inlineImage = loadHeroImage();
       prepared.htmlBody = buildResponsiveHtml(plainBody, {
         from: prepared.from,
@@ -910,6 +930,21 @@ var TenderOutreach = (function () {
       "true"
     );
     return { enabled: true };
+  }
+
+  function activateApprovedVisualTemplate() {
+    var properties = PropertiesService.getScriptProperties();
+    var sender = requireSenderConfiguration(properties);
+    properties.setProperties((function () {
+      var values = {};
+      values[CONFIG.properties.replyTo] = sender.senderAlias;
+      values[CONFIG.properties.visualTemplateMode] = "true";
+      return values;
+    })(), false);
+    return {
+      enabled: true,
+      replyTo: sender.senderAlias,
+    };
   }
 
   function requireWorkingDraftConfiguration() {
@@ -1598,6 +1633,21 @@ var TenderOutreach = (function () {
         SpreadsheetApp.flush();
 
         try {
+          // Refresh the approved draft immediately before sending. This keeps
+          // every queued message aligned with the current approved template,
+          // including drafts prepared before a visual or copy revision.
+          var subject = renderTemplate(context.template.subject, candidate);
+          var body = renderTemplate(context.template.body, candidate);
+          var options = { from: runtime.senderAlias };
+          if (runtime.senderName) options.name = runtime.senderName;
+          if (runtime.replyTo) options.replyTo = runtime.replyTo;
+          updateDraftViaGmailApi(
+            candidate.draftId,
+            candidate.email,
+            subject,
+            body,
+            options
+          );
           var sentMessage = sendDraftViaGmailApi(candidate.draftId);
           var messageId = String((sentMessage && sentMessage.id) || "");
           var threadId = String((sentMessage && sentMessage.threadId) || "");
@@ -1612,7 +1662,7 @@ var TenderOutreach = (function () {
               candidate.draftId,
               messageId,
               threadId,
-              "Отправлено через подтверждённую production-партию",
+              "Черновик обновлён перед отправкой; отправлено через подтверждённую production-партию",
             ]]);
           appendEvent(
             context.eventsSheet,
@@ -2168,7 +2218,7 @@ var TenderOutreach = (function () {
       .addItem("Проверить автоматическую подготовку", "previewTenderAutomatedPreparation")
       .addItem("Подготовить автоматическую партию", "prepareTenderAutomatedDrafts")
       .addItem("Обновить подготовленные черновики", "refreshTenderPreparedDrafts")
-      .addItem("Включить визуальный шаблон", "enableTenderVisualTemplate")
+      .addItem("Активировать утверждённый визуальный шаблон", "activateApprovedTenderVisualTemplate")
       .addSeparator()
       .addItem("Проверить production-партию", "previewTenderProductionBatch")
       .addItem("Отправить подтверждённую партию", "sendTenderProductionBatch")
@@ -2213,8 +2263,9 @@ var TenderOutreach = (function () {
     previewAutomatedPreparation: previewAutomatedPreparation,
     previewProductionQueue: previewProductionQueue,
     createTestDrafts: createTestDrafts,
-    sendVisualTemplateTest: sendVisualTemplateTest,
-    enableVisualTemplateForProduction: enableVisualTemplateForProduction,
+      sendVisualTemplateTest: sendVisualTemplateTest,
+      enableVisualTemplateForProduction: enableVisualTemplateForProduction,
+      activateApprovedVisualTemplate: activateApprovedVisualTemplate,
     createWorkingDrafts: createWorkingDrafts,
     prepareAutomatedWorkingDrafts: prepareAutomatedWorkingDrafts,
     refreshPreparedWorkingDrafts: refreshPreparedWorkingDrafts,
@@ -2252,6 +2303,10 @@ function sendTenderVisualTemplateTest() {
 
 function enableTenderVisualTemplate() {
   return TenderOutreach.enableVisualTemplateForProduction();
+}
+
+function activateApprovedTenderVisualTemplate() {
+  return TenderOutreach.activateApprovedVisualTemplate();
 }
 
 function previewTenderWorkingDrafts() {
