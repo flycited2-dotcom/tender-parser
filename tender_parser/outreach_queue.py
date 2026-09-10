@@ -251,6 +251,7 @@ class OutreachQueueSynchronizer:
             and str(_cell(row, index["Закупка-основание"]) or "").lower().startswith(("http://", "https://"))
             for row in actual
         )
+        sender_errors = sum(status(row) == "ошибка отправителя" for row in actual)
         dashboard_values = [[value] for value in [
             customer_count,
             sum(decision(row) == "needs_contact_review" for row in actual),
@@ -258,8 +259,8 @@ class OutreachQueueSynchronizer:
             stoplist_count,
             sum(decision(row) == "excluded" for row in actual),
             eligible,
-            "АКТИВНА",
-            True,
+            "ПРИОСТАНОВЛЕНА" if sender_errors else "АКТИВНА",
+            not sender_errors,
             sum(str(_cell(row, index["Статус согласия"]) or "").strip().casefold() == "подтверждено" for row in actual),
             0,
         ]]

@@ -28,6 +28,9 @@ class WatchdogReport:
     eligible_waiting: int
     prepared_drafts: int
     send_errors: int
+    delivery_bounces: int
+    opted_out: int
+    mailbox_monitor_age_hours: float | None
     repairs: tuple[str, ...]
     problems: tuple[str, ...]
 
@@ -58,6 +61,9 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
     eligible_waiting = 0
     prepared_drafts = 0
     send_errors = 0
+    delivery_bounces = 0
+    opted_out = 0
+    mailbox_monitor_age: float | None = None
     queue_sync_age: float | None = None
     try:
         session = OutreachQueueSynchronizer(queue_config)._authorized_session()
@@ -69,8 +75,16 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
             session, queue_config.spreadsheet_id, "'События'!A1:J5000",
             queue_config.timeout_seconds,
         )
+        dashboard_values = _get_values(
+            session, queue_config.spreadsheet_id, "'Дашборд'!A1:B30",
+            queue_config.timeout_seconds,
+        )
         queue_sync_age = _latest_event_age_hours(event_values, "queue_sync_completed", current)
         eligible_waiting, prepared_drafts, send_errors = _queue_counters(queue_values)
+        delivery_bounces, opted_out = _delivery_counters(queue_values)
+        mailbox_monitor_age = _dashboard_datetime_age_hours(
+            dashboard_values, "Последняя проверка возвратов", current
+        )
 
         if queue_sync_age is None or queue_sync_age > 8:
             customer_sheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "").strip()
@@ -88,6 +102,8 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
                 problems.append(f"повторная синхронизация очереди не выполнена: {result.detail}")
         if send_errors:
             problems.append(f"в очереди ошибок подготовки/отправки: {send_errors}")
+        if mailbox_monitor_age is None or mailbox_monitor_age > 2:
+            problems.append("контроль возвратов не подтверждал работу более 2 часов")
         if eligible_waiting > 0 and prepared_drafts == 0:
             last_draft_age = _latest_event_age_hours(
                 event_values, "automated_working_draft_created", current
@@ -109,6 +125,9 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
         eligible_waiting=eligible_waiting,
         prepared_drafts=prepared_drafts,
         send_errors=send_errors,
+        delivery_bounces=delivery_bounces,
+        opted_out=opted_out,
+        mailbox_monitor_age_hours=mailbox_monitor_age,
         repairs=tuple(repairs),
         problems=tuple(problems),
     )
@@ -156,9 +175,39 @@ def _queue_counters(values: Sequence[Sequence[object]]) -> tuple[int, int, int]:
             eligible += 1
         if status == "рабочий черновик" and _cell(row, headers, "ID черновика"):
             prepared += 1
-        if status in {"ошибка рабочего черновика", "ошибка отправки"}:
+        if status in {
+            "ошибка рабочего черновика",
+            "ошибка отправки",
+            "ошибка отправителя",
+        }:
             errors += 1
     return eligible, prepared, errors
+
+
+def _delivery_counters(values: Sequence[Sequence[object]]) -> tuple[int, int]:
+    if not values:
+        return 0, 0
+    headers = {str(value or "").strip(): index for index, value in enumerate(values[0])}
+    bounced = opted_out = 0
+    for row in values[1:]:
+        if not _cell(row, headers, "ID кандидата"):
+            continue
+        status = str(_cell(row, headers, "Статус рассылки") or "").strip().casefold()
+        if status in {"не доставлено", "bounced"}:
+            bounced += 1
+        if status == "не писать":
+            opted_out += 1
+    return bounced, opted_out
+
+
+def _dashboard_datetime_age_hours(
+    values: Sequence[Sequence[object]], label: str, now: datetime
+) -> float | None:
+    for row in values[1:]:
+        if not row or str(row[0] or "").strip() != label:
+            continue
+        return _age_hours(_parse_datetime(str(row[1] if len(row) > 1 else ""), now), now)
+    return None
 
 
 def _latest_event_age_hours(
