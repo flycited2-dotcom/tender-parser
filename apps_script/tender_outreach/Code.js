@@ -19,6 +19,7 @@ var TenderOutreach = (function () {
       stoplist: "Стоп-лист",
       events: "События",
       dmarc: "DMARC",
+      dashboard: "Дашборд",
     },
     properties: {
       testMode: "TENDER_OUTREACH_TEST_MODE",
@@ -54,8 +55,9 @@ var TenderOutreach = (function () {
       statusSending: "отправляется",
       statusSent: "отправлено",
       statusSendError: "ошибка отправки",
+      statusSenderError: "ошибка отправителя",
       stageSent: "отправлено",
-      statusBounced: "bounced",
+      statusBounced: "не доставлено",
       stageBounced: "недоставка",
       statusOptedOut: "не писать",
       stageOptedOut: "отписка",
@@ -2007,6 +2009,147 @@ var TenderOutreach = (function () {
     }, {});
   }
 
+  function gmailBounceSearchQuery(lookbackDays) {
+    return "newer_than:" + (Number(lookbackDays) || CONFIG.mailboxLookbackDays) +
+      "d {from:mailer-daemon from:postmaster subject:\"Сообщение не доставлено\" " +
+      "subject:\"Delivery Status Notification\" " +
+      "subject:\"Undelivered Mail Returned to Sender\" subject:\"Mail delivery failed\"}";
+  }
+
+  function extractBounceDiagnostic(text) {
+    var value = String(text || "").replace(/\r/g, "");
+    var diagnostic = value.match(/^Diagnostic-Code:\s*(?:[^;]+;\s*)?(.+)$/im);
+    if (diagnostic && diagnostic[1]) return String(diagnostic[1]).trim().slice(0, 240);
+    var smtp = value.match(/\b(?:4|5)\d\d(?:[ -][^\n]{1,220})?/i);
+    return smtp ? String(smtp[0]).trim().slice(0, 240) : "";
+  }
+
+  function isSenderAliasFailure(text) {
+    return /CustomFromDenied|другого адреса или псевдонима|send(?:ing)?\s+mail\s+as|sender address rejected/i
+      .test(String(text || ""));
+  }
+
+  function ensureQueueStatusValidation(queueSheet, statusColumn) {
+    var allowedStatuses = [
+      "заблокировано",
+      CONFIG.queue.statusQueued,
+      "черновик",
+      "одобрено",
+      CONFIG.queue.statusSending,
+      CONFIG.queue.statusSent,
+      CONFIG.queue.statusSendError,
+      CONFIG.queue.statusSenderError,
+      "bounced",
+      CONFIG.queue.statusBounced,
+      "отменено",
+      CONFIG.queue.statusOptedOut,
+      CONFIG.queue.statusTestDraftCreating,
+      CONFIG.queue.statusTestDraft,
+      CONFIG.queue.statusTestDraftError,
+      "тестовое письмо отправлено",
+      CONFIG.queue.statusWorkingDraftCreating,
+      CONFIG.queue.statusWorkingDraft,
+      CONFIG.queue.statusWorkingDraftError,
+    ];
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(allowedStatuses, true)
+      .setAllowInvalid(false)
+      .build();
+    queueSheet.getRange(2, statusColumn, Math.max(queueSheet.getMaxRows() - 1, 1), 1)
+      .setDataValidation(rule);
+  }
+
+  function ensureQueueStageValidation(queueSheet, stageColumn) {
+    var allowedStages = [
+      "тест",
+      CONFIG.queue.stageWorkingDraft,
+      CONFIG.queue.stageSent,
+      CONFIG.queue.stageBounced,
+      CONFIG.queue.stageOptedOut,
+      "ошибка отправителя",
+      "ответил",
+      "нужен фоллоу-ап",
+      "неактуально",
+      CONFIG.queue.statusOptedOut,
+    ];
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(allowedStages, true)
+      .setAllowInvalid(false)
+      .build();
+    queueSheet.getRange(2, stageColumn, Math.max(queueSheet.getMaxRows() - 1, 1), 1)
+      .setDataValidation(rule);
+  }
+
+  function mailboxStatusCounts(queueSheet, statusColumn) {
+    var result = { bounced: 0, optedOut: 0, senderErrors: 0 };
+    if (queueSheet.getLastRow() < 2) return result;
+    queueSheet.getRange(2, statusColumn, queueSheet.getLastRow() - 1, 1)
+      .getValues()
+      .forEach(function (row) {
+        var status = normalizeLabel(row[0]);
+        if (status === CONFIG.queue.statusBounced || status === "bounced") result.bounced += 1;
+        if (status === CONFIG.queue.statusOptedOut) result.optedOut += 1;
+        if (status === CONFIG.queue.statusSenderError) result.senderErrors += 1;
+      });
+    return result;
+  }
+
+  function upsertDashboardMetric(sheet, label, value) {
+    var lastRow = Math.max(sheet.getLastRow(), 1);
+    var labels = sheet.getRange(1, 1, lastRow, 1).getValues();
+    var rowNumber = 0;
+    for (var index = 0; index < labels.length; index += 1) {
+      if (String(labels[index][0] || "").trim() === label) {
+        rowNumber = index + 1;
+        break;
+      }
+    }
+    if (!rowNumber) {
+      rowNumber = lastRow + 1;
+      if (lastRow >= 2) {
+        sheet.getRange(lastRow, 1, 1, 2).copyTo(
+          sheet.getRange(rowNumber, 1, 1, 2),
+          SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+          false
+        );
+      }
+      sheet.getRange(rowNumber, 1).setValue(label);
+    }
+    sheet.getRange(rowNumber, 2).setValue(value);
+    return rowNumber;
+  }
+
+  function updateMailboxDashboard(context, checkedAt) {
+    var statusColumn = context.queue.index[QUEUE_HEADERS.mailingStatus] + 1;
+    var counts = mailboxStatusCounts(context.queueSheet, statusColumn);
+    var dashboard = requireSheet(context.spreadsheet, CONFIG.sheets.dashboard);
+    var bouncedRow = upsertDashboardMetric(dashboard, "Недоставлено", counts.bounced);
+    var optedOutRow = upsertDashboardMetric(dashboard, "Отписались", counts.optedOut);
+    var senderErrorRow = upsertDashboardMetric(
+      dashboard,
+      "Ошибки отправителя",
+      counts.senderErrors
+    );
+    dashboard.getRange(bouncedRow, 2).setNumberFormat("0");
+    dashboard.getRange(optedOutRow, 2).setNumberFormat("0");
+    dashboard.getRange(senderErrorRow, 2).setNumberFormat("0");
+    var checkedRow = upsertDashboardMetric(
+      dashboard,
+      "Последняя проверка возвратов",
+      checkedAt || new Date()
+    );
+    dashboard.getRange(checkedRow, 2).setNumberFormat("dd.MM.yyyy HH:mm:ss");
+    var schedulerEnabled = PropertiesService.getScriptProperties()
+      .getProperty(CONFIG.properties.schedulerMode) === "true";
+    upsertDashboardMetric(
+      dashboard,
+      "Отправка",
+      schedulerEnabled ? "АКТИВНА" : "ПРИОСТАНОВЛЕНА"
+    );
+    upsertDashboardMetric(dashboard, "approved_for_send", schedulerEnabled);
+    return counts;
+  }
+
   function isOptOutText(text) {
     return /(?:^|\s)(?:не\s+писать|отпис(?:ка|аться|ываюсь)|unsubscribe)(?:\s|$|[.!])/i
       .test(String(text || ""));
@@ -2031,104 +2174,172 @@ var TenderOutreach = (function () {
     return true;
   }
 
-  function processMailboxSignals() {
+  function processMailboxSignals(options) {
+    options = options || {};
     var properties = PropertiesService.getScriptProperties();
     if (properties.getProperty(CONFIG.properties.mailboxMonitorMode) !== "true") {
       return { bounced: 0, optedOut: 0, skipped: "mailbox_monitor_disabled" };
     }
-    var context = loadContext();
-    var processed = processedMessageSet(properties, CONFIG.properties.processedMailboxIds);
-    var lookback = CONFIG.mailboxLookbackDays;
-    var bounceIds = listGmailMessageIds(
-      "newer_than:" + lookback + "d (from:mailer-daemon OR subject:\"Delivery Status Notification\" OR subject:\"Undelivered Mail Returned to Sender\")",
-      100
-    );
-    var optOutIds = listGmailMessageIds(
-      "newer_than:" + lookback + "d -from:me (\"не писать\" OR отписаться OR unsubscribe)",
-      100
-    );
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(5000)) {
+      return { bounced: 0, optedOut: 0, skipped: "mailbox_monitor_lock_busy" };
+    }
+    try {
+      var context = loadContext();
+      var processed = processedMessageSet(properties, CONFIG.properties.processedMailboxIds);
+      var lookback = CONFIG.mailboxLookbackDays;
+      var bounceIds = listGmailMessageIds(gmailBounceSearchQuery(lookback), 100);
+      var optOutIds = listGmailMessageIds(
+        "newer_than:" + lookback + "d -from:me {\"не писать\" отписаться unsubscribe}",
+        100
+      );
     var bounceSet = bounceIds.reduce(function (result, id) {
       result[id] = true;
       return result;
     }, {});
-    var allIds = bounceIds.concat(optOutIds).filter(function (id, index, values) {
-      return values.indexOf(id) === index && !processed[id];
-    });
-    var queueByEmail = {};
-    context.queue.rows.forEach(function (row, rowOffset) {
-      var candidate = candidateFromRow(row, context.queue.index);
-      if (!candidate.email) return;
-      if (!queueByEmail[candidate.email]) queueByEmail[candidate.email] = [];
-      queueByEmail[candidate.email].push({ candidate: candidate, rowOffset: rowOffset });
-    });
-    var stoplistSheet = requireSheet(context.spreadsheet, CONFIG.sheets.stoplist);
-    var bounced = 0;
-    var optedOut = 0;
-    var failures = [];
+      var allIds = bounceIds.concat(optOutIds).filter(function (id, index, values) {
+        return values.indexOf(id) === index && (options.forceReprocess || !processed[id]);
+      });
+      var queueByEmail = {};
+      var queueByThread = {};
+      context.queue.rows.forEach(function (row, rowOffset) {
+        var candidate = candidateFromRow(row, context.queue.index);
+        var match = { candidate: candidate, rowOffset: rowOffset };
+        if (candidate.email) {
+          if (!queueByEmail[candidate.email]) queueByEmail[candidate.email] = [];
+          queueByEmail[candidate.email].push(match);
+        }
+        if (candidate.threadId) queueByThread[candidate.threadId] = match;
+      });
+      var stoplistSheet = requireSheet(context.spreadsheet, CONFIG.sheets.stoplist);
+      var statusColumn = context.queue.index[QUEUE_HEADERS.mailingStatus] + 1;
+      var stageColumn = context.queue.index[QUEUE_HEADERS.stage] + 1;
+      ensureQueueStatusValidation(context.queueSheet, statusColumn);
+      ensureQueueStageValidation(context.queueSheet, stageColumn);
+      var bounced = 0;
+      var optedOut = 0;
+      var failures = [];
+      var unmatchedBounces = 0;
+      var senderAliasFailures = 0;
 
-    allIds.forEach(function (messageId) {
-      try {
-        var message = Gmail.Users.Messages.get("me", messageId, { format: "full" });
-        var payload = message.payload || {};
-        var subject = gmailHeader(payload, "Subject");
-        var from = gmailHeader(payload, "From");
-        var text = gmailMessageText(message);
-        var isBounce = Boolean(bounceSet[messageId]);
-        var addresses = isBounce
-          ? extractEmailsFromText(subject + "\n" + from + "\n" + text)
-          : extractEmailsFromText(from);
-        var isOptOut = !isBounce && isOptOutText(text);
+      allIds.forEach(function (messageId) {
+        try {
+          var message = Gmail.Users.Messages.get("me", messageId, { format: "full" });
+          var payload = message.payload || {};
+          var subject = gmailHeader(payload, "Subject");
+          var from = gmailHeader(payload, "From");
+          var text = gmailMessageText(message);
+          var signalText = subject + "\n" + from + "\n" +
+            String(message.snippet || "") + "\n" + text;
+          var isBounce = Boolean(bounceSet[messageId]);
+          var addresses = isBounce
+            ? extractEmailsFromText(signalText)
+            : extractEmailsFromText(from);
+          var isOptOut = !isBounce && isOptOutText(text);
+          var senderAliasFailure = isBounce && isSenderAliasFailure(signalText);
+          var matched = false;
+          var diagnostic = isBounce ? extractBounceDiagnostic(signalText) : "";
+          var matches = {};
 
-        Object.keys(addresses).forEach(function (email) {
-          (queueByEmail[email] || []).forEach(function (match) {
+          Object.keys(addresses).forEach(function (email) {
+            (queueByEmail[email] || []).forEach(function (match) {
+              matches[String(match.rowOffset)] = match;
+            });
+          });
+          if (isBounce && message.threadId && queueByThread[String(message.threadId)]) {
+            var threadMatch = queueByThread[String(message.threadId)];
+            matches[String(threadMatch.rowOffset)] = threadMatch;
+          }
+
+          Object.keys(matches).forEach(function (key) {
+            var match = matches[key];
             var candidate = match.candidate;
+            if (isBounce && !(candidate.messageId || candidate.sentAt)) return;
+            if (!isBounce && !isOptOut) return;
             var sheetRow = match.rowOffset + 2;
-            var statusColumn = context.queue.index[QUEUE_HEADERS.mailingStatus] + 1;
-            var stageColumn = context.queue.index[QUEUE_HEADERS.stage] + 1;
             var noteColumn = context.queue.index[QUEUE_HEADERS.note] + 1;
             var autoSendColumn = context.queue.index[QUEUE_HEADERS.autoSend] + 1;
-            var newStatus = isBounce
-              ? CONFIG.queue.statusBounced
-              : CONFIG.queue.statusOptedOut;
+            var newStatus = senderAliasFailure
+              ? CONFIG.queue.statusSenderError
+              : (isBounce ? CONFIG.queue.statusBounced : CONFIG.queue.statusOptedOut);
             var newStage = isBounce
               ? CONFIG.queue.stageBounced
               : CONFIG.queue.stageOptedOut;
-            if (!isBounce && !isOptOut) return;
+            if (
+              normalizeLabel(candidate.mailingStatus) === normalizeLabel(newStatus) &&
+              !options.forceReprocess
+            ) {
+              matched = true;
+              return;
+            }
             context.queueSheet.getRange(sheetRow, statusColumn).setValue(newStatus);
             context.queueSheet.getRange(sheetRow, stageColumn).setValue(newStage);
             context.queueSheet.getRange(sheetRow, autoSendColumn).setValue(false);
             context.queueSheet.getRange(sheetRow, noteColumn).setValue(
-              (isBounce ? "Автоматически обнаружена недоставка" : "Получен отказ «не писать»") +
+              (senderAliasFailure
+                ? "Системная недоставка: отклонён настроенный адрес отправителя"
+                : (isBounce ? "Автоматически обнаружена недоставка" : "Получен отказ «не писать»")) +
+              (diagnostic ? ": " + diagnostic : "") +
               "; Gmail message_id=" + messageId
             );
-            stoplistEmail(
-              stoplistSheet,
-              email,
-              isBounce ? "bounced_tender" : "opted_out_tender",
-              candidate.mailingStatus,
-              candidate.stage
-            );
+            if (!senderAliasFailure) {
+              stoplistEmail(
+                stoplistSheet,
+                candidate.email,
+                isBounce ? "bounced_tender" : "opted_out_tender",
+                candidate.mailingStatus,
+                candidate.stage
+              );
+            }
             appendEvent(
               context.eventsSheet,
               candidate.campaignId,
               candidate.candidateId,
               candidate.email,
-              isBounce ? "delivery_bounced" : "recipient_opted_out",
+              senderAliasFailure
+                ? "sender_alias_delivery_failed"
+                : (isBounce ? "delivery_bounced" : "recipient_opted_out"),
               candidate.mailingStatus,
               newStatus,
               "gmail_message_id=" + messageId
             );
-            if (isBounce) bounced += 1;
+            if (senderAliasFailure) senderAliasFailures += 1;
+            else if (isBounce) bounced += 1;
             else optedOut += 1;
+            matched = true;
           });
-        });
-        processed[messageId] = true;
-      } catch (error) {
-        failures.push(messageId + ":" + String(error.message || error));
+          if (senderAliasFailure && !matched) senderAliasFailures += 1;
+          if (isBounce && !matched) unmatchedBounces += 1;
+          processed[messageId] = true;
+        } catch (error) {
+          failures.push(messageId + ":" + String(error.message || error));
+        }
+      });
+      if (senderAliasFailures > 0) {
+        properties.setProperty(CONFIG.properties.schedulerMode, "false");
       }
-    });
-    saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
-    return { bounced: bounced, optedOut: optedOut, failures: failures.slice(0, 5) };
+      saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
+      var totals = updateMailboxDashboard(context, new Date());
+      return {
+        bounced: bounced,
+        optedOut: optedOut,
+        totalBounced: totals.bounced,
+        totalOptedOut: totals.optedOut,
+        totalSenderErrors: totals.senderErrors,
+        senderAliasFailures: senderAliasFailures,
+        schedulerPaused: senderAliasFailures > 0,
+        unmatchedBounces: unmatchedBounces,
+        failures: failures.slice(0, 5),
+      };
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  function runMailboxMonitor() {
+    var result = processMailboxSignals();
+    Logger.log(JSON.stringify(result));
+    return result;
   }
 
   function runNightlyPreparation() {
@@ -2156,6 +2367,7 @@ var TenderOutreach = (function () {
     var handlers = {
       runTenderProductionSchedule: true,
       runTenderNightlyPreparation: true,
+      runTenderMailboxMonitor: true,
     };
     ScriptApp.getProjectTriggers().forEach(function (trigger) {
       if (handlers[trigger.getHandlerFunction()]) ScriptApp.deleteTrigger(trigger);
@@ -2169,6 +2381,10 @@ var TenderOutreach = (function () {
       .atHour(3)
       .nearMinute(15)
       .everyDays(1)
+      .create();
+    ScriptApp.newTrigger("runTenderMailboxMonitor")
+      .timeBased()
+      .everyMinutes(15)
       .create();
     return ScriptApp.getProjectTriggers().filter(function (trigger) {
       return handlers[trigger.getHandlerFunction()];
@@ -2201,7 +2417,24 @@ var TenderOutreach = (function () {
   }
 
   function runProductionSchedule() {
-    var result = sendProductionBatch(true);
+    var mailbox;
+    try {
+      mailbox = processMailboxSignals();
+    } catch (error) {
+      mailbox = { error: String(error.message || error) };
+    }
+    var result = { mailbox: mailbox, sending: sendProductionBatch(true) };
+    Logger.log(JSON.stringify(result));
+    return result;
+  }
+
+  function upgradeMailboxMonitoring() {
+    var properties = PropertiesService.getScriptProperties();
+    properties.setProperty(CONFIG.properties.mailboxMonitorMode, "true");
+    var result = {
+      triggers: installAutomationTriggers(),
+      mailbox: processMailboxSignals({ forceReprocess: true }),
+    };
     Logger.log(JSON.stringify(result));
     return result;
   }
@@ -2256,6 +2489,9 @@ var TenderOutreach = (function () {
     clampProductionBatchLimit: clampProductionBatchLimit,
     isScheduleOpen: isScheduleOpen,
     extractEmailsFromText: extractEmailsFromText,
+    gmailBounceSearchQuery: gmailBounceSearchQuery,
+    extractBounceDiagnostic: extractBounceDiagnostic,
+    isSenderAliasFailure: isSenderAliasFailure,
     isOptOutText: isOptOutText,
     extractDmarcRowsFromXml: extractDmarcRowsFromXml,
     previewQueue: previewQueue,
@@ -2272,11 +2508,13 @@ var TenderOutreach = (function () {
     sendProductionBatch: sendProductionBatch,
     approveAutomationAfterFirstBatchReview: approveAutomationAfterFirstBatchReview,
     processMailboxSignals: processMailboxSignals,
+    runMailboxMonitor: runMailboxMonitor,
     processDmarcReports: processDmarcReports,
     runNightlyPreparation: runNightlyPreparation,
     installAutomationTriggers: installAutomationTriggers,
     initializeAutomationForFirstReview: initializeAutomationForFirstReview,
     runProductionSchedule: runProductionSchedule,
+    upgradeMailboxMonitoring: upgradeMailboxMonitoring,
     onOpen: onOpen,
   };
 })();
@@ -2347,6 +2585,14 @@ function approveTenderAutomationAfterReview() {
 
 function processTenderMailboxSignals() {
   return TenderOutreach.processMailboxSignals();
+}
+
+function runTenderMailboxMonitor() {
+  return TenderOutreach.runMailboxMonitor();
+}
+
+function upgradeTenderMailboxMonitoring() {
+  return TenderOutreach.upgradeMailboxMonitoring();
 }
 
 function processTenderDmarcReports() {

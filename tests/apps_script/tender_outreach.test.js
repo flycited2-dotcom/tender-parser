@@ -381,6 +381,19 @@ test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
   );
   assert.equal(outreach.isOptOutText("Прошу больше не писать."), true);
   assert.equal(outreach.isOptOutText("Спасибо, напишите завтра"), false);
+  assert.match(outreach.gmailBounceSearchQuery(14), /Сообщение не доставлено/);
+  assert.match(outreach.gmailBounceSearchQuery(14), /from:mailer-daemon/);
+  assert.equal(
+    outreach.extractBounceDiagnostic("Diagnostic-Code: smtp; 550 Unknown recipient\n"),
+    "550 Unknown recipient"
+  );
+  assert.equal(
+    outreach.isSenderAliasFailure(
+      "Вы отправляете сообщение с другого адреса или псевдонима. CustomFromDenied"
+    ),
+    true
+  );
+  assert.equal(outreach.isSenderAliasFailure("550 Unknown recipient"), false);
 });
 
 test("audit event row follows the sheet header order", () => {
