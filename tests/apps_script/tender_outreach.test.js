@@ -389,9 +389,15 @@ test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
   );
   assert.equal(
     outreach.isSenderAliasFailure(
-      "Вы отправляете сообщение с другого адреса или псевдонима. CustomFromDenied"
+      "535 Authentication failed. CustomFromDenied"
     ),
     true
+  );
+  assert.equal(
+    outreach.isSenderAliasFailure(
+      "Вы отправляете сообщение с другого адреса или псевдонима. 550 Unknown recipient"
+    ),
+    false
   );
   assert.equal(outreach.isSenderAliasFailure("550 Unknown recipient"), false);
 });

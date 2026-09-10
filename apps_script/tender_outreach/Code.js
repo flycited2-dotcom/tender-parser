@@ -2025,8 +2025,15 @@ var TenderOutreach = (function () {
   }
 
   function isSenderAliasFailure(text) {
-    return /CustomFromDenied|другого адреса или псевдонима|send(?:ing)?\s+mail\s+as|sender address rejected/i
-      .test(String(text || ""));
+    var value = String(text || "");
+    if (
+      /unknown recipient|user unknown|no such (?:user|mailbox)|recipient address rejected|address not found|mailbox unavailable/i
+        .test(value)
+    ) {
+      return false;
+    }
+    return /(?:^|\D)53[045](?:\D|$)|authentication (?:failed|required)|invalid (?:login|credentials)|username and password not accepted|badcredentials|sender address rejected/i
+      .test(value);
   }
 
   function ensureQueueStatusValidation(queueSheet, statusColumn) {
@@ -2439,6 +2446,24 @@ var TenderOutreach = (function () {
     return result;
   }
 
+  function resumeAutomationAfterMailboxCheck() {
+    var result = processMailboxSignals({ forceReprocess: true });
+    if (
+      result.failures.length ||
+      result.unmatchedBounces ||
+      result.totalSenderErrors
+    ) {
+      throw new Error("Автоматика не возобновлена: почтовые ошибки требуют проверки");
+    }
+    var properties = PropertiesService.getScriptProperties();
+    properties.setProperty(CONFIG.properties.schedulerMode, "true");
+    updateMailboxDashboard(loadContext(), new Date());
+    result.schedulerPaused = false;
+    result.schedulerResumed = true;
+    Logger.log(JSON.stringify(result));
+    return result;
+  }
+
   function onOpen() {
     SpreadsheetApp.getUi()
       .createMenu("Тендерная рассылка")
@@ -2515,6 +2540,7 @@ var TenderOutreach = (function () {
     initializeAutomationForFirstReview: initializeAutomationForFirstReview,
     runProductionSchedule: runProductionSchedule,
     upgradeMailboxMonitoring: upgradeMailboxMonitoring,
+    resumeAutomationAfterMailboxCheck: resumeAutomationAfterMailboxCheck,
     onOpen: onOpen,
   };
 })();
@@ -2593,6 +2619,10 @@ function runTenderMailboxMonitor() {
 
 function upgradeTenderMailboxMonitoring() {
   return TenderOutreach.upgradeMailboxMonitoring();
+}
+
+function resumeTenderAutomationAfterMailboxCheck() {
+  return TenderOutreach.resumeAutomationAfterMailboxCheck();
 }
 
 function processTenderDmarcReports() {
