@@ -4,7 +4,9 @@ from pathlib import Path
 import requests
 
 from tender_parser.customer_contacts import (
+    CustomerContact,
     CustomerContactEnricher,
+    _apply_contact,
     find_eis_organization_url,
     parse_eis_contact_page,
 )
@@ -217,3 +219,19 @@ def test_enricher_recovers_obsolete_eis_card_subtype_through_official_search(tmp
     assert rows[0][4] == "9102063951"
     assert any("/extendedsearch/results" in url for url in session.calls)
     assert any("/notice/ea20/" in url for url in session.calls)
+
+
+def test_generated_eis_email_is_refreshed_but_manual_email_is_preserved() -> None:
+    generated: list[object] = ["key", "Org", "", "", "", "", "", "old@example.ru", "", "", "", ORG_URL, "", "01.09.2026", "Нужно проверить", ""]
+    _apply_contact(
+        generated,
+        CustomerContact(email="new@example.ru", source_url=ORG_URL),
+    )
+    assert generated[7] == "new@example.ru"
+
+    manual: list[object] = ["key", "Org", "", "", "", "", "", "manual@example.ru", "", "", "", "Введено вручную", "", "01.09.2026", "Проверен", ""]
+    _apply_contact(
+        manual,
+        CustomerContact(email="source@example.ru", source_url=ORG_URL),
+    )
+    assert manual[7] == "manual@example.ru"

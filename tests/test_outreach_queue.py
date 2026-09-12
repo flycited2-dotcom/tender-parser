@@ -1,6 +1,9 @@
 from tender_parser.outreach_queue import (
     CUSTOMER_HEADERS,
     QUEUE_HEADERS,
+    OutreachQueueConfig,
+    OutreachQueueSynchronizer,
+    QueueSyncPlan,
     build_queue_sync_plan,
 )
 
@@ -71,6 +74,20 @@ def test_sync_never_replaces_or_duplicates_sent_organization() -> None:
     assert plan.appends == []
 
 
+def test_sync_refreshes_changed_email_for_unsent_organization() -> None:
+    existing = empty_queue_row("pending-org")
+    existing[4] = "old@example.ru"
+    plan = build_queue_sync_plan(
+        [CUSTOMER_HEADERS, source_row("pending-org", "new@example.ru")],
+        [QUEUE_HEADERS, existing],
+        stop_emails=set(),
+    )
+
+    assert len(plan.updates) == 1
+    assert plan.updates[0].values[4] == "new@example.ru"
+    assert plan.appends == []
+
+
 def test_sync_respects_global_stoplist_and_internal_email_deduplication() -> None:
     plan = build_queue_sync_plan(
         [
@@ -86,3 +103,38 @@ def test_sync_respects_global_stoplist_and_internal_email_deduplication() -> Non
     assert by_key["blocked"][15:18] == ["suppressed", "global_stoplist", "заблокировано"]
     assert by_key["first"][15] == "needs_contact_review"
     assert by_key["second"][15:17] == ["excluded", "duplicate_email_in_current_registry"]
+
+
+class _Response:
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _Session:
+    def __init__(self) -> None:
+        self.put_urls: list[str] = []
+
+    def put(self, url: str, **_: object) -> _Response:
+        self.put_urls.append(url)
+        return _Response()
+
+
+def test_dashboard_sync_preserves_apps_script_scheduler_cells() -> None:
+    session = _Session()
+    synchronizer = OutreachQueueSynchronizer(
+        OutreachQueueConfig(enabled=True, spreadsheet_id="sheet"),
+        session=session,
+    )
+
+    synchronizer._update_dashboard(
+        session,
+        [QUEUE_HEADERS],
+        QueueSyncPlan(updates=[], appends=[]),
+        customer_count=0,
+        stoplist_count=0,
+    )
+
+    assert len(session.put_urls) == 2
+    assert any("B2%3AB7" in url for url in session.put_urls)
+    assert any("B10%3AB11" in url for url in session.put_urls)
+    assert all("B2%3AB11" not in url for url in session.put_urls)

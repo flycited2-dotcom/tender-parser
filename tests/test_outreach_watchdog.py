@@ -5,6 +5,7 @@ from tender_parser.outreach_watchdog import (
     _delivery_counters,
     _latest_event_age_hours,
     _queue_counters,
+    _recent_delivery_counters,
 )
 from tender_parser.outreach_queue import QUEUE_HEADERS
 
@@ -62,3 +63,20 @@ def test_dashboard_monitor_age_reads_named_metric() -> None:
     assert _dashboard_datetime_age_hours(
         values, "Последняя проверка возвратов", now
     ) == 0.5
+
+
+def test_recent_delivery_counters_measure_three_calendar_day_bounce_rate() -> None:
+    now = datetime(2026, 9, 12, 22, tzinfo=timezone.utc)
+    sent = [""] * len(QUEUE_HEADERS)
+    sent[17] = "отправлено"
+    sent[18] = "11.09.2026"
+    bounced = [""] * len(QUEUE_HEADERS)
+    bounced[17] = "не доставлено"
+    bounced[18] = "10.09.2026"
+    old = [""] * len(QUEUE_HEADERS)
+    old[17] = "не доставлено"
+    old[18] = "09.09.2026"
+
+    assert _recent_delivery_counters(
+        [QUEUE_HEADERS, sent, bounced, old], now
+    ) == (2, 1)

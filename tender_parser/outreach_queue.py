@@ -251,24 +251,34 @@ class OutreachQueueSynchronizer:
             and str(_cell(row, index["Закупка-основание"]) or "").lower().startswith(("http://", "https://"))
             for row in actual
         )
-        sender_errors = sum(status(row) == "ошибка отправителя" for row in actual)
-        dashboard_values = [[value] for value in [
+        dashboard_core_values = [[value] for value in [
             customer_count,
             sum(decision(row) == "needs_contact_review" for row in actual),
             sum(decision(row) == "suppressed" for row in actual),
             stoplist_count,
             sum(decision(row) == "excluded" for row in actual),
             eligible,
-            "ПРИОСТАНОВЛЕНА" if sender_errors else "АКТИВНА",
-            not sender_errors,
+        ]]
+        dashboard_core_range = quote(f"'{DASHBOARD_SHEET}'!B2:B7", safe="")
+        response = session.put(  # type: ignore[attr-defined]
+            f"{SHEETS_API}/{self.config.spreadsheet_id}/values/" + dashboard_core_range,
+            params={"valueInputOption": "RAW"},
+            json={"values": dashboard_core_values},
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
+        # B8:B9 are owned by Apps Script and reflect the real scheduler
+        # property. Queue synchronization must never make a paused sender look
+        # active or re-approve it on the dashboard.
+        dashboard_tail_values = [[value] for value in [
             sum(str(_cell(row, index["Статус согласия"]) or "").strip().casefold() == "подтверждено" for row in actual),
             0,
         ]]
-        dashboard_range = quote(f"'{DASHBOARD_SHEET}'!B2:B11", safe="")
+        dashboard_tail_range = quote(f"'{DASHBOARD_SHEET}'!B10:B11", safe="")
         response = session.put(  # type: ignore[attr-defined]
-            f"{SHEETS_API}/{self.config.spreadsheet_id}/values/" + dashboard_range,
+            f"{SHEETS_API}/{self.config.spreadsheet_id}/values/" + dashboard_tail_range,
             params={"valueInputOption": "RAW"},
-            json={"values": dashboard_values},
+            json={"values": dashboard_tail_values},
             timeout=self.config.timeout_seconds,
         )
         response.raise_for_status()
@@ -322,7 +332,9 @@ def build_queue_sync_plan(
                 _cell(old_row, queue_index[name])
                 for name in ("Дата отправки", "ID черновика", "ID сообщения")
             )
-            if not old_email and source_email and not protected:
+            if source_email and source_email != old_email and not protected:
+                if old_email:
+                    claimed_emails.discard(old_email)
                 values = _queue_row(
                     source_row, source_index, queue_headers, stop_emails,
                     claimed_emails, campaign_id,

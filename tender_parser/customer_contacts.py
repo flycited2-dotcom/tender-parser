@@ -21,7 +21,10 @@ from tender_parser.text import normalize_text
 
 
 EIS_HOSTS = {"zakupki.gov.ru", "www.zakupki.gov.ru"}
-DEFAULT_SUCCESS_TTL_DAYS = 30
+# Public procurement cards often keep working contact data, but mailboxes can
+# be renamed or closed without warning. Refresh successful contacts weekly so
+# a stale cached address cannot feed the outreach queue for a month.
+DEFAULT_SUCCESS_TTL_DAYS = 7
 DEFAULT_RETRY_TTL_HOURS = 24
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tender-Parser/0.3"
 PARSER_VERSION = 3
@@ -441,11 +444,18 @@ def _apply_contact(row: list[object], contact: CustomerContact) -> None:
         contact.source_url,
     ]
     changed = False
+    existing_source = str(row[11] or "").strip()
+    generated_eis_contact = bool(existing_source and _is_eis_url(existing_source))
     for offset, value in enumerate(values, start=4):
-        if value and not str(row[offset] or "").strip():
+        current = str(row[offset] or "").strip()
+        # Preserve explicitly entered/manual values. Fields previously sourced
+        # from EIS are machine-managed and may be refreshed when the official
+        # card changes; this is especially important for closed mailboxes.
+        refreshable = generated_eis_contact and offset in {7, 8, 9, 10, 11}
+        if value and (not current or (refreshable and current != value)):
             row[offset] = value
             changed = True
-    if changed and not str(row[13] or "").strip():
+    if changed and (generated_eis_contact or not str(row[13] or "").strip()):
         row[13] = datetime.now().strftime("%d.%m.%Y")
 
 

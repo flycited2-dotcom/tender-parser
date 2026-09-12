@@ -29,8 +29,12 @@ class WatchdogReport:
     prepared_drafts: int
     send_errors: int
     delivery_bounces: int
+    recent_delivery_attempts: int
+    recent_delivery_bounces: int
+    recent_bounce_rate: float
     opted_out: int
     mailbox_monitor_age_hours: float | None
+    scheduler_status: str
     repairs: tuple[str, ...]
     problems: tuple[str, ...]
 
@@ -62,8 +66,12 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
     prepared_drafts = 0
     send_errors = 0
     delivery_bounces = 0
+    recent_delivery_attempts = 0
+    recent_delivery_bounces = 0
+    recent_bounce_rate = 0.0
     opted_out = 0
     mailbox_monitor_age: float | None = None
+    scheduler_status = "неизвестно"
     queue_sync_age: float | None = None
     try:
         session = OutreachQueueSynchronizer(queue_config)._authorized_session()
@@ -82,9 +90,18 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
         queue_sync_age = _latest_event_age_hours(event_values, "queue_sync_completed", current)
         eligible_waiting, prepared_drafts, send_errors = _queue_counters(queue_values)
         delivery_bounces, opted_out = _delivery_counters(queue_values)
+        recent_delivery_attempts, recent_delivery_bounces = _recent_delivery_counters(
+            queue_values, current
+        )
+        recent_bounce_rate = (
+            recent_delivery_bounces / recent_delivery_attempts
+            if recent_delivery_attempts
+            else 0.0
+        )
         mailbox_monitor_age = _dashboard_datetime_age_hours(
             dashboard_values, "Последняя проверка возвратов", current
         )
+        scheduler_status = _dashboard_value(dashboard_values, "Отправка") or "неизвестно"
 
         if queue_sync_age is None or queue_sync_age > 8:
             customer_sheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "").strip()
@@ -102,6 +119,12 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
                 problems.append(f"повторная синхронизация очереди не выполнена: {result.detail}")
         if send_errors:
             problems.append(f"в очереди ошибок подготовки/отправки: {send_errors}")
+        if recent_delivery_attempts >= 10 and recent_bounce_rate >= 0.15:
+            problems.append(
+                "высокая доля недоставки за последние 3 дня: "
+                f"{recent_delivery_bounces}/{recent_delivery_attempts} "
+                f"({recent_bounce_rate:.1%}); отправка должна оставаться приостановленной"
+            )
         if mailbox_monitor_age is None or mailbox_monitor_age > 2:
             problems.append("контроль возвратов не подтверждал работу более 2 часов")
         if eligible_waiting > 0 and prepared_drafts == 0:
@@ -126,8 +149,12 @@ def run_watchdog(base_dir: Path, *, now: datetime | None = None) -> WatchdogRepo
         prepared_drafts=prepared_drafts,
         send_errors=send_errors,
         delivery_bounces=delivery_bounces,
+        recent_delivery_attempts=recent_delivery_attempts,
+        recent_delivery_bounces=recent_delivery_bounces,
+        recent_bounce_rate=round(recent_bounce_rate, 4),
         opted_out=opted_out,
         mailbox_monitor_age_hours=mailbox_monitor_age,
+        scheduler_status=scheduler_status,
         repairs=tuple(repairs),
         problems=tuple(problems),
     )
@@ -198,6 +225,37 @@ def _delivery_counters(values: Sequence[Sequence[object]]) -> tuple[int, int]:
         if status == "не писать":
             opted_out += 1
     return bounced, opted_out
+
+
+def _recent_delivery_counters(
+    values: Sequence[Sequence[object]],
+    now: datetime,
+    *,
+    calendar_days: int = 3,
+) -> tuple[int, int]:
+    if not values:
+        return 0, 0
+    headers = {str(value or "").strip(): index for index, value in enumerate(values[0])}
+    cutoff = now.date() - timedelta(days=max(calendar_days - 1, 0))
+    attempts = bounces = 0
+    for row in values[1:]:
+        status = str(_cell(row, headers, "Статус рассылки") or "").strip().casefold()
+        if status not in {"отправлено", "не доставлено", "bounced"}:
+            continue
+        sent_at = _parse_datetime(str(_cell(row, headers, "Дата отправки") or ""), now)
+        if sent_at is None or sent_at.date() < cutoff:
+            continue
+        attempts += 1
+        if status in {"не доставлено", "bounced"}:
+            bounces += 1
+    return attempts, bounces
+
+
+def _dashboard_value(values: Sequence[Sequence[object]], label: str) -> str:
+    for row in values[1:]:
+        if row and str(row[0] or "").strip() == label:
+            return str(row[1] if len(row) > 1 else "").strip()
+    return ""
 
 
 def _dashboard_datetime_age_hours(
