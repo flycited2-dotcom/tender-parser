@@ -2384,7 +2384,7 @@ var TenderOutreach = (function () {
           });
           if (senderAliasFailure && !matched) senderAliasFailures += 1;
           if (isBounce && !matched) unmatchedBounces += 1;
-          if (isBounce && !senderAliasFailure && !wasPreviouslyProcessed) {
+          if (isBounce && matched && !senderAliasFailure && !wasPreviouslyProcessed) {
             newHardBounces += 1;
           }
           processed[messageId] = true;
