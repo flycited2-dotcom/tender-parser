@@ -2406,6 +2406,8 @@ var TenderOutreach = (function () {
       }
       saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
       var totals = updateMailboxDashboard(context, new Date());
+      var schedulerPausedNow =
+        properties.getProperty(CONFIG.properties.schedulerMode) !== "true";
       return {
         bounced: bounced,
         optedOut: optedOut,
@@ -2415,7 +2417,7 @@ var TenderOutreach = (function () {
         senderAliasFailures: senderAliasFailures,
         newHardBounces: newHardBounces,
         bounceCircuitOpen: bounceCircuitOpen,
-        schedulerPaused: senderAliasFailures > 0 || bounceCircuitOpen,
+        schedulerPaused: schedulerPausedNow,
         unmatchedBounces: unmatchedBounces,
         failures: failures.slice(0, 5),
       };
