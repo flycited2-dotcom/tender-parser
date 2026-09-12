@@ -38,6 +38,7 @@ var TenderOutreach = (function () {
       senderName: "TENDER_OUTREACH_SENDER_NAME",
       replyTo: "TENDER_OUTREACH_REPLY_TO",
       visualTemplateMode: "TENDER_OUTREACH_VISUAL_TEMPLATE_MODE",
+      schedulerPauseReason: "TENDER_OUTREACH_SCHEDULER_PAUSE_REASON",
     },
     // The owner approved the final visual treatment on 05.09.2026. An
     // explicit script property of "false" remains an immediate rollback.
@@ -79,6 +80,7 @@ var TenderOutreach = (function () {
     defaultProductionBatchLimit: 5,
     maxProcessedMessageIds: 300,
     mailboxLookbackDays: 14,
+    maxNewHardBouncesBeforePause: 3,
   };
 
   var QUEUE_HEADERS = {
@@ -1750,10 +1752,37 @@ var TenderOutreach = (function () {
     return "";
   }
 
+  function normalizeBase64WebSafe(data) {
+    var value = String(data || "").replace(/\s+/g, "");
+    while (value.length % 4) value += "=";
+    return value;
+  }
+
+  function decodeBase64WebSafeBytes(data) {
+    if (data && typeof data.getBytes === "function") return data.getBytes();
+    if (Object.prototype.toString.call(data) === "[object Array]") return data;
+    var value = normalizeBase64WebSafe(data);
+    if (!value) return [];
+    try {
+      return Utilities.base64DecodeWebSafe(value);
+    } catch (error) {
+      try {
+        return Utilities.base64Decode(value.replace(/-/g, "+").replace(/_/g, "/"));
+      } catch (fallbackError) {
+        var invalidCharacters = value.replace(/[A-Za-z0-9_=\-]/g, "").length;
+        throw new Error(
+          "base64_attachment_decode_failed type=" + typeof data +
+          " length=" + value.length +
+          " invalid_characters=" + invalidCharacters
+        );
+      }
+    }
+  }
+
   function decodeGmailText(data) {
     if (!data) return "";
     try {
-      return Utilities.newBlob(Utilities.base64DecodeWebSafe(data))
+      return Utilities.newBlob(decodeBase64WebSafeBytes(data))
         .getDataAsString("UTF-8");
     } catch (error) {
       return "";
@@ -1793,7 +1822,7 @@ var TenderOutreach = (function () {
       }
       if (data && String(data).length <= 8 * 1024 * 1024) {
         result.push(Utilities.newBlob(
-          Utilities.base64DecodeWebSafe(data),
+          decodeBase64WebSafeBytes(data),
           part.mimeType || "application/octet-stream",
           filename
         ));
@@ -1855,8 +1884,8 @@ var TenderOutreach = (function () {
     return child ? String(child.getText() || "").trim() : "";
   }
 
-  function extractDmarcRowsFromXml(xmlText, messageId) {
-    var root = XmlService.parse(String(xmlText || "")).getRootElement();
+  function extractDmarcRowsFromXml(xmlContent, messageId) {
+    var root = XmlService.parse(String(xmlContent || "")).getRootElement();
     if (root.getName() !== "feedback") return [];
     var metadata = xmlChild(root, "report_metadata");
     var policy = xmlChild(root, "policy_published");
@@ -2013,7 +2042,9 @@ var TenderOutreach = (function () {
     return "newer_than:" + (Number(lookbackDays) || CONFIG.mailboxLookbackDays) +
       "d {from:mailer-daemon from:postmaster subject:\"Сообщение не доставлено\" " +
       "subject:\"Delivery Status Notification\" " +
-      "subject:\"Undelivered Mail Returned to Sender\" subject:\"Mail delivery failed\"}";
+      "subject:\"Undelivered Mail Returned to Sender\" subject:\"Mail delivery failed\" " +
+      "\"This message was created automatically by mail delivery software\" " +
+      "\"A message that you sent could not be delivered\"}";
   }
 
   function extractBounceDiagnostic(text) {
@@ -2154,7 +2185,41 @@ var TenderOutreach = (function () {
       schedulerEnabled ? "АКТИВНА" : "ПРИОСТАНОВЛЕНА"
     );
     upsertDashboardMetric(dashboard, "approved_for_send", schedulerEnabled);
+    upsertDashboardMetric(
+      dashboard,
+      "Причина приостановки",
+      schedulerEnabled ? "" : String(
+        PropertiesService.getScriptProperties().getProperty(
+          CONFIG.properties.schedulerPauseReason
+        ) || "Остановлено вручную"
+      )
+    );
     return counts;
+  }
+
+  function pauseAutomationForIncident(reason) {
+    var properties = PropertiesService.getScriptProperties();
+    var pauseReason = String(reason || "Проверка недоставленных писем").trim();
+    properties.setProperty(CONFIG.properties.schedulerMode, "false");
+    properties.setProperty(CONFIG.properties.schedulerPauseReason, pauseReason);
+    var context = loadContext();
+    var totals = updateMailboxDashboard(context, new Date());
+    appendEvent(
+      context.eventsSheet,
+      "tender-intro-v1",
+      "",
+      "",
+      "scheduler_paused_delivery_incident",
+      "активна",
+      "приостановлена",
+      pauseReason
+    );
+    return {
+      schedulerPaused: true,
+      reason: pauseReason,
+      totalBounced: totals.bounced,
+      totalSenderErrors: totals.senderErrors,
+    };
   }
 
   function isOptOutText(text) {
@@ -2228,9 +2293,11 @@ var TenderOutreach = (function () {
       var failures = [];
       var unmatchedBounces = 0;
       var senderAliasFailures = 0;
+      var newHardBounces = 0;
 
       allIds.forEach(function (messageId) {
         try {
+          var wasPreviouslyProcessed = Boolean(processed[messageId]);
           var message = Gmail.Users.Messages.get("me", messageId, { format: "full" });
           var payload = message.payload || {};
           var subject = gmailHeader(payload, "Subject");
@@ -2317,13 +2384,25 @@ var TenderOutreach = (function () {
           });
           if (senderAliasFailure && !matched) senderAliasFailures += 1;
           if (isBounce && !matched) unmatchedBounces += 1;
+          if (isBounce && !senderAliasFailure && !wasPreviouslyProcessed) {
+            newHardBounces += 1;
+          }
           processed[messageId] = true;
         } catch (error) {
           failures.push(messageId + ":" + String(error.message || error));
         }
       });
-      if (senderAliasFailures > 0) {
+      var bounceCircuitOpen =
+        newHardBounces >= CONFIG.maxNewHardBouncesBeforePause;
+      if (senderAliasFailures > 0 || bounceCircuitOpen) {
         properties.setProperty(CONFIG.properties.schedulerMode, "false");
+        properties.setProperty(
+          CONFIG.properties.schedulerPauseReason,
+          senderAliasFailures > 0
+            ? "Системная ошибка адреса отправителя"
+            : "Предохранитель: " + newHardBounces +
+              " новых жёстких возврата за одну проверку"
+        );
       }
       saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
       var totals = updateMailboxDashboard(context, new Date());
@@ -2334,7 +2413,9 @@ var TenderOutreach = (function () {
         totalOptedOut: totals.optedOut,
         totalSenderErrors: totals.senderErrors,
         senderAliasFailures: senderAliasFailures,
-        schedulerPaused: senderAliasFailures > 0,
+        newHardBounces: newHardBounces,
+        bounceCircuitOpen: bounceCircuitOpen,
+        schedulerPaused: senderAliasFailures > 0 || bounceCircuitOpen,
         unmatchedBounces: unmatchedBounces,
         failures: failures.slice(0, 5),
       };
@@ -2457,6 +2538,7 @@ var TenderOutreach = (function () {
     }
     var properties = PropertiesService.getScriptProperties();
     properties.setProperty(CONFIG.properties.schedulerMode, "true");
+    properties.deleteProperty(CONFIG.properties.schedulerPauseReason);
     updateMailboxDashboard(loadContext(), new Date());
     result.schedulerPaused = false;
     result.schedulerResumed = true;
@@ -2484,6 +2566,7 @@ var TenderOutreach = (function () {
       .addSeparator()
       .addItem("Обработать возвраты и отписки", "processTenderMailboxSignals")
       .addItem("Обработать DMARC-отчёты", "processTenderDmarcReports")
+      .addItem("Аварийно приостановить отправку", "pauseTenderAutomationForIncident")
       .addItem("Установить триггеры автоматики", "installTenderAutomationTriggers")
       .addItem("Подготовить запуск до первой проверки", "initializeTenderAutomationForFirstReview")
       .addToUi();
@@ -2517,6 +2600,7 @@ var TenderOutreach = (function () {
     gmailBounceSearchQuery: gmailBounceSearchQuery,
     extractBounceDiagnostic: extractBounceDiagnostic,
     isSenderAliasFailure: isSenderAliasFailure,
+    normalizeBase64WebSafe: normalizeBase64WebSafe,
     isOptOutText: isOptOutText,
     extractDmarcRowsFromXml: extractDmarcRowsFromXml,
     previewQueue: previewQueue,
@@ -2541,6 +2625,7 @@ var TenderOutreach = (function () {
     runProductionSchedule: runProductionSchedule,
     upgradeMailboxMonitoring: upgradeMailboxMonitoring,
     resumeAutomationAfterMailboxCheck: resumeAutomationAfterMailboxCheck,
+    pauseAutomationForIncident: pauseAutomationForIncident,
     onOpen: onOpen,
   };
 })();
@@ -2625,8 +2710,16 @@ function resumeTenderAutomationAfterMailboxCheck() {
   return TenderOutreach.resumeAutomationAfterMailboxCheck();
 }
 
+function pauseTenderAutomationForIncident() {
+  return TenderOutreach.pauseAutomationForIncident(
+    "Аварийная остановка: высокая доля недоставленных писем"
+  );
+}
+
 function processTenderDmarcReports() {
-  return TenderOutreach.processDmarcReports();
+  var result = TenderOutreach.processDmarcReports();
+  Logger.log(JSON.stringify(result));
+  return result;
 }
 
 function runTenderNightlyPreparation() {

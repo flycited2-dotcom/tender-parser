@@ -383,6 +383,10 @@ test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
   assert.equal(outreach.isOptOutText("Спасибо, напишите завтра"), false);
   assert.match(outreach.gmailBounceSearchQuery(14), /Сообщение не доставлено/);
   assert.match(outreach.gmailBounceSearchQuery(14), /from:mailer-daemon/);
+  assert.match(
+    outreach.gmailBounceSearchQuery(14),
+    /This message was created automatically by mail delivery software/
+  );
   assert.equal(
     outreach.extractBounceDiagnostic("Diagnostic-Code: smtp; 550 Unknown recipient\n"),
     "550 Unknown recipient"
@@ -400,6 +404,8 @@ test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
     false
   );
   assert.equal(outreach.isSenderAliasFailure("550 Unknown recipient"), false);
+  assert.equal(outreach.normalizeBase64WebSafe("YWJjZA"), "YWJjZA==");
+  assert.equal(outreach.normalizeBase64WebSafe("YW Jj\nZA=="), "YWJjZA==");
 });
 
 test("audit event row follows the sheet header order", () => {
