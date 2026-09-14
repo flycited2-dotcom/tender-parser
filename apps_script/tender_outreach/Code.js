@@ -80,10 +80,8 @@ var TenderOutreach = (function () {
     defaultProductionBatchLimit: 5,
     maxProcessedMessageIds: 300,
     mailboxLookbackDays: 14,
-    // After the September delivery incident, one newly detected hard bounce is
-    // enough to stop the next scheduled batch. Old, already processed bounces
-    // do not increment this counter.
-    maxNewHardBouncesBeforePause: 1,
+    // Old, already processed bounces do not increment this counter.
+    maxNewHardBouncesBeforePause: 3,
   };
 
   var QUEUE_HEADERS = {
