@@ -80,7 +80,10 @@ var TenderOutreach = (function () {
     defaultProductionBatchLimit: 5,
     maxProcessedMessageIds: 300,
     mailboxLookbackDays: 14,
-    maxNewHardBouncesBeforePause: 3,
+    // After the September delivery incident, one newly detected hard bounce is
+    // enough to stop the next scheduled batch. Old, already processed bounces
+    // do not increment this counter.
+    maxNewHardBouncesBeforePause: 1,
   };
 
   var QUEUE_HEADERS = {
@@ -2533,17 +2536,25 @@ var TenderOutreach = (function () {
     var result = processMailboxSignals({ forceReprocess: true });
     if (
       result.failures.length ||
-      result.unmatchedBounces ||
       result.totalSenderErrors
     ) {
       throw new Error("Автоматика не возобновлена: почтовые ошибки требуют проверки");
     }
     var properties = PropertiesService.getScriptProperties();
+    // Relaunch conservatively. The hard limit is intentionally lower than the
+    // campaign daily limit; the hourly schedule and mailbox monitor remain in
+    // control of the pace.
+    properties.setProperty(
+      CONFIG.properties.productionBatchLimit,
+      String(CONFIG.defaultProductionBatchLimit)
+    );
     properties.setProperty(CONFIG.properties.schedulerMode, "true");
     properties.deleteProperty(CONFIG.properties.schedulerPauseReason);
     updateMailboxDashboard(loadContext(), new Date());
     result.schedulerPaused = false;
     result.schedulerResumed = true;
+    result.batchLimit = CONFIG.defaultProductionBatchLimit;
+    result.hardBouncePauseThreshold = CONFIG.maxNewHardBouncesBeforePause;
     Logger.log(JSON.stringify(result));
     return result;
   }

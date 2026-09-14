@@ -310,6 +310,7 @@ test("production batch and schedule have conservative hard limits", () => {
   assert.equal(outreach.clampProductionBatchLimit("50"), 10);
   assert.equal(outreach.clampProductionBatchLimit("0"), 5);
   assert.equal(outreach.CONFIG.maxHardSendsPerDay, 50);
+  assert.equal(outreach.CONFIG.maxNewHardBouncesBeforePause, 1);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 1, 10 * 60), true);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 5, 17 * 60), true);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 6, 12 * 60), false);
