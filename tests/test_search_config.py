@@ -10,6 +10,7 @@ from tender_parser.search_config import (
     DEFAULT_SEARCH_PROFILE,
     SearchProfile,
     apply_search_profile,
+    load_and_apply_search_config,
     load_search_profile,
 )
 
@@ -84,3 +85,22 @@ def test_cli_loads_workbook_from_project_config_folder(tmp_path: Path, capsys) -
 
     assert result == 0
     assert "Словарь Excel: загружен" in output
+
+
+def test_runtime_profile_preserves_required_product_coverage(tmp_path: Path) -> None:
+    workbook = tmp_path / "Настройки_поиска.xlsx"
+    copyfile(WORKBOOK_PATH, workbook)
+    try:
+        status = load_and_apply_search_config(workbook)
+
+        assert status.status == "loaded"
+        assert "кровать" in config.CATEGORY_KEYWORDS[
+            "Офисная, архивная и складская мебель"
+        ]
+        assert "солнечная панель" in config.CATEGORY_KEYWORDS[
+            "Резервное электропитание и ИБП"
+        ]
+        assert "медицинский холодильник" in config.SEARCH_QUERY_TERMS
+    finally:
+        apply_search_profile(DEFAULT_SEARCH_PROFILE)
+        config.ensure_required_coverage()

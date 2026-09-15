@@ -557,7 +557,7 @@ def test_evaluate_tender_stops_laboratory_in_genitive() -> None:
     assert result.filter_status == "excluded"
 
 
-def test_evaluate_tender_stops_laboratory_adjectives() -> None:
+def test_evaluate_tender_keeps_laboratory_furniture_for_review() -> None:
     result = evaluate_tender(
         TenderRecord(
             title="Мебель специализированная лабораторная",
@@ -571,8 +571,62 @@ def test_evaluate_tender_stops_laboratory_adjectives() -> None:
         now=datetime(2026, 5, 19),
     )
 
+    assert result.filter_status == "review"
+    assert result.category == "Офисная, архивная и складская мебель"
+    assert "контекстная стоп-тема" in result.exclude_reason
+
+
+def test_evaluate_tender_keeps_medical_refrigerator_for_review() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка медицинских холодильников для хранения препаратов",
+            raw_text="Медицинский холодильник, Республика Крым",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "review"
+    assert result.category == "Бытовая техника"
+
+
+def test_evaluate_tender_keeps_diesel_generator_for_review() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка дизельной генераторной установки с АВР",
+            raw_text="ДГУ резервного электропитания, Севастополь",
+        ),
+        now=NOW,
+    )
+
+    assert result.filter_status == "review"
+    assert result.category == "Резервное электропитание и ИБП"
+
+
+def test_evaluate_tender_still_excludes_diesel_fuel_for_generator() -> None:
+    result = evaluate_tender(
+        make_tender(
+            title="Поставка дизельного топлива для генератора",
+            raw_text="Дизельное топливо, Республика Крым",
+        ),
+        now=NOW,
+    )
+
     assert result.filter_status == "excluded"
-    assert "лабораторн" in result.exclude_reason
+    assert "топливо" in result.exclude_reason
+
+
+def test_evaluate_tender_matches_new_product_contours() -> None:
+    cases = [
+        ("Поставка металлических кроватей", "Офисная, архивная и складская мебель"),
+        ("Поставка жидкого мыла", "Хозяйственные товары и уборка"),
+        ("Поставка солнечных панелей", "Резервное электропитание и ИБП"),
+        ("Поставка дизельных тепловых пушек", "Климатическая техника"),
+    ]
+
+    for title, category in cases:
+        result = evaluate_tender(make_tender(title=title, raw_text=title), now=NOW)
+        assert result.filter_status in {"matched", "review"}
+        assert result.category == category
 
 
 def test_evaluate_tender_stops_neurosurgery_consumables_matching_wire() -> None:

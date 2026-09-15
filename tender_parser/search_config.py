@@ -107,19 +107,22 @@ def apply_search_profile(profile: SearchProfile) -> None:
 def load_and_apply_search_config(path: Path) -> SearchConfigStatus:
     if not path.exists():
         apply_search_profile(DEFAULT_SEARCH_PROFILE)
+        config.ensure_required_coverage()
         return SearchConfigStatus(status="missing", path=path, detail="используется встроенный словарь")
     try:
         profile = load_search_profile(path)
     except SearchConfigError as exc:
         apply_search_profile(DEFAULT_SEARCH_PROFILE)
+        config.ensure_required_coverage()
         return SearchConfigStatus(status="error", path=path, detail=str(exc))
     apply_search_profile(profile)
+    config.ensure_required_coverage()
     return SearchConfigStatus(
         status="loaded",
         path=path,
         detail=(
-            f"категорий {len(profile.category_keywords)}, запросов {len(profile.search_terms)}, "
-            f"исключений {len(profile.stop_terms)}, регионов {len(profile.regions)}"
+            f"категорий {len(config.CATEGORY_KEYWORDS)}, запросов {len(config.SEARCH_QUERY_TERMS)}, "
+            f"исключений {len(config.STOP_TERMS)}, регионов {len(config.SEARCH_REGION_TERMS)}"
         ),
     )
 

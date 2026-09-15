@@ -19,6 +19,54 @@ STOP_TERM_VARIANTS = {
     "лекарственные препараты": ["лекарственных препаратов"],
 }
 
+MEDICAL_CONTEXT_TARGET_TERMS = [
+    "медицинский холодильник",
+    "фармацевтический холодильник",
+    "лабораторный холодильник",
+    "холодильное оборудование",
+    "холодильный шкаф",
+    "морозильная камера",
+    "морозильник",
+    "холодильник",
+    "медицинская мебель",
+    "лабораторная мебель",
+    "мебель",
+    "кровать",
+    "шкаф",
+    "стеллаж",
+    "сейф",
+    "полка",
+    "кондиционер",
+    "сплит-система",
+    "система кондиционирования",
+    "климатическое оборудование",
+]
+
+DIESEL_CONTEXT_TARGET_TERMS = [
+    "дизельная генераторная установка",
+    "дизельный генератор",
+    "дизель-генератор",
+    "генераторная установка",
+    "электрогенератор",
+    "генератор",
+    "дизельная тепловая пушка",
+    "тепловая пушка",
+    "тепловая пуш",
+    "тепловые пушки",
+    "тепловых пушек",
+    "дизельный теплогенератор",
+    "теплогенератор",
+]
+
+CONSTRUCTION_HVAC_TARGET_TERMS = [
+    "кондиционер",
+    "сплит-система",
+    "система кондиционирования",
+    "климатическое оборудование",
+    "вентиляционное оборудование",
+    "система вентиляции",
+]
+
 
 def _first_matching_term(text: str, terms: list[str]) -> str | None:
     for term in terms:
@@ -33,6 +81,25 @@ def _first_matching_term(text: str, terms: list[str]) -> str | None:
         for variant in STOP_TERM_VARIANTS.get(normalized, []):
             if normalize_text(variant) in text:
                 return normalized
+    return None
+
+
+def _contextual_stop_target(title: str, stop_term: str) -> str | None:
+    """Return a target product that makes a broad stop word reviewable.
+
+    Evidence is deliberately limited to the procurement title: navigation,
+    customer names and incidental specification text must not override a stop.
+    """
+
+    normalized_stop = normalize_text(stop_term)
+    if normalized_stop.startswith(("медицин", "лаборатор")):
+        return _first_matching_term(title, MEDICAL_CONTEXT_TARGET_TERMS)
+    if normalized_stop == "дизель":
+        return _first_matching_term(title, DIESEL_CONTEXT_TARGET_TERMS)
+    if normalized_stop.startswith(
+        ("капитальн", "строитель", "строительно-монтаж", "ремонт здания")
+    ):
+        return _first_matching_term(title, CONSTRUCTION_HVAC_TARGET_TERMS)
     return None
 
 
@@ -217,6 +284,7 @@ def target_region(tender: TenderRecord) -> str | None:
 def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> TenderRecord:
     current = now or datetime.now()
     subject = _subject_searchable(tender)
+    title = normalize_text(tender.title)
 
     medical_ventilation = _first_matching_term(
         subject, config.MEDICAL_VENTILATION_FALSE_POSITIVES
@@ -225,14 +293,17 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
         return _exclude(tender, f"медицинская вентиляция: {medical_ventilation}")
 
     stop_term = _first_matching_term(subject, config.STOP_TERMS)
+    contextual_target = None
     if stop_term:
-        return _exclude(tender, f"стоп-тема: {stop_term}")
+        contextual_target = _contextual_stop_target(title, stop_term)
+        if not contextual_target:
+            return _exclude(tender, f"стоп-тема: {stop_term}")
 
     if tender.deadline is not None and tender.deadline <= current:
         return _exclude(tender, "срок подачи истек")
 
     category, terms = matching_category(
-        subject, title_text=normalize_text(tender.title)
+        subject, title_text=title
     )
     if not category:
         return _exclude(tender, "категория интереса не найдена")
@@ -245,6 +316,10 @@ def evaluate_tender(tender: TenderRecord, now: datetime | None = None) -> Tender
         return _exclude(tender, f"сумма меньше {config.MIN_PRICE_RUB}")
 
     missing: list[str] = []
+    if contextual_target:
+        missing.append(
+            f"контекстная стоп-тема «{stop_term}», подтвержден целевой товар «{contextual_target}»"
+        )
     if tender.deadline is None:
         missing.append("срок подачи не указан")
     if not region:

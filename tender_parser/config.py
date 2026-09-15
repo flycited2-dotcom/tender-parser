@@ -265,6 +265,63 @@ CATEGORY_KEYWORDS = {
     ],
 }
 
+# Минимальный коммерческий охват, который должен сохраняться даже если
+# пользовательский Excel-словарь или расширенный JSON ещё не были обновлены.
+# Эти группы отражают фактически доступный ассортимент поставщиков.
+REQUIRED_CATEGORY_KEYWORDS = {
+    "Резервное электропитание и ИБП": [
+        "генератор",
+        "дизельный генератор",
+        "дизель-генератор",
+        "дизельная генераторная установка",
+        "электрогенератор",
+        "солнечная панель",
+        "солнечная батарея",
+        "фотоэлектрический модуль",
+        "фотовольтаический модуль",
+        "солнечная электростанция",
+    ],
+    "Климатическая техника": [
+        "дизельная тепловая пушка",
+        "дизельный теплогенератор",
+        "тепловая пуш",
+        "тепловые пушки",
+        "тепловых пушек",
+    ],
+    "Бытовая техника": [
+        "медицинский холодильник",
+        "фармацевтический холодильник",
+        "лабораторный холодильник",
+    ],
+    "Хозяйственные товары и уборка": ["жидкое мыло", "мыл"],
+    "Офисная, архивная и складская мебель": [
+        "мебель",
+        "медицинская мебель",
+        "лабораторная мебель",
+        "кровать",
+        "медицинская кровать",
+        "металлическая кровать",
+        "медицинский шкаф",
+        "лабораторный шкаф",
+        "медицинский стеллаж",
+        "лабораторный стеллаж",
+        "металлическая полка",
+    ],
+}
+
+REQUIRED_SEARCH_QUERY_TERMS = [
+    "мебель",
+    "кровать",
+    "медицинский холодильник",
+    "медицинская мебель",
+    "генератор",
+    "дизельный генератор",
+    "тепловая пушка",
+    "солнечная панель",
+    "фотоэлектрический модуль",
+    "жидкое мыло",
+]
+
 BROAD_SEARCH_TERMS = [
     "оргтехника",
     "офисная техника",
@@ -552,3 +609,40 @@ def _load_expanded_dictionary() -> None:
 
 
 _load_expanded_dictionary()
+
+
+def ensure_required_coverage() -> None:
+    """Merge required product contours into any editable runtime profile."""
+
+    for category, required_terms in REQUIRED_CATEGORY_KEYWORDS.items():
+        configured_terms = CATEGORY_KEYWORDS.setdefault(category, [])
+        known = {str(term).strip().lower() for term in configured_terms}
+        for term in required_terms:
+            if term.lower() not in known:
+                configured_terms.append(term)
+                known.add(term.lower())
+
+    known_queries = {str(term).strip().lower() for term in SEARCH_QUERY_TERMS}
+    for term in REQUIRED_SEARCH_QUERY_TERMS:
+        if term.lower() not in known_queries:
+            SEARCH_QUERY_TERMS.append(term)
+            known_queries.add(term.lower())
+
+    REGIONAL_SEARCH_QUERIES[:] = [
+        f"{term} {region}"
+        for term in SEARCH_QUERY_TERMS
+        for region in SEARCH_REGION_TERMS
+    ]
+    B2B_SEARCH_QUERIES[:] = [*CUSTOMER_DISCOVERY_REGION_QUERIES, *SEARCH_QUERY_TERMS]
+    ROSTENDER_SEARCH_QUERIES[:] = [
+        *CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *REGIONAL_SEARCH_QUERIES,
+    ]
+    ETP_GPB_SEARCH_QUERIES[:] = [
+        *CUSTOMER_DISCOVERY_REGION_QUERIES,
+        *REGIONAL_SEARCH_QUERIES,
+    ]
+    EIS_SEARCH_QUERIES[:] = REGIONAL_SEARCH_QUERIES
+
+
+ensure_required_coverage()
