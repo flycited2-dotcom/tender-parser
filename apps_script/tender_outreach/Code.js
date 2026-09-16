@@ -452,6 +452,27 @@ var TenderOutreach = (function () {
     );
   }
 
+  function isStaleDraftError(error) {
+    return /message not a draft|draft not found|requested entity was not found/i
+      .test(String((error && error.message) || error || ""));
+  }
+
+  function refreshOrRecreateDraft(draftId, to, subject, plainBody, options) {
+    try {
+      return {
+        draft: updateDraftViaGmailApi(draftId, to, subject, plainBody, options),
+        recreated: false,
+      };
+    } catch (error) {
+      if (!isStaleDraftError(error)) throw error;
+      var replacement = createDraftViaGmailApi(to, subject, plainBody, options);
+      if (!replacement || !replacement.id) {
+        throw new Error("Gmail API не вернул ID заново созданного черновика");
+      }
+      return { draft: replacement, recreated: true };
+    }
+  }
+
   function hashEmail(email) {
     var normalized = normalizeEmail(email);
     if (!normalized) return "";
@@ -556,6 +577,7 @@ var TenderOutreach = (function () {
       draftId: String(row[index[QUEUE_HEADERS.draftId]] || "").trim(),
       messageId: String(row[index[QUEUE_HEADERS.messageId]] || "").trim(),
       threadId: String(row[index[QUEUE_HEADERS.threadId]] || "").trim(),
+      note: String(row[index[QUEUE_HEADERS.note]] || "").trim(),
       approved: asBoolean(row[index[QUEUE_HEADERS.approved]]),
       autoSend: asBoolean(row[index[QUEUE_HEADERS.autoSend]]),
       contactBasis: normalizeLabel(row[index[QUEUE_HEADERS.contactBasis]]),
@@ -1596,6 +1618,51 @@ var TenderOutreach = (function () {
         throw new Error("Столбцы результата отправки имеют неожиданное расположение");
       }
 
+      // A draft can disappear from Gmail while its ID remains in the queue
+      // (for example after a manual cleanup). Return only those safe, unsent
+      // rows to the working-draft state; the send loop below will recreate the
+      // missing Gmail draft immediately before sending.
+      context.queue.rows.forEach(function (row, rowOffset) {
+        var failedCandidate = candidateFromRow(row, context.queue.index);
+        if (
+          normalizeLabel(failedCandidate.mailingStatus) !== CONFIG.queue.statusSendError ||
+          normalizeLabel(failedCandidate.stage) !== CONFIG.queue.stageWorkingDraft ||
+          failedCandidate.messageId || failedCandidate.sentAt ||
+          !isStaleDraftError(failedCandidate.note)
+        ) return;
+        var retryCandidate = Object.assign({}, failedCandidate, {
+          mailingStatus: CONFIG.queue.statusWorkingDraft,
+        });
+        var retryReason = productionSendEligibility(
+          retryCandidate,
+          context.campaigns[retryCandidate.campaignId],
+          context.stopEmails,
+          context.template
+        );
+        if (retryReason) return;
+        var retryRow = rowOffset + 2;
+        context.queueSheet.getRange(retryRow, statusColumn).setValue(
+          CONFIG.queue.statusWorkingDraft
+        );
+        context.queueSheet.getRange(retryRow, noteColumn).setValue(
+          "Повторная постановка: Gmail-черновик отсутствовал; будет создан заново перед отправкой"
+        );
+        row[context.queue.index[QUEUE_HEADERS.mailingStatus]] =
+          CONFIG.queue.statusWorkingDraft;
+        row[context.queue.index[QUEUE_HEADERS.note]] =
+          "Повторная постановка: Gmail-черновик отсутствовал; будет создан заново перед отправкой";
+        appendEvent(
+          context.eventsSheet,
+          retryCandidate.campaignId,
+          retryCandidate.candidateId,
+          retryCandidate.email,
+          "stale_draft_retry_queued",
+          CONFIG.queue.statusSendError,
+          CONFIG.queue.statusWorkingDraft,
+          "old_draft_id=" + retryCandidate.draftId
+        );
+      });
+
       for (var rowOffset = 0; rowOffset < context.queue.rows.length; rowOffset += 1) {
         if (sentCandidateIds.length >= runtime.batchLimit) break;
 
@@ -1646,14 +1713,21 @@ var TenderOutreach = (function () {
           var options = { from: runtime.senderAlias };
           if (runtime.senderName) options.name = runtime.senderName;
           if (runtime.replyTo) options.replyTo = runtime.replyTo;
-          updateDraftViaGmailApi(
+          var preparedDraft = refreshOrRecreateDraft(
             candidate.draftId,
             candidate.email,
             subject,
             body,
             options
           );
-          var sentMessage = sendDraftViaGmailApi(candidate.draftId);
+          var activeDraftId = String(
+            (preparedDraft.draft && preparedDraft.draft.id) || candidate.draftId || ""
+          );
+          if (!activeDraftId) throw new Error("Gmail API не вернул ID рабочего черновика");
+          if (preparedDraft.recreated) {
+            context.queueSheet.getRange(sheetRow, draftColumn).setValue(activeDraftId);
+          }
+          var sentMessage = sendDraftViaGmailApi(activeDraftId);
           var messageId = String((sentMessage && sentMessage.id) || "");
           var threadId = String((sentMessage && sentMessage.threadId) || "");
           if (!messageId) throw new Error("Gmail API не вернул ID отправленного сообщения");
@@ -1664,10 +1738,13 @@ var TenderOutreach = (function () {
               CONFIG.queue.statusSent,
               now,
               CONFIG.queue.stageSent,
-              candidate.draftId,
+              activeDraftId,
               messageId,
               threadId,
-              "Черновик обновлён перед отправкой; отправлено через подтверждённую production-партию",
+              (preparedDraft.recreated
+                ? "Утраченный Gmail-черновик создан заново; "
+                : "Черновик обновлён перед отправкой; ") +
+              "отправлено через подтверждённую production-партию",
             ]]);
           appendEvent(
             context.eventsSheet,
@@ -1677,7 +1754,8 @@ var TenderOutreach = (function () {
             "production_email_sent",
             oldStatus,
             CONFIG.queue.statusSent,
-            "message_id=" + messageId + ";thread_id=" + threadId
+              "message_id=" + messageId + ";thread_id=" + threadId +
+              ";draft_recreated=" + preparedDraft.recreated
           );
           sentCandidateIds.push(candidate.candidateId);
           sentThisRun[candidate.campaignId] = campaignSentThisRun + 1;
@@ -2608,6 +2686,7 @@ var TenderOutreach = (function () {
     clampProductionBatchLimit: clampProductionBatchLimit,
     isScheduleOpen: isScheduleOpen,
     extractEmailsFromText: extractEmailsFromText,
+    isStaleDraftError: isStaleDraftError,
     gmailBounceSearchQuery: gmailBounceSearchQuery,
     extractBounceDiagnostic: extractBounceDiagnostic,
     isSenderAliasFailure: isSenderAliasFailure,

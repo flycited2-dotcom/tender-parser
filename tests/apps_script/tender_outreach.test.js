@@ -409,6 +409,13 @@ test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
   assert.equal(outreach.normalizeBase64WebSafe("YW Jj\nZA=="), "YWJjZA==");
 });
 
+test("stale Gmail drafts are recognized for safe recreation", () => {
+  assert.equal(outreach.isStaleDraftError(new Error("Message not a draft")), true);
+  assert.equal(outreach.isStaleDraftError("Draft not found"), true);
+  assert.equal(outreach.isStaleDraftError("Requested entity was not found"), true);
+  assert.equal(outreach.isStaleDraftError("Daily sending quota exceeded"), false);
+});
+
 test("audit event row follows the sheet header order", () => {
   const timestamp = new Date("2026-08-24T20:29:28Z");
   assert.deepEqual(
