@@ -405,6 +405,12 @@ test("mailbox signal helpers recognize bounces and explicit opt-outs", () => {
     false
   );
   assert.equal(outreach.isSenderAliasFailure("550 Unknown recipient"), false);
+  assert.equal(
+    outreach.isSenderAliasFailure(
+      "553 5.7.1 <alexey.gurinenko@simfer.com.ru>: Sender address rejected: not logged in"
+    ),
+    false
+  );
   assert.equal(outreach.normalizeBase64WebSafe("YWJjZA"), "YWJjZA==");
   assert.equal(outreach.normalizeBase64WebSafe("YW Jj\nZA=="), "YWJjZA==");
 });

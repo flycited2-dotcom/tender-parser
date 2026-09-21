@@ -82,6 +82,10 @@ var TenderOutreach = (function () {
     mailboxLookbackDays: 14,
     // Old, already processed bounces do not increment this counter.
     maxNewHardBouncesBeforePause: 3,
+    // A single remote server can reject the envelope sender even when the
+    // configured Gmail alias is healthy. Require three confirmed sender-side
+    // failures before stopping the whole campaign.
+    maxSenderAliasFailuresBeforePause: 3,
   };
 
   var QUEUE_HEADERS = {
@@ -2142,8 +2146,67 @@ var TenderOutreach = (function () {
     ) {
       return false;
     }
-    return /(?:^|\D)53[045](?:\D|$)|authentication (?:failed|required)|invalid (?:login|credentials)|username and password not accepted|badcredentials|sender address rejected/i
+    // Some recipient SMTP gateways generate this after Gmail has already
+    // accepted and sent the message. It is not proof that the configured
+    // Gmail "Send mail as" alias is broken.
+    if (/sender address rejected:\s*not logged in/i.test(value)) return false;
+    return /authentication (?:failed|required)|invalid (?:login|credentials)|username and password not accepted|badcredentials/i
       .test(value);
+  }
+
+  function reclassifyLegacyRemoteSenderRejections(context) {
+    var statusColumn = context.queue.index[QUEUE_HEADERS.mailingStatus] + 1;
+    var stageColumn = context.queue.index[QUEUE_HEADERS.stage] + 1;
+    var autoSendColumn = context.queue.index[QUEUE_HEADERS.autoSend] + 1;
+    var noteColumn = context.queue.index[QUEUE_HEADERS.note] + 1;
+    var stoplistSheet = requireSheet(context.spreadsheet, CONFIG.sheets.stoplist);
+    var reclassified = 0;
+
+    context.queue.rows.forEach(function (row, rowOffset) {
+      var candidate = candidateFromRow(row, context.queue.index);
+      if (
+        normalizeLabel(candidate.mailingStatus) !== CONFIG.queue.statusSenderError ||
+        !/sender address rejected:\s*not logged in/i.test(candidate.note)
+      ) return;
+
+      var sheetRow = rowOffset + 2;
+      var note = String(candidate.note || "")
+        .replace(
+          /^Системная недоставка:\s*отклонён настроенный адрес отправителя/i,
+          "Недоставка: сервер получателя отклонил адрес отправителя"
+        );
+      context.queueSheet.getRange(sheetRow, statusColumn).setValue(
+        CONFIG.queue.statusBounced
+      );
+      context.queueSheet.getRange(sheetRow, stageColumn).setValue(
+        CONFIG.queue.stageBounced
+      );
+      context.queueSheet.getRange(sheetRow, autoSendColumn).setValue(false);
+      context.queueSheet.getRange(sheetRow, noteColumn).setValue(note);
+      row[context.queue.index[QUEUE_HEADERS.mailingStatus]] = CONFIG.queue.statusBounced;
+      row[context.queue.index[QUEUE_HEADERS.stage]] = CONFIG.queue.stageBounced;
+      row[context.queue.index[QUEUE_HEADERS.autoSend]] = false;
+      row[context.queue.index[QUEUE_HEADERS.note]] = note;
+      stoplistEmail(
+        stoplistSheet,
+        candidate.email,
+        "remote_sender_rejected_tender",
+        candidate.mailingStatus,
+        candidate.stage
+      );
+      appendEvent(
+        context.eventsSheet,
+        candidate.campaignId,
+        candidate.candidateId,
+        candidate.email,
+        "sender_rejection_reclassified",
+        CONFIG.queue.statusSenderError,
+        CONFIG.queue.statusBounced,
+        "recipient_gateway_rejection"
+      );
+      reclassified += 1;
+    });
+    return reclassified;
   }
 
   function ensureQueueStatusValidation(queueSheet, statusColumn) {
@@ -2337,6 +2400,8 @@ var TenderOutreach = (function () {
     }
     try {
       var context = loadContext();
+      var reclassifiedSenderRejections =
+        reclassifyLegacyRemoteSenderRejections(context);
       var processed = processedMessageSet(properties, CONFIG.properties.processedMailboxIds);
       var lookback = CONFIG.mailboxLookbackDays;
       var bounceIds = listGmailMessageIds(gmailBounceSearchQuery(lookback), 100);
@@ -2473,15 +2538,31 @@ var TenderOutreach = (function () {
       });
       var bounceCircuitOpen =
         newHardBounces >= CONFIG.maxNewHardBouncesBeforePause;
-      if (senderAliasFailures > 0 || bounceCircuitOpen) {
+      var currentCounts = mailboxStatusCounts(context.queueSheet, statusColumn);
+      var senderCircuitOpen =
+        currentCounts.senderErrors >= CONFIG.maxSenderAliasFailuresBeforePause;
+      if (senderCircuitOpen || bounceCircuitOpen) {
         properties.setProperty(CONFIG.properties.schedulerMode, "false");
         properties.setProperty(
           CONFIG.properties.schedulerPauseReason,
-          senderAliasFailures > 0
-            ? "Системная ошибка адреса отправителя"
+          senderCircuitOpen
+            ? "Предохранитель: " + currentCounts.senderErrors +
+              " подтверждённых ошибок адреса отправителя"
             : "Предохранитель: " + newHardBounces +
               " новых жёстких возврата за одну проверку"
         );
+      } else {
+        var pauseReason = String(
+          properties.getProperty(CONFIG.properties.schedulerPauseReason) || ""
+        );
+        if (
+          properties.getProperty(CONFIG.properties.schedulerMode) !== "true" &&
+          /(?:Системная ошибка адреса отправителя|подтверждённых ошибок адреса отправителя)/i
+            .test(pauseReason)
+        ) {
+          properties.setProperty(CONFIG.properties.schedulerMode, "true");
+          properties.deleteProperty(CONFIG.properties.schedulerPauseReason);
+        }
       }
       saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
       var totals = updateMailboxDashboard(context, new Date());
@@ -2494,6 +2575,9 @@ var TenderOutreach = (function () {
         totalOptedOut: totals.optedOut,
         totalSenderErrors: totals.senderErrors,
         senderAliasFailures: senderAliasFailures,
+        reclassifiedSenderRejections: reclassifiedSenderRejections,
+        senderCircuitOpen: senderCircuitOpen,
+        senderErrorPauseThreshold: CONFIG.maxSenderAliasFailuresBeforePause,
         newHardBounces: newHardBounces,
         bounceCircuitOpen: bounceCircuitOpen,
         schedulerPaused: schedulerPausedNow,
@@ -2612,7 +2696,7 @@ var TenderOutreach = (function () {
     var result = processMailboxSignals({ forceReprocess: true });
     if (
       result.failures.length ||
-      result.totalSenderErrors
+      result.totalSenderErrors >= CONFIG.maxSenderAliasFailuresBeforePause
     ) {
       throw new Error("Автоматика не возобновлена: почтовые ошибки требуют проверки");
     }
@@ -2631,6 +2715,7 @@ var TenderOutreach = (function () {
     result.schedulerResumed = true;
     result.batchLimit = CONFIG.defaultProductionBatchLimit;
     result.hardBouncePauseThreshold = CONFIG.maxNewHardBouncesBeforePause;
+    result.senderErrorPauseThreshold = CONFIG.maxSenderAliasFailuresBeforePause;
     Logger.log(JSON.stringify(result));
     return result;
   }
