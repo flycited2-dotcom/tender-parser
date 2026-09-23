@@ -1,0 +1,10 @@
+[Unit]
+Description=Supplier Intelligence Gmail to Google Sheets sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tender
+WorkingDirectory=/opt/tender-parser-integration
+ExecStart=/opt/tender-parser-integration/.venv/bin/python -m tender_parser.supplier_intelligence sync

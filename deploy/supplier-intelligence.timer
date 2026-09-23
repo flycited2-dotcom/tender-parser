@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Supplier Intelligence every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=supplier-intelligence.service
+
+[Install]
+WantedBy=timers.target

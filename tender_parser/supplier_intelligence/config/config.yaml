@@ -1,0 +1,26 @@
+own_emails:
+  - termoark@gmail.com
+  - flycited@gmail.com
+own_domains:
+  - simfer.com.ru
+confidence_threshold: 0.70
+ignored_sender_domains:
+  - google.com
+  - googlemail.com
+  - avito.ru
+  - ozon.ru
+  - wildberries.ru
+  - market.yandex.ru
+  - sberbank.ru
+  - tbank.ru
+  - tinkoff.ru
+  - alfabank.ru
+  - vtb.ru
+  - reg.ru
+  - timeweb.ru
+  - beget.com
+ignored_sender_prefixes:
+  - no-reply
+  - noreply
+  - mailer-daemon
+  - postmaster

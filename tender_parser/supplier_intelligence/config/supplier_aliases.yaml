@@ -1,0 +1,6 @@
+# Explicit aliases are resolved before fuzzy matching. Keep only verified links.
+# aliases:
+#   - supplier_id: SUP-000001
+#     type: EMAIL
+#     value: sales@example.ru
+aliases: []
