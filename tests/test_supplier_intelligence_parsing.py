@@ -188,3 +188,24 @@ def test_quote_lines_only_assign_explicit_values_and_keep_price_history() -> Non
     assert ambiguous[0]["price_total"] is None
     assert ambiguous[0]["unresolved_price"] == 21_000
     assert extract_quote_lines("Скидка на всю линейку") == []
+
+
+def test_quote_lines_reject_boilerplate_totals_and_unrelated_prices() -> None:
+    assert extract_quote_lines("Всего наименований: 1, на сумму 269 360 руб 48 573,11 руб") == []
+    assert extract_quote_lines("Проверяйте заказ перед отправкой: возврат каждой позиции стоимостью более 6000 руб стоит 250 руб") == []
+    assert extract_quote_lines("[FREE DOMESTIC SHIPPING ON ORDERS OVER $200 AND $300]") == []
+    assert extract_quote_lines("Подтвердите, пожалуйста, актуальность цены 21 276 руб") == []
+    assert extract_quote_lines("Цена за 1 шт 21 276 руб 170 208 руб") == []
+
+
+def test_quote_lines_require_arithmetic_for_unlabelled_unit_and_total() -> None:
+    valid = extract_quote_lines("Тележка сервировочная МСК-653.12, 8 шт × 4 000 руб = 32 000 руб")
+    assert valid[0]["price_unit"] == 4000
+    assert valid[0]["price_total"] == 32000
+    ambiguous = extract_quote_lines("ПРОКАТ КРУГЛОГО КОНЬКА 100 руб 150 руб")
+    assert ambiguous[0]["price_unit"] is None
+    assert ambiguous[0]["price_total"] is None
+    assert ambiguous[0]["unresolved_price"] == 100
+    inconsistent = extract_quote_lines("Тележка сервировочная, 8 шт 4 000 руб 6 000 руб")
+    assert inconsistent[0]["price_unit"] is None
+    assert inconsistent[0]["price_total"] is None

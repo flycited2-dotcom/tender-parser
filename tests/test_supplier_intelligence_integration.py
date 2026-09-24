@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -214,6 +215,76 @@ def test_fake_collector_backfill_incremental_idempotency_and_dry_run(tmp_path: P
     assert dry.totals()["suppliers_created"] == 1
     assert SupplierStore(config.database_path).stats() == before
     assert not SupplierStore(config.database_path).seen(OWN, "m3")
+
+
+def test_scheduled_sync_advances_both_mailboxes_before_either_backfill_finishes(tmp_path: Path) -> None:
+    config = replace(
+        _config(tmp_path),
+        mailboxes=(
+            MailboxConfig(OWN, tmp_path / "first-token.json"),
+            MailboxConfig(OTHER_OWN, tmp_path / "second-token.json"),
+        ),
+    )
+
+    class TwoPageCollector:
+        requested: list[tuple[str, str | None]] = []
+
+        def __init__(self, account: str, client_secret: Path, token: Path) -> None:
+            self.account = account
+
+        def authorize(self, *, interactive: bool) -> None:
+            assert interactive is False
+
+        def list_message_ids(self, page_token=None, page_size=500):
+            self.requested.append((self.account, page_token))
+            suffix = "a" if self.account == OWN else "b"
+            if page_token is None:
+                return [f"{suffix}1"], "next", "100"
+            assert page_token == "next"
+            return [f"{suffix}2"], None, None
+
+        def list_history(self, start_history, page_token=None):
+            assert start_history == "100"
+            return [], None, "200"
+
+        def get_message(self, message_id: str) -> dict:
+            sender = "sales@alpha.example" if self.account == OWN else "sales@beta.example"
+            return _raw(
+                message_id, sender=sender, recipient=self.account,
+                subject="КП на огнетушители", body="Предлагаем огнетушители.",
+                thread=f"thread-{message_id}",
+            )
+
+        def get_attachment(self, message_id: str, attachment_id: str) -> dict:
+            raise AssertionError("No attachment expected")
+
+        def profile(self) -> dict:
+            return {"historyId": "200"}
+
+    sync = SupplierSync(config, collector_factory=TwoPageCollector)
+    first = sync.run()
+    store = SupplierStore(config.database_path)
+    assert TwoPageCollector.requested == [(OWN, None), (OTHER_OWN, None)]
+    assert first.totals()["messages_processed"] == 2
+    assert first.mailboxes[OWN]["status"] == "BACKFILLING"
+    assert first.mailboxes[OTHER_OWN]["status"] == "BACKFILLING"
+    assert store.get_checkpoint(OWN) == "next"
+    assert store.get_checkpoint(OTHER_OWN) == "next"
+    assert store.get_backfill_start_history(OWN) == "100"
+    assert store.get_backfill_start_history(OTHER_OWN) == "100"
+    assert not store.get_sync_state(OWN)
+    assert not store.get_sync_state(OTHER_OWN)
+
+    second = sync.run()
+    assert TwoPageCollector.requested[-2:] == [(OWN, "next"), (OTHER_OWN, "next")]
+    assert second.totals()["messages_processed"] == 2
+    assert second.mailboxes[OWN]["status"] == "OK"
+    assert second.mailboxes[OTHER_OWN]["status"] == "OK"
+    assert store.get_checkpoint(OWN) is None
+    assert store.get_checkpoint(OTHER_OWN) is None
+    assert store.get_sync_state(OWN) == "200"
+    assert store.get_sync_state(OTHER_OWN) == "200"
+    assert store.stats()["processed_messages"] == 4
 
 
 def test_one_bad_message_is_retried_without_stopping_other_mail(tmp_path: Path) -> None:

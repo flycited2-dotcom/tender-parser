@@ -10,22 +10,29 @@ from html import unescape
 from pathlib import Path
 from typing import Callable
 
-from tender_parser.supplier_intelligence.attachment_parser import extract_attachment_text
+from tender_parser.supplier_intelligence.attachment_parser import (
+    extract_attachment_text,
+    extract_spreadsheet_quote_lines,
+)
 from tender_parser.supplier_intelligence.extraction import (
     classify_response,
     extract_ids,
     extract_quote_lines,
     split_quoted,
 )
-from tender_parser.supplier_intelligence.normalization import normalize_email
+from tender_parser.supplier_intelligence.normalization import is_public_email_domain, normalize_email
 from tender_parser.supplier_intelligence.product_classifier import classify_products
-from tender_parser.supplier_intelligence.signature_parser import parse_signature
+from tender_parser.supplier_intelligence.signature_parser import is_plausible_website, parse_signature
 
 
 _INN = re.compile(r"\bИНН\s*[:№]?\s*(\d{10}|\d{12})\b", re.I)
 _KPP = re.compile(r"\bКПП\s*[:№]?\s*(\d{9})\b", re.I)
 _OGRN = re.compile(r"\bОГРН\s*[:№]?\s*(\d{13}|\d{15})\b", re.I)
-_LEGAL_NAME = re.compile(r"\b(?:ООО|АО|ПАО|ОАО|ЗАО|ИП)\s*[«\"']?[^\n,;]{3,70}", re.I)
+_LEGAL_NAME = re.compile(
+    r"\b(?:ООО|АО|ПАО|ОАО|ЗАО|ИП)\s*"
+    r"(?:[«\"'„“][^»\"'”\n]{2,70}[»\"'”]|[^\n,;:]{3,70})",
+    re.I,
+)
 _BUSINESS = re.compile(
     r"\b(?:кп|коммерческ\w* предложени\w*|сч[её]т|прайс|цен[аыу]|"
     r"стоимост\w*|наличи\w*|поставк\w*|запрос\w*|rfq|спецификац\w*)\b",
@@ -119,9 +126,11 @@ def normalize_gmail_message(
     legal_match = _LEGAL_NAME.search(details) if direction == "IN" else None
     legal_name = legal_match.group(0).strip(" ,.;:") if legal_match else ""
     company_name = str(signature.get("company") or legal_name or "").strip() if direction == "IN" else ""
-    if not company_name and display and not _looks_like_person(display):
+    if not company_name and display and not _looks_like_person(display) and not _looks_like_service_name(display):
         company_name = display
     website = str(signature.get("website") or "").strip() if direction == "IN" else ""
+    if website and not is_plausible_website(website):
+        website = ""
     domain = _domain(partner_email)
     if website:
         site_domain = re.sub(r"^https?://", "", website, flags=re.I).split("/", 1)[0].removeprefix("www.")
@@ -141,6 +150,7 @@ def normalize_gmail_message(
 
     attachments: list[dict] = []
     attachment_texts: list[tuple[str, str]] = []
+    attachment_quotes: list[dict] = []
     for part in attachment_parts:
         filename = str(part.get("filename") or "")
         data = part.get("body") or {}
@@ -162,6 +172,12 @@ def normalize_gmail_message(
             parsed_text = extract_attachment_text(filename, raw_data) if raw_data else ""
             if parsed_text:
                 attachment_texts.append((filename, parsed_text[:250_000]))
+            if direction == "IN" and Path(filename).suffix.casefold() in {".xlsx", ".xls"}:
+                attachment_quotes.extend({
+                    **line,
+                    "attachment_filename": filename,
+                    "attachment_type": entry["mime_type"],
+                } for line in extract_spreadsheet_quote_lines(filename, raw_data))
         except Exception as exc:
             entry["parse_error"] = str(exc)[:300]
 
@@ -176,9 +192,12 @@ def normalize_gmail_message(
     if not isinstance(quote_lines, list):
         quote_lines = []
     for filename, value in (attachment_texts if direction == "IN" else []):
+        if Path(filename).suffix.casefold() in {".xlsx", ".xls"}:
+            continue
         for line in extract_quote_lines(value) or []:
             if isinstance(line, dict):
                 quote_lines.append({**line, "attachment_filename": filename})
+    quote_lines.extend(attachment_quotes)
     response_type = classify_response(new_body + "\n" + " ".join(entry["filename"] for entry in attachments)) if direction == "IN" else ""
     signal = bool(products or quote_lines or _BUSINESS.search(details) or company_name)
     if _IGNORE_SUBJECT.search(subject):
@@ -290,6 +309,14 @@ def _looks_like_person(value: str) -> bool:
     if words and words[0].casefold() in {"ооо", "ао", "пао", "оао", "зао", "ип"}:
         return False
     return len(words) in {2, 3} and all(word[:1].isupper() for word in words)
+
+
+def _looks_like_service_name(value: str) -> bool:
+    """Do not turn public mail or invalid domain labels into company names."""
+    text = value.strip()
+    if "@" in text or is_public_email_domain(text):
+        return True
+    return bool("." in text and not any(ch.isspace() for ch in text) and not is_plausible_website(text))
 
 
 def _forwarded_message(body: str) -> dict[str, str] | None:

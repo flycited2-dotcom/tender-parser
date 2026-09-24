@@ -304,10 +304,12 @@ def _dashboard_rows(tables: dict[str, list[dict]]) -> list[dict]:
     suppliers = tables.get("SUPPLIERS", [])
     contacts = tables.get("CONTACTS", [])
     categories = tables.get("SUPPLIER_CATEGORIES", [])
-    interactions = tables.get("INTERACTIONS", [])
     quotes = tables.get("QUOTES", [])
     reviews = tables.get("REVIEW_QUEUE", [])
-    errors = tables.get("PROCESSING_LOG", [])
+    snapshot = {
+        str(row.get("METRIC") or ""): row.get("VALUE")
+        for row in tables.get("DASHBOARD", [])
+    }
     month_ago = datetime.now(timezone.utc) - timedelta(days=30)
     recent = 0
     for supplier in suppliers:
@@ -326,16 +328,13 @@ def _dashboard_rows(tables: dict[str, list[dict]]) -> list[dict]:
         ("Всего поставщиков", len(suppliers)),
         ("Всего контактов", len(contacts)),
         ("Всего товарных категорий", len(categories)),
-        ("Всего обработанных писем", len({
-            (str(row.get("GMAIL_ACCOUNT") or ""), str(row.get("MESSAGE_ID") or ""))
-            for row in interactions if row.get("MESSAGE_ID")
-        })),
+        ("Всего обработанных писем", int(snapshot.get("PROCESSED_MESSAGES") or 0)),
         ("Всего КП", len(quotes)),
         ("Новых поставщиков за 30 дней", recent),
         ("Поставщики без категории", sum(not supplier.get("CATEGORY_L1") for supplier in suppliers)),
         ("Поставщики без телефона", sum(not supplier.get("PRIMARY_PHONE") for supplier in suppliers)),
         ("Поставщики без названия компании", sum(not supplier.get("COMPANY_NAME") for supplier in suppliers)),
-        ("Ошибки обработки", sum(int(log.get("ERROR_COUNT") or 0) for log in errors)),
+        ("Ошибки обработки", int(snapshot.get("ERRORS") or 0)),
         ("Записи на ручной проверке", sum(str(item.get("STATUS") or "NEW") in {"", "NEW", "IN_REVIEW"} for item in reviews)),
     ]
     result = [{"METRIC": name, "VALUE": value, "DETAIL": ""} for name, value in rows]

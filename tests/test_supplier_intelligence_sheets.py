@@ -68,14 +68,21 @@ def test_manual_supplier_review_status_survives_a_sync():
                for part in body["data"])
 
 
-def test_dashboard_counts_unique_gmail_messages_across_suppliers():
-    rows = _dashboard_rows({"INTERACTIONS": [
-        {"GMAIL_ACCOUNT": "one@gmail.com", "MESSAGE_ID": "m1"},
-        {"GMAIL_ACCOUNT": "one@gmail.com", "MESSAGE_ID": "m1"},
-        {"GMAIL_ACCOUNT": "two@gmail.com", "MESSAGE_ID": "m1"},
-    ]})
+def test_dashboard_uses_processed_message_and_current_error_counts():
+    rows = _dashboard_rows({
+        "DASHBOARD": [
+            {"METRIC": "PROCESSED_MESSAGES", "VALUE": 17},
+            {"METRIC": "ERRORS", "VALUE": 2},
+        ],
+        "INTERACTIONS": [
+            {"GMAIL_ACCOUNT": "one@gmail.com", "MESSAGE_ID": "m1"},
+            {"GMAIL_ACCOUNT": "one@gmail.com", "MESSAGE_ID": "m1"},
+        ],
+        "PROCESSING_LOG": [{"ERROR_COUNT": 9}],
+    })
     counts = {row["METRIC"]: row["VALUE"] for row in rows}
-    assert counts["Всего обработанных писем"] == 2
+    assert counts["Всего обработанных писем"] == 17
+    assert counts["Ошибки обработки"] == 2
 
 
 def test_large_backfill_expands_grid_before_reading_values():

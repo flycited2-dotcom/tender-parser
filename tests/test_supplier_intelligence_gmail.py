@@ -15,12 +15,14 @@ from openpyxl import Workbook
 from tender_parser.supplier_intelligence.attachment_parser import (
     extract_attachment_text,
     extract_attachments,
+    extract_spreadsheet_quote_lines,
 )
 from tender_parser.supplier_intelligence.gmail_collector import (
     AuthorizationRequired,
     GmailCollector,
     HistoryCursorExpired,
 )
+from tender_parser.supplier_intelligence.message_parser import normalize_gmail_message
 
 
 def _collector() -> tuple[GmailCollector, MagicMock]:
@@ -42,6 +44,36 @@ def _xlsx() -> bytes:
     sheet.title = "Прайс"
     sheet.append(["Модель", "Цена"])
     sheet.append(["Насос Н-100", 12345])
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _commercial_offer_xlsx(*, mismatched_row: bool = False) -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "КП"
+    sheet.append(["КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ"])
+    sheet.append(["Дата: 10 августа 2026 г."])
+    sheet.append([])
+    sheet.append(["Товар / Артикул", "Фото", "Описание", "Кол-во", "Цена за ед.", "Сумма"])
+    sheet.append([
+        "Портативная станция Oukitel P2001EPlus\nPS_OK_P2001EPlus_2400", None,
+        "Электростанция 2048 Вт·ч. Гарантия 2 000 ₽ на дополнительные услуги.",
+        55, "98 670 ₽", "5 426 850 ₽",
+    ])
+    for number in range(2, 10):
+        quantity = number
+        price = number * 10_000
+        sheet.append([
+            f"Портативная станция Модель-{number}\nART_{number}_2000", None,
+            "Мощность 2400 Вт, ресурс 4000 циклов", quantity,
+            f"{price:,} ₽".replace(",", " "),
+            f"{quantity * price:,} ₽".replace(",", " "),
+        ])
+    if mismatched_row:
+        sheet.append(["Инвертор Solax X1", None, "Техническое описание", 2, "100 000 ₽", "250 000 ₽"])
+    sheet.append(["ИТОГО (9 позиций)", None, None, None, None, "20 941 960 ₽"])
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -169,6 +201,62 @@ def test_office_attachment_text_is_extracted_without_local_files() -> None:
     assert "Насос Н-100" in extract_attachment_text("price.xlsx", _xlsx())
     assert "12345" in extract_attachment_text("price.xlsx", _xlsx())
     assert "ООО Поставщик" in extract_attachment_text("offer.docx", _docx())
+
+
+def test_xlsx_offer_uses_product_quantity_and_price_columns() -> None:
+    quotes = extract_spreadsheet_quote_lines("КП_Электростанции_с_фото.xlsx", _commercial_offer_xlsx())
+    assert len(quotes) == 9
+    assert quotes[0]["product_name"] == "Портативная станция Oukitel P2001EPlus"
+    assert quotes[0]["article"] == "PS_OK_P2001EPlus_2400"
+    assert quotes[0]["quantity"] == 55
+    assert quotes[0]["price_unit"] == 98_670
+    assert quotes[0]["price_total"] == 5_426_850
+    assert quotes[0]["currency"] == "RUB"
+    assert quotes[0]["attachment_sheet"] == "КП"
+    assert quotes[0]["attachment_row"] == 5
+    assert all(quote["price_total"] == quote["quantity"] * quote["price_unit"] for quote in quotes)
+
+
+def test_inconsistent_xlsx_price_is_unresolved_and_not_mistaken_for_quote() -> None:
+    quotes = extract_spreadsheet_quote_lines("offer.xlsx", _commercial_offer_xlsx(mismatched_row=True))
+    assert len(quotes) == 10
+    invalid = quotes[-1]
+    assert invalid["product_name"] == "Инвертор Solax X1"
+    assert invalid["price_unit"] is None
+    assert invalid["price_total"] is None
+    assert invalid["unresolved_price"] == 100_000
+
+
+def test_message_uses_structured_xlsx_quotes_without_flat_specification_prices() -> None:
+    content = _commercial_offer_xlsx()
+    body = _encode("Направляем КП во вложении.".encode("utf-8"))
+    message = {
+        "id": "offer-1", "threadId": "thread-1", "internalDate": "1790000000000",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [
+                {"name": "From", "value": "Отдел продаж <sales@vendor.example>"},
+                {"name": "To", "value": "termoark@gmail.com"},
+                {"name": "Subject", "value": "КП на электростанции"},
+            ],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": body}},
+                {"mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                 "filename": "КП_Электростанции_с_фото.xlsx",
+                 "body": {"data": _encode(content), "size": len(content)}},
+            ],
+        },
+    }
+    parsed = normalize_gmail_message(
+        "termoark@gmail.com", message,
+        own_emails={"termoark@gmail.com"}, own_domains=set(),
+    )
+    assert len(parsed["quote_lines"]) == 9
+    assert all(quote["attachment_filename"] == "КП_Электростанции_с_фото.xlsx"
+               for quote in parsed["quote_lines"])
+    assert all(quote["attachment_type"] ==
+               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+               for quote in parsed["quote_lines"])
 
 
 def test_attachment_failures_are_isolated_and_metadata_survives() -> None:

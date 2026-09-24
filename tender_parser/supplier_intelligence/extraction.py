@@ -100,6 +100,14 @@ _QUANTITY_RE = re.compile(
 )
 _TOTAL_LABEL_RE = re.compile(r"\b(?:итого|всего|сумма|общая\s+стоимость)\b", re.I)
 _UNIT_LABEL_RE = re.compile(r"\b(?:цена\s+за\s+(?:ед\.?|шт\.?|единицу)|за\s+штуку|за\s+единицу|руб\.?/шт|₽/шт)\b", re.I)
+_NON_PRODUCT_RE = re.compile(
+    r"^(?:[\W_]*(?:проверяйте|подтвердите|добрый\s+день|всего\s+наименований|"
+    r"партия\b|рц\s+стандарта|стоимость\s+за\s+шт|цена\s+за\s*$|"
+    r"итого\b|всего\b|общая\s+стоимость\b|"
+    r"есть\s+по\s+наличию|по\s+раз[ъь]ёмам|(?:free\s+)?(?:domestic\s+)?shipping\b)|"
+    r"[\W_]*(?:возврат\s+каждой\s+позиции|доставка\s+по\s+городу))",
+    re.I,
+)
 
 
 def _number(value: str) -> float:
@@ -122,7 +130,7 @@ def extract_quote_lines(text: str | None) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     for raw_line in text.replace("\r", "\n").splitlines():
         line = " ".join(raw_line.split())
-        if not line or len(line) > 300:
+        if not line or len(line) > 300 or "&bull;" in line.lower() or "&nbsp;" in line.lower():
             continue
         prices = list(_MONEY_RE.finditer(line))
         if not prices or len({_currency(item.group("currency")) for item in prices}) != 1:
@@ -136,10 +144,15 @@ def extract_quote_lines(text: str | None) -> list[dict[str, object]]:
         unit = quantity_match.group("unit").rstrip(".").lower() if quantity_match else None
         if quantity_match:
             product = (product[: quantity_match.start()] + " " + product[quantity_match.end() :]).strip(" \t,|;:-–—×xх")
-        product = re.sub(r"\b(?:цена\s+за\s+(?:ед\.?|шт\.?|единицу)|цена)\s*[:=]?\s*$", "", product, flags=re.I).strip(" \t|;:-–—")
+        product = re.sub(r"\b(?:цена\s+за\s+(?:ед\.?|шт\.?|единицу)?|цена)\s*[:=]?\s*$", "", product, flags=re.I).strip(" \t|;:-–—")
+        product = re.sub(r"\s*[—–,-]\s*срок\s+поставки\b.*$", "", product, flags=re.I).strip(" \t|;:-–—")
         if (
             len(product) < 3
+            or len(product) > 160
+            or not re.search(r"[A-Za-zА-Яа-яЁё]{3}", product)
             or _TOTAL_LABEL_RE.fullmatch(product)
+            or _NON_PRODUCT_RE.search(product)
+            or product.startswith(("⚙", "⭑", "["))
             or re.match(r"^(?:ндс|доставка|предоплата|оплата|скидка|сч[её]т)\b", product, re.I)
         ):
             continue
@@ -148,7 +161,21 @@ def extract_quote_lines(text: str | None) -> list[dict[str, object]]:
         price_total: float | None = None
         unresolved_price: float | None = None
         if len(prices) >= 2:
-            price_unit, price_total = numbers[0], numbers[1]
+            # Two money amounts alone do not establish a unit price and a
+            # total: policies, subtotals and product specifications contain
+            # them too. Require an explicit quantity and matching arithmetic.
+            consistent = quantity is not None and quantity > 0 and len(prices) == 2 and abs(
+                numbers[0] * quantity - numbers[1]
+            ) <= max(1.0, numbers[1] * 0.01)
+            labelled = bool(
+                len(prices) == 2
+                and _UNIT_LABEL_RE.search(line[: prices[0].start()])
+                and _TOTAL_LABEL_RE.search(line[prices[0].end() : prices[1].start()])
+            )
+            if consistent or labelled:
+                price_unit, price_total = numbers[0], numbers[1]
+            else:
+                unresolved_price = numbers[0]
         elif _UNIT_LABEL_RE.search(line) or re.search(r"(?:₽|руб\.?|RUB|USD|EUR|\$|€)\s*/\s*(?:шт|ед)", line, re.I):
             price_unit = numbers[0]
         elif _TOTAL_LABEL_RE.search(line[prices[0].end() :]):

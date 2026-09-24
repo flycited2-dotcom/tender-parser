@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .normalization import normalize_email, normalize_phone
+from .normalization import is_public_email_domain, normalize_email, normalize_phone
 
 
 _SIGNOFF_RE = re.compile(
@@ -24,7 +24,8 @@ _SITE_RE = re.compile(
 _NON_COMPANY_SITES = {"vk.com", "t.me", "wa.me", "facebook.com", "instagram.com", "youtu.be"}
 _PERSON_RE = re.compile(r"^[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+){1,2}$")
 _COMPANY_RE = re.compile(
-    r"\b(?:ООО|АО|ПАО|ЗАО|ОАО|ИП)\s+(?:[«\"']?[^,;\n<>]{2,70}[»\"']?)",
+    r"\b(?:ООО|АО|ПАО|ЗАО|ОАО|ИП)\s+"
+    r"(?:[«\"'„“][^»\"'”\n]{2,70}[»\"'”]|[^,;\n<>]{2,70})",
     re.IGNORECASE,
 )
 _POSITION_RE = re.compile(
@@ -33,6 +34,20 @@ _POSITION_RE = re.compile(
     re.IGNORECASE,
 )
 _CITY_RE = re.compile(r"\b(?:г\.|город)\s*([А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?)")
+
+
+def is_plausible_website(value: str | None) -> bool:
+    """Accept a full hostname/URL only when it looks like a company site.
+
+    A public mailbox or social network domain in a signature is contact context,
+    not evidence of the supplier's own website.
+    """
+    candidate = str(value or "").strip()
+    match = _SITE_RE.fullmatch(candidate)
+    if not match:
+        return False
+    domain = match.group(1).casefold()
+    return domain not in _NON_COMPANY_SITES and not is_public_email_domain(domain)
 
 
 def extract_signature_text(text: str | None) -> str:
@@ -110,7 +125,7 @@ def parse_signature(text: str | None) -> dict[str, object]:
             site_line = _EMAIL_RE.sub(" ", _PHONE_RE.sub(" ", line))
             for site in _SITE_RE.finditer(site_line):
                 domain = site.group(1).lower()
-                if domain not in _NON_COMPANY_SITES:
+                if is_plausible_website(domain):
                     result["website"] = domain
                     break
     result["emails"] = emails

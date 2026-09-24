@@ -63,10 +63,21 @@ class SupplierSync:
                     collector.authorize(interactive=False)
                     self._retry_pending(store, collector, entry.address, row)
                     if backfill or not store.get_sync_state(entry.address):
-                        self._backfill(store, collector, entry.address, row, publish_partial=not dry_run)
+                        # A scheduled sync processes one historical page per mailbox.
+                        # This lets every configured account start importing on the
+                        # first run. The explicit `backfill` command still walks the
+                        # entire mailbox and publishes each completed page.
+                        complete = self._backfill(
+                            store, collector, entry.address, row,
+                            max_pages=None if backfill else 1,
+                            publish_partial=backfill and not dry_run,
+                        )
+                        if not complete:
+                            row["status"] = "BACKFILLING" if row["error_count"] == 0 else "PARTIAL"
                     else:
                         self._incremental(store, collector, entry.address, row)
-                    row["status"] = "OK" if row["error_count"] == 0 else "PARTIAL"
+                    if row["status"] == "RUNNING":
+                        row["status"] = "OK" if row["error_count"] == 0 else "PARTIAL"
                 except Exception as exc:
                     row["status"] = "ERROR"
                     row["error_count"] += 1
@@ -120,10 +131,11 @@ class SupplierSync:
 
     def _backfill(
         self, store: SupplierStore, collector: GmailCollector, mailbox: str, row: dict,
-        *, publish_partial: bool = False,
-    ) -> None:
+        *, max_pages: int | None = None, publish_partial: bool = False,
+    ) -> bool:
         page_token = store.get_checkpoint(mailbox)
         baseline = store.get_backfill_start_history(mailbox)
+        pages = 0
         while True:
             ids, next_token, first_history = collector.list_message_ids(page_token, self.config.batch_size)
             if not baseline and first_history:
@@ -133,6 +145,7 @@ class SupplierSync:
             for message_id in ids:
                 self._process_one(store, collector, mailbox, message_id, row)
             store.set_checkpoint(mailbox, next_token)
+            pages += 1
             # Long historical imports must become visible in the working Sheet
             # before the entire mailbox has finished. The SQLite page checkpoint
             # is already durable, so a failed projection is safe to retry.
@@ -143,6 +156,11 @@ class SupplierSync:
                     LOG.exception("Partial Google Sheets projection failed")
             if not next_token:
                 break
+            if max_pages is not None and pages >= max_pages:
+                # Preserve both the next page and the *first* history cursor.
+                # A later run resumes the scan and catches up with History only
+                # after every historical page has been indexed.
+                return False
             page_token = next_token
         # Capture messages arriving while historical pages were being read.
         if baseline:
@@ -159,6 +177,7 @@ class SupplierSync:
             store.set_sync_state(mailbox, str(collector.profile().get("historyId") or ""))
         store.set_checkpoint(mailbox, None)
         store.set_backfill_start_history(mailbox, None)
+        return True
 
     def _incremental(self, store: SupplierStore, collector: GmailCollector, mailbox: str, row: dict) -> None:
         start = store.get_sync_state(mailbox)
