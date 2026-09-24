@@ -321,15 +321,22 @@ def _dashboard_rows(tables: dict[str, list[dict]]) -> list[dict]:
         except ValueError:
             pass
     counts = Counter()
+    category_paths: set[tuple[str, str, str, str]] = set()
     for category in categories:
         if category.get("CATEGORY_L1"):
             counts[str(category["CATEGORY_L1"])] += 1
+            category_paths.add(tuple(str(category.get(f"CATEGORY_L{level}") or "") for level in range(1, 5)))
     rows = [
         ("Всего поставщиков", len(suppliers)),
         ("Всего контактов", len(contacts)),
-        ("Всего товарных категорий", len(categories)),
+        ("Всего товарных категорий", len(category_paths)),
+        ("Связей поставщиков с категориями", len(categories)),
         ("Всего обработанных писем", int(snapshot.get("PROCESSED_MESSAGES") or 0)),
-        ("Всего КП", len(quotes)),
+        ("Строк КП", len(quotes)),
+        ("Писем с КП", len({
+            (str(quote.get("GMAIL_ACCOUNT") or ""), str(quote.get("MESSAGE_ID") or ""))
+            for quote in quotes if quote.get("MESSAGE_ID")
+        })),
         ("Новых поставщиков за 30 дней", recent),
         ("Поставщики без категории", sum(not supplier.get("CATEGORY_L1") for supplier in suppliers)),
         ("Поставщики без телефона", sum(not supplier.get("PRIMARY_PHONE") for supplier in suppliers)),

@@ -103,6 +103,26 @@ def test_dashboard_recent_suppliers_uses_first_contact_not_import_date():
     assert counts["Новых поставщиков за 30 дней"] == 1
 
 
+def test_dashboard_distinguishes_categories_links_quote_rows_and_letters():
+    rows = _dashboard_rows({
+        "SUPPLIER_CATEGORIES": [
+            {"CATEGORY_L1": "Медицинское оборудование", "CATEGORY_L2": "Холодильники"},
+            {"CATEGORY_L1": "Медицинское оборудование", "CATEGORY_L2": "Холодильники"},
+            {"CATEGORY_L1": "Климатическое оборудование", "CATEGORY_L2": "Кондиционеры"},
+        ],
+        "QUOTES": [
+            {"GMAIL_ACCOUNT": "a@gmail.com", "MESSAGE_ID": "one"},
+            {"GMAIL_ACCOUNT": "a@gmail.com", "MESSAGE_ID": "one"},
+            {"GMAIL_ACCOUNT": "b@gmail.com", "MESSAGE_ID": "two"},
+        ],
+    })
+    counts = {row["METRIC"]: row["VALUE"] for row in rows}
+    assert counts["Всего товарных категорий"] == 2
+    assert counts["Связей поставщиков с категориями"] == 3
+    assert counts["Строк КП"] == 3
+    assert counts["Писем с КП"] == 2
+
+
 def test_large_backfill_expands_grid_before_reading_values():
     existing = {name: [headers] for name, headers in HEADERS.items()}
     session = _Session(existing)
