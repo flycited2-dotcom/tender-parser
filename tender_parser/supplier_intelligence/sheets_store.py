@@ -314,7 +314,7 @@ def _dashboard_rows(tables: dict[str, list[dict]]) -> list[dict]:
     recent = 0
     for supplier in suppliers:
         try:
-            stamp = datetime.fromisoformat(str(supplier.get("CREATED_AT") or ""))
+            stamp = datetime.fromisoformat(str(supplier.get("FIRST_CONTACT_DATE") or ""))
             if stamp.tzinfo is None:
                 stamp = stamp.replace(tzinfo=timezone.utc)
             recent += stamp >= month_ago

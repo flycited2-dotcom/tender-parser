@@ -85,6 +85,24 @@ def test_dashboard_uses_processed_message_and_current_error_counts():
     assert counts["Ошибки обработки"] == 2
 
 
+def test_dashboard_recent_suppliers_uses_first_contact_not_import_date():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    rows = _dashboard_rows({"SUPPLIERS": [
+        {
+            "CREATED_AT": now.isoformat(),
+            "FIRST_CONTACT_DATE": (now - timedelta(days=120)).isoformat(),
+        },
+        {
+            "CREATED_AT": now.isoformat(),
+            "FIRST_CONTACT_DATE": (now - timedelta(days=2)).isoformat(),
+        },
+    ]})
+    counts = {row["METRIC"]: row["VALUE"] for row in rows}
+    assert counts["Новых поставщиков за 30 дней"] == 1
+
+
 def test_large_backfill_expands_grid_before_reading_values():
     existing = {name: [headers] for name, headers in HEADERS.items()}
     session = _Session(existing)
