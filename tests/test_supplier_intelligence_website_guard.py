@@ -63,14 +63,14 @@ def test_public_mail_sender_label_is_not_company_or_website() -> None:
     assert parsed["supplier"]["domain"] == "company.ru"
 
 
-def test_quoted_legal_name_stops_before_subject_suffix() -> None:
+def test_legal_name_in_subject_is_not_assumed_to_be_supplier() -> None:
     parsed = _parsed(
         "Менеджер <sales@company.ru>",
         'ООО "Трансавто-7" за июнь',
         "Направляем коммерческое предложение.",
     )
-    assert parsed["supplier"]["legal_name"] == 'ООО "Трансавто-7"'
-    assert parsed["supplier"]["company_name"] == 'ООО "Трансавто-7"'
+    assert parsed["supplier"]["legal_name"] == ""
+    assert parsed["supplier"]["company_name"] == ""
 
 
 def test_quoted_signature_company_stops_at_closing_quote() -> None:

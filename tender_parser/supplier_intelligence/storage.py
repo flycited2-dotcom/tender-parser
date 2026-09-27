@@ -788,10 +788,14 @@ class SupplierStore:
                 "position=CASE WHEN position='' THEN ? ELSE position END,"
                 "email=CASE WHEN email='' THEN ? ELSE email END,"
                 "phone=CASE WHEN phone='' THEN ? ELSE phone END,"
+                "phone_ext=CASE WHEN phone_ext='' THEN ? ELSE phone_ext END,"
+                "telegram=CASE WHEN telegram='' THEN ? ELSE telegram END,"
+                "whatsapp=CASE WHEN whatsapp='' THEN ? ELSE whatsapp END,"
                 "last_seen_at=MAX(last_seen_at,?), confidence=MAX(confidence,?) WHERE id=?",
                 (name, first_name, last_name, patronymic,
                  _value(contact, "position") or _value(signature, "position"),
-                 email, phone, date, confidence, existing["id"]),
+                 email, phone, _value(contact, "phone_ext"), _value(contact, "telegram"),
+                 _value(contact, "whatsapp"), date, confidence, existing["id"]),
             )
             db.execute("INSERT OR IGNORE INTO contact_evidence VALUES(?,?,?,?,?)",
                        (existing["id"], mailbox, message_id, thread_id, date))

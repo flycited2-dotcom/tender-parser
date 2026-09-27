@@ -23,6 +23,11 @@ from tender_parser.supplier_intelligence.extraction import (
 from tender_parser.supplier_intelligence.normalization import is_public_email_domain, normalize_email
 from tender_parser.supplier_intelligence.product_classifier import classify_products
 from tender_parser.supplier_intelligence.signature_parser import is_plausible_website, parse_signature
+from tender_parser.supplier_intelligence.structured_fields import (
+    message_type as classify_message_type,
+    refusal_reason,
+    supplier_role,
+)
 
 
 _INN = re.compile(r"\bИНН\s*[:№]?\s*(\d{10}|\d{12})\b", re.I)
@@ -33,6 +38,12 @@ _LEGAL_NAME = re.compile(
     r"(?:[«\"'„“][^»\"'”\n]{2,70}[»\"'”]|[^\n,;:]{3,70})",
     re.I,
 )
+_SELF_IDENTITY = re.compile(
+    r"^\s*(?:мы\b|наша\s+(?:компания|организация)\b|наш(?:и|\s+инн|\s+кпп|\s+огрн)\b|"
+    r"реквизиты\s+нашей\s+(?:компании|организации)\b)",
+    re.I,
+)
+_OUR_REQUISITES = re.compile(r"^\s*(?:наши\s+реквизиты|реквизиты\s+нашей\s+(?:компании|организации))\b", re.I)
 _BUSINESS = re.compile(
     r"\b(?:кп|коммерческ\w* предложени\w*|сч[её]т|прайс|цен[аыу]|"
     r"стоимост\w*|наличи\w*|поставк\w*|запрос\w*|rfq|спецификац\w*)\b",
@@ -106,6 +117,13 @@ def normalize_gmail_message(
     signature = parse_signature(signature_text or new_body) if direction == "IN" else {}
     if not isinstance(signature, dict):
         signature = {}
+    # A copied customer signature can trail a supplier reply without a standard
+    # quote marker. Never attribute our own contact block to that supplier.
+    if direction == "IN" and signature_text and any(
+        own_address in signature_text.casefold() for own_address in own
+    ):
+        signature = {}
+        signature_text = ""
 
     target_addresses = [entry[1] for entry in (recipients + carbon_copy)] if direction == "OUT" else []
     if direction == "IN":
@@ -123,7 +141,8 @@ def normalize_gmail_message(
     elif direction == "OUT":
         display = next((name for name, value in recipients + carbon_copy if value == partner_email), "")
     details = "\n".join([subject, new_body, signature_text])
-    legal_match = _LEGAL_NAME.search(details) if direction == "IN" else None
+    identity_details = _supplier_identity_text(new_body, signature_text) if direction == "IN" else ""
+    legal_match = _LEGAL_NAME.search(identity_details) if direction == "IN" else None
     legal_name = legal_match.group(0).strip(" ,.;:") if legal_match else ""
     company_name = str(signature.get("company") or legal_name or "").strip() if direction == "IN" else ""
     if not company_name and display and not _looks_like_person(display) and not _looks_like_service_name(display):
@@ -135,17 +154,26 @@ def normalize_gmail_message(
     if website:
         site_domain = re.sub(r"^https?://", "", website, flags=re.I).split("/", 1)[0].removeprefix("www.")
         domain = site_domain or domain
+    role = supplier_role(new_body, signature_text) if direction == "IN" else {}
     supplier = {
         "company_name": company_name,
         "legal_name": legal_name,
-        "inn": _first(_INN, details) if direction == "IN" else "",
-        "kpp": _first(_KPP, details) if direction == "IN" else "",
-        "ogrn": _first(_OGRN, details) if direction == "IN" else "",
+        "inn": _first(_INN, identity_details) if direction == "IN" else "",
+        "kpp": _first(_KPP, identity_details) if direction == "IN" else "",
+        "ogrn": _first(_OGRN, identity_details) if direction == "IN" else "",
         "website": website,
         "domain": domain,
         "email": partner_email,
         "phone": next(iter(signature.get("phones") or []), ""),
         "city": str(signature.get("city") or ""),
+        "region": str(signature.get("region") or ""),
+        "address": str(signature.get("address") or ""),
+        "contact": {
+            "phone_ext": str(signature.get("phone_ext") or ""),
+            "telegram": str(signature.get("telegram") or ""),
+            "whatsapp": str(signature.get("whatsapp") or ""),
+        } if direction == "IN" else {},
+        **role,
     }
 
     attachments: list[dict] = []
@@ -199,6 +227,9 @@ def normalize_gmail_message(
                 quote_lines.append({**line, "attachment_filename": filename})
     quote_lines.extend(attachment_quotes)
     response_type = classify_response(new_body + "\n" + " ".join(entry["filename"] for entry in attachments)) if direction == "IN" else ""
+    reason, reason_response = refusal_reason(new_body) if direction == "IN" else ("", "")
+    if reason_response:
+        response_type = reason_response
     signal = bool(products or quote_lines or _BUSINESS.search(details) or company_name)
     if _IGNORE_SUBJECT.search(subject):
         signal = False
@@ -240,6 +271,8 @@ def normalize_gmail_message(
         "categories": categories,
         "products": products,
         "response_type": response_type,
+        "message_type": classify_message_type(direction, subject, new_body, response_type),
+        "refusal_reason": reason,
         "quote_lines": quote_lines,
         "attachments": attachments,
         "supplier_signal": signal,
@@ -300,6 +333,19 @@ def _first(pattern: re.Pattern[str], value: str) -> str:
     return match.group(1) if match else ""
 
 
+def _supplier_identity_text(new_body: str, signature_text: str) -> str:
+    """Read company identifiers from sender-owned text only.
+
+    Supplier replies often quote our legal details or ask for our company
+    card. Those identifiers must not become aliases of the sender.
+    """
+    lines = [signature_text]
+    for line in new_body.splitlines():
+        if _SELF_IDENTITY.search(line) or _OUR_REQUISITES.search(line):
+            lines.append(line[:300])
+    return "\n".join(lines)
+
+
 def _domain(value: str) -> str:
     return value.rsplit("@", 1)[-1].casefold() if "@" in value else ""
 
@@ -314,6 +360,8 @@ def _looks_like_person(value: str) -> bool:
 def _looks_like_service_name(value: str) -> bool:
     """Do not turn public mail or invalid domain labels into company names."""
     text = value.strip()
+    if re.fullmatch(r"(?:менеджер|отдел\s+продаж|специалист|директор|sales\s+manager)", text, re.I):
+        return True
     if "@" in text or is_public_email_domain(text):
         return True
     return bool("." in text and not any(ch.isspace() for ch in text) and not is_plausible_website(text))

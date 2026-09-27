@@ -142,6 +142,13 @@ def match_candidates(identity: Identity, suppliers: list[dict], aliases: list[di
         email = bool(identity.email and identity.email in values["EMAIL"])
         phone = bool(identity.phone and identity.phone in values["PHONE"])
         company = bool(identity.company and identity.company in values["COMPANY_NAME"])
+        # A shared phone, buyer tax number or company mention in a forwarded
+        # thread cannot establish that two unrelated sender domains are one
+        # supplier. Cross-domain identities need an exact known email or a
+        # separate manual review before their facts can be combined.
+        known_domains = {value for value in values["DOMAIN"] if not is_public_domain(value)}
+        if identity.domain and known_domains and identity.domain not in known_domains and not email:
+            continue
         reasons = tuple(name for name, matched in (("inn", inn), ("domain", domain), ("website", website), ("email", email), ("phone", phone), ("company", company)) if matched)
         if not reasons:
             continue

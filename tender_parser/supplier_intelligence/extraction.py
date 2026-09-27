@@ -8,7 +8,7 @@ from .signature_parser import extract_signature_text
 
 
 _QUOTE_BOUNDARY = re.compile(
-    r"^(?:-{2,}\s*(?:Original Message|Forwarded message)|"
+    r"^(?:-{8,}\s*$|-{2,}\s*(?:Original Message|Forwarded message)|"
     r"On\s+.{5,200}\s+wrote:|"
     r"(?:От|From):\s+.+@.+|"
     r"(?:В|On)\s+.{5,200}\s+(?:писал[аи]?:|wrote:))",
