@@ -149,6 +149,8 @@ def match_candidates(identity: Identity, suppliers: list[dict], aliases: list[di
         known_domains = {value for value in values["DOMAIN"] if not is_public_domain(value)}
         if identity.domain and known_domains and identity.domain not in known_domains and not email:
             continue
+        if not identity.domain and known_domains and not email:
+            continue
         reasons = tuple(name for name, matched in (("inn", inn), ("domain", domain), ("website", website), ("email", email), ("phone", phone), ("company", company)) if matched)
         if not reasons:
             continue
