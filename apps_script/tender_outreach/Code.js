@@ -73,6 +73,11 @@ var TenderOutreach = (function () {
       ownerAuthorizedTenderPhrase: "PUBLIC_TENDER_OUTREACH_AUTHORIZED",
     },
     blockedSubjectPrefixes: ["[ЗАБЛОКИРОВАНО]", "[ЧЕРНОВИК"],
+    // Delivery history as of 29.09.2026: crimeaedu.ru 13/13 rejected,
+    // ukr.net 2/2 rejected the outbound relay IP, yandex.ua 2/2 unknown user.
+    // Keep these domains out of both draft preparation and final send until
+    // their deliverability is reverified; do not affect other addresses.
+    blockedRecipientDomains: ["crimeaedu.ru", "ukr.net", "yandex.ua"],
     maxHardTestDraftsPerRun: 5,
     maxHardWorkingDraftsPerRun: 20,
     maxHardSendsPerRun: 10,
@@ -130,6 +135,12 @@ var TenderOutreach = (function () {
     var text = String(value || "").trim().toLowerCase();
     var match = text.match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i);
     return match ? match[0].replace(/\.$/, "") : "";
+  }
+
+  function isBlockedRecipientDomain(email) {
+    var normalized = normalizeEmail(email);
+    var domain = normalized.split("@")[1] || "";
+    return CONFIG.blockedRecipientDomains.indexOf(domain) >= 0;
   }
 
   function asBoolean(value) {
@@ -603,6 +614,7 @@ var TenderOutreach = (function () {
     if (isBlockedTemplate(template)) return "template_blocked";
     if (!candidate.candidateId) return "candidate_id_missing";
     if (!candidate.email) return "email_missing_or_invalid";
+    if (isBlockedRecipientDomain(candidate.email)) return "recipient_domain_delivery_blocked";
     if (candidate.campaignId !== campaign.id) return "campaign_mismatch";
     if (candidate.decision !== CONFIG.queue.decisionReady) return "decision_not_ready";
     if (normalizeLabel(candidate.mailingStatus) !== CONFIG.queue.statusQueued) {
@@ -683,6 +695,7 @@ var TenderOutreach = (function () {
     if (isBlockedTemplate(template)) return "template_blocked";
     if (!candidate.candidateId) return "candidate_id_missing";
     if (!candidate.email) return "email_missing_or_invalid";
+    if (isBlockedRecipientDomain(candidate.email)) return "recipient_domain_delivery_blocked";
     if (candidate.campaignId !== campaign.id) return "campaign_mismatch";
     if (["needs_contact_review", CONFIG.queue.decisionReady].indexOf(candidate.decision) < 0) {
       return "decision_not_eligible_for_automation";
@@ -738,6 +751,7 @@ var TenderOutreach = (function () {
     if (isBlockedTemplate(template)) return "template_blocked";
     if (!candidate.candidateId) return "candidate_id_missing";
     if (!candidate.email) return "email_missing_or_invalid";
+    if (isBlockedRecipientDomain(candidate.email)) return "recipient_domain_delivery_blocked";
     if (candidate.campaignId !== campaign.id) return "campaign_mismatch";
     if (candidate.decision !== CONFIG.queue.decisionReady) return "decision_not_ready";
     if (normalizeLabel(candidate.mailingStatus) !== CONFIG.queue.statusWorkingDraft) {

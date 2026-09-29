@@ -236,6 +236,43 @@ test("automated preparation requires explicit campaign authorization and tender 
   );
 });
 
+test("domains with confirmed delivery failures cannot enter drafts or final send", () => {
+  for (const domain of ["crimeaedu.ru", "ukr.net", "yandex.ua"]) {
+    const email = `buyer@${domain}`;
+    const draftCandidate = candidate({
+      email,
+      decision: "needs_contact_review",
+      mailingStatus: "заблокировано",
+    });
+    assert.equal(
+      outreach.automatedDraftEligibility(
+        draftCandidate,
+        automatedCampaign(),
+        {},
+        template,
+        {}
+      ),
+      "recipient_domain_delivery_blocked"
+    );
+    const sendCandidate = candidate({
+      email,
+      mailingStatus: "рабочий черновик",
+      stage: "рабочий черновик",
+      draftId: "draft-1",
+      autoSend: true,
+    });
+    assert.equal(
+      outreach.productionSendEligibility(
+        sendCandidate,
+        automatedCampaign(),
+        {},
+        template
+      ),
+      "recipient_domain_delivery_blocked"
+    );
+  }
+});
+
 test("production permits a reviewed public tender campaign without rewriting consent fields", () => {
   const ready = candidate({
     mailingStatus: "рабочий черновик",
