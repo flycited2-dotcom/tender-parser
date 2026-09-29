@@ -347,11 +347,73 @@ test("production batch and schedule have conservative hard limits", () => {
   assert.equal(outreach.clampProductionBatchLimit("50"), 10);
   assert.equal(outreach.clampProductionBatchLimit("0"), 5);
   assert.equal(outreach.CONFIG.maxHardSendsPerDay, 50);
-  assert.equal(outreach.CONFIG.maxNewHardBouncesBeforePause, 3);
+  assert.equal(outreach.CONFIG.maxHardBouncesInWindowBeforePause, 5);
+  assert.equal(outreach.CONFIG.bounceWindowHours, 24);
+  assert.equal(outreach.CONFIG.bounceCooldownHours, 2);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 1, 10 * 60), true);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 5, 17 * 60), true);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 6, 12 * 60), false);
   assert.equal(outreach.isScheduleOpen(productionCampaign(), 3, 9 * 60 + 59), false);
+});
+
+function fakeProperties(initial = {}) {
+  const values = { ...initial };
+  return {
+    values,
+    getProperty: (key) => values[key] ?? null,
+    setProperty: (key, value) => { values[key] = String(value); },
+    deleteProperty: (key) => { delete values[key]; },
+  };
+}
+
+test("five new bounces pause for two hours, then recover automatically", () => {
+  const keys = outreach.CONFIG.properties;
+  const props = fakeProperties({ [keys.schedulerMode]: "true" });
+  const start = Date.parse("2026-09-29T10:00:00Z");
+  assert.equal(outreach.updateSchedulerCircuit(props, start, false, 0, 4, false).transition, "");
+  assert.equal(props.values[keys.schedulerMode], "true");
+  const paused = outreach.updateSchedulerCircuit(props, start, false, 0, 5, false);
+  assert.equal(paused.transition, "bounce_cooldown_started");
+  assert.equal(props.values[keys.schedulerMode], "false");
+  assert.equal(Number(props.values[keys.schedulerResumeAt]), start + 2 * 60 * 60 * 1000);
+  outreach.updateSchedulerCircuit(props, start + 60 * 60 * 1000, false, 0, 0, false);
+  assert.equal(props.values[keys.schedulerMode], "false");
+  outreach.updateSchedulerCircuit(props, start + 2 * 60 * 60 * 1000, false, 0, 0, true);
+  assert.equal(props.values[keys.schedulerMode], "false");
+  const resumed = outreach.updateSchedulerCircuit(
+    props, start + 2 * 60 * 60 * 1000, false, 0, 0, false
+  );
+  assert.equal(resumed.transition, "bounce_cooldown_completed");
+  assert.equal(props.values[keys.schedulerMode], "true");
+  assert.equal(props.values[keys.schedulerResumeAt], undefined);
+});
+
+test("hard bounces from separate checks accumulate only within 24 hours", () => {
+  const props = fakeProperties();
+  const start = Date.parse("2026-09-29T10:00:00Z");
+  assert.equal(outreach.recordRecentHardBounces(props, start, 2), 2);
+  assert.equal(outreach.recordRecentHardBounces(props, start + 15 * 60 * 1000, 2), 4);
+  assert.equal(outreach.recordRecentHardBounces(props, start + 30 * 60 * 1000, 1), 5);
+  assert.equal(outreach.recordRecentHardBounces(props, start + 25 * 60 * 60 * 1000, 0), 0);
+});
+
+test("sender and manual pauses do not auto-resume", () => {
+  const keys = outreach.CONFIG.properties;
+  const start = Date.parse("2026-09-29T10:00:00Z");
+  const sender = fakeProperties({ [keys.schedulerMode]: "true" });
+  outreach.updateSchedulerCircuit(sender, start, true, 3, 0, false);
+  assert.equal(sender.values[keys.schedulerPauseKind], "sender");
+  outreach.updateSchedulerCircuit(sender, start + 24 * 60 * 60 * 1000, false, 0, 5, false);
+  assert.equal(sender.values[keys.schedulerMode], "false");
+  assert.equal(sender.values[keys.schedulerPauseKind], "sender");
+  const manual = fakeProperties({
+    [keys.schedulerMode]: "false",
+    [keys.schedulerPauseKind]: "manual",
+    [keys.schedulerPauseReason]: "Аварийная остановка",
+  });
+  outreach.updateSchedulerCircuit(manual, start, false, 0, 5, false);
+  assert.equal(manual.values[keys.schedulerPauseKind], "manual");
+  assert.equal(manual.values[keys.schedulerMode], "false");
 });
 
 test("template rendering is deterministic", () => {

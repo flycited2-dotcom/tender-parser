@@ -39,6 +39,9 @@ var TenderOutreach = (function () {
       replyTo: "TENDER_OUTREACH_REPLY_TO",
       visualTemplateMode: "TENDER_OUTREACH_VISUAL_TEMPLATE_MODE",
       schedulerPauseReason: "TENDER_OUTREACH_SCHEDULER_PAUSE_REASON",
+      schedulerPauseKind: "TENDER_OUTREACH_SCHEDULER_PAUSE_KIND",
+      schedulerResumeAt: "TENDER_OUTREACH_SCHEDULER_RESUME_AT",
+      recentHardBounces: "TENDER_OUTREACH_RECENT_HARD_BOUNCES",
     },
     // The owner approved the final visual treatment on 05.09.2026. An
     // explicit script property of "false" remains an immediate rollback.
@@ -85,8 +88,11 @@ var TenderOutreach = (function () {
     defaultProductionBatchLimit: 5,
     maxProcessedMessageIds: 300,
     mailboxLookbackDays: 14,
-    // Old, already processed bounces do not increment this counter.
-    maxNewHardBouncesBeforePause: 3,
+    // Only newly processed bounces count; retain a rolling window so delayed
+    // delivery notices from different 15-minute checks still accumulate.
+    maxHardBouncesInWindowBeforePause: 5,
+    bounceWindowHours: 24,
+    bounceCooldownHours: 2,
     // A single remote server can reject the envelope sender even when the
     // configured Gmail alias is healthy. Require three confirmed sender-side
     // failures before stopping the whole campaign.
@@ -2358,6 +2364,9 @@ var TenderOutreach = (function () {
     var pauseReason = String(reason || "Проверка недоставленных писем").trim();
     properties.setProperty(CONFIG.properties.schedulerMode, "false");
     properties.setProperty(CONFIG.properties.schedulerPauseReason, pauseReason);
+    properties.setProperty(CONFIG.properties.schedulerPauseKind, "manual");
+    properties.deleteProperty(CONFIG.properties.schedulerResumeAt);
+    properties.deleteProperty(CONFIG.properties.recentHardBounces);
     var context = loadContext();
     var totals = updateMailboxDashboard(context, new Date());
     appendEvent(
@@ -2376,6 +2385,93 @@ var TenderOutreach = (function () {
       totalBounced: totals.bounced,
       totalSenderErrors: totals.senderErrors,
     };
+  }
+
+  function recordRecentHardBounces(properties, nowMs, newHardBounces) {
+    var key = CONFIG.properties.recentHardBounces;
+    var parsed;
+    try {
+      parsed = JSON.parse(properties.getProperty(key) || "[]");
+    } catch (error) {
+      parsed = [];
+    }
+    var cutoff = nowMs - CONFIG.bounceWindowHours * 60 * 60 * 1000;
+    var recent = (Array.isArray(parsed) ? parsed : []).filter(function (stamp) {
+      return typeof stamp === "number" && stamp > cutoff && stamp <= nowMs;
+    });
+    for (var index = 0; index < newHardBounces; index += 1) recent.push(nowMs);
+    properties.setProperty(key, JSON.stringify(recent.slice(-100)));
+    return recent.length;
+  }
+
+  function updateSchedulerCircuit(properties, nowMs, senderCircuitOpen,
+    senderErrorCount, recentHardBounces, mailboxFailures) {
+    var pauseKind = String(properties.getProperty(
+      CONFIG.properties.schedulerPauseKind
+    ) || "");
+    var previousReason = String(properties.getProperty(
+      CONFIG.properties.schedulerPauseReason
+    ) || "");
+    if (senderCircuitOpen) {
+      properties.setProperty(CONFIG.properties.schedulerMode, "false");
+      properties.setProperty(CONFIG.properties.schedulerPauseKind, "sender");
+      properties.deleteProperty(CONFIG.properties.schedulerResumeAt);
+      properties.setProperty(
+        CONFIG.properties.schedulerPauseReason,
+        "Предохранитель: " + senderErrorCount +
+          " подтверждённых ошибок адреса отправителя; требуется проверка"
+      );
+      return { transition: pauseKind === "sender" ? "" : "sender_paused", resumeAt: "" };
+    }
+    if (pauseKind === "manual" || pauseKind === "sender" ||
+      (properties.getProperty(CONFIG.properties.schedulerMode) !== "true" &&
+        !pauseKind && previousReason &&
+        !/Предохранитель:.*жёстких возврата/i.test(previousReason))) {
+      return { transition: "", resumeAt: "" };
+    }
+    if (recentHardBounces >= CONFIG.maxHardBouncesInWindowBeforePause) {
+      var until = nowMs + CONFIG.bounceCooldownHours * 60 * 60 * 1000;
+      properties.setProperty(CONFIG.properties.schedulerMode, "false");
+      properties.setProperty(CONFIG.properties.schedulerPauseKind, "bounce_cooldown");
+      properties.setProperty(CONFIG.properties.schedulerResumeAt, String(until));
+      properties.setProperty(
+        CONFIG.properties.schedulerPauseReason,
+        "Предохранитель: " + recentHardBounces + " недоставок за 24 часа; " +
+          "автозапуск " + (typeof Utilities !== "undefined"
+            ? Utilities.formatDate(new Date(until), "Europe/Moscow", "dd.MM.yyyy HH:mm") + " МСК"
+            : new Date(until).toISOString())
+      );
+      properties.deleteProperty(CONFIG.properties.recentHardBounces);
+      return { transition: "bounce_cooldown_started", resumeAt: new Date(until).toISOString() };
+    }
+    // Migrate an older indefinite bounce pause without auto-resuming a manual
+    // or sender-authentication incident.
+    if (!pauseKind && /Предохранитель:.*жёстких возврата/i.test(previousReason)) {
+      pauseKind = "bounce_cooldown";
+      properties.setProperty(CONFIG.properties.schedulerPauseKind, pauseKind);
+      properties.setProperty(
+        CONFIG.properties.schedulerResumeAt,
+        String(nowMs + CONFIG.bounceCooldownHours * 60 * 60 * 1000)
+      );
+    }
+    if (pauseKind !== "bounce_cooldown") return { transition: "", resumeAt: "" };
+    var resumeAtMs = Number(properties.getProperty(
+      CONFIG.properties.schedulerResumeAt
+    ));
+    if (!isFinite(resumeAtMs) || resumeAtMs <= 0) {
+      resumeAtMs = nowMs + CONFIG.bounceCooldownHours * 60 * 60 * 1000;
+      properties.setProperty(CONFIG.properties.schedulerResumeAt, String(resumeAtMs));
+    }
+    if (nowMs >= resumeAtMs && !mailboxFailures) {
+      properties.setProperty(CONFIG.properties.schedulerMode, "true");
+      properties.deleteProperty(CONFIG.properties.schedulerPauseReason);
+      properties.deleteProperty(CONFIG.properties.schedulerPauseKind);
+      properties.deleteProperty(CONFIG.properties.schedulerResumeAt);
+      properties.deleteProperty(CONFIG.properties.recentHardBounces);
+      return { transition: "bounce_cooldown_completed", resumeAt: "" };
+    }
+    properties.setProperty(CONFIG.properties.schedulerMode, "false");
+    return { transition: "", resumeAt: new Date(resumeAtMs).toISOString() };
   }
 
   function isOptOutText(text) {
@@ -2550,33 +2646,38 @@ var TenderOutreach = (function () {
           failures.push(messageId + ":" + String(error.message || error));
         }
       });
+      var nowMs = Date.now();
+      var recentHardBounces = recordRecentHardBounces(
+        properties, nowMs, newHardBounces
+      );
       var bounceCircuitOpen =
-        newHardBounces >= CONFIG.maxNewHardBouncesBeforePause;
+        recentHardBounces >= CONFIG.maxHardBouncesInWindowBeforePause;
       var currentCounts = mailboxStatusCounts(context.queueSheet, statusColumn);
       var senderCircuitOpen =
         currentCounts.senderErrors >= CONFIG.maxSenderAliasFailuresBeforePause;
-      if (senderCircuitOpen || bounceCircuitOpen) {
-        properties.setProperty(CONFIG.properties.schedulerMode, "false");
-        properties.setProperty(
-          CONFIG.properties.schedulerPauseReason,
-          senderCircuitOpen
-            ? "Предохранитель: " + currentCounts.senderErrors +
-              " подтверждённых ошибок адреса отправителя"
-            : "Предохранитель: " + newHardBounces +
-              " новых жёстких возврата за одну проверку"
+      var circuit = updateSchedulerCircuit(
+        properties,
+        nowMs,
+        senderCircuitOpen,
+        currentCounts.senderErrors,
+        recentHardBounces,
+        failures.length > 0
+      );
+      if (circuit.transition) {
+        appendEvent(
+          context.eventsSheet,
+          "tender-intro-v1",
+          "",
+          "",
+          circuit.transition,
+          circuit.transition === "bounce_cooldown_completed"
+            ? "приостановлена" : "активна",
+          circuit.transition === "bounce_cooldown_completed"
+            ? "активна" : "приостановлена",
+          circuit.transition === "bounce_cooldown_completed"
+            ? "cooldown_elapsed_mailbox_clean"
+            : (circuit.resumeAt || "sender_error_requires_review")
         );
-      } else {
-        var pauseReason = String(
-          properties.getProperty(CONFIG.properties.schedulerPauseReason) || ""
-        );
-        if (
-          properties.getProperty(CONFIG.properties.schedulerMode) !== "true" &&
-          /(?:Системная ошибка адреса отправителя|подтверждённых ошибок адреса отправителя)/i
-            .test(pauseReason)
-        ) {
-          properties.setProperty(CONFIG.properties.schedulerMode, "true");
-          properties.deleteProperty(CONFIG.properties.schedulerPauseReason);
-        }
       }
       saveProcessedMessageSet(properties, CONFIG.properties.processedMailboxIds, processed);
       var totals = updateMailboxDashboard(context, new Date());
@@ -2593,7 +2694,11 @@ var TenderOutreach = (function () {
         senderCircuitOpen: senderCircuitOpen,
         senderErrorPauseThreshold: CONFIG.maxSenderAliasFailuresBeforePause,
         newHardBounces: newHardBounces,
+        recentHardBounces: recentHardBounces,
+        bounceWindowHours: CONFIG.bounceWindowHours,
         bounceCircuitOpen: bounceCircuitOpen,
+        bounceCooldownResumeAt: circuit.resumeAt,
+        circuitTransition: circuit.transition,
         schedulerPaused: schedulerPausedNow,
         unmatchedBounces: unmatchedBounces,
         failures: failures.slice(0, 5),
@@ -2690,7 +2795,13 @@ var TenderOutreach = (function () {
     } catch (error) {
       mailbox = { error: String(error.message || error) };
     }
-    var result = { mailbox: mailbox, sending: sendProductionBatch(true) };
+    // A failed or skipped mailbox check must not silently bypass the
+    // deliverability circuit. Retry on the next hourly trigger instead.
+    var sending = mailbox.error || mailbox.skipped ||
+      (mailbox.failures && mailbox.failures.length)
+      ? { sent: 0, skipped: "mailbox_check_unavailable" }
+      : sendProductionBatch(true);
+    var result = { mailbox: mailbox, sending: sending };
     Logger.log(JSON.stringify(result));
     return result;
   }
@@ -2710,7 +2821,8 @@ var TenderOutreach = (function () {
     var result = processMailboxSignals({ forceReprocess: true });
     if (
       result.failures.length ||
-      result.totalSenderErrors >= CONFIG.maxSenderAliasFailuresBeforePause
+      result.totalSenderErrors >= CONFIG.maxSenderAliasFailuresBeforePause ||
+      result.bounceCircuitOpen
     ) {
       throw new Error("Автоматика не возобновлена: почтовые ошибки требуют проверки");
     }
@@ -2724,11 +2836,14 @@ var TenderOutreach = (function () {
     );
     properties.setProperty(CONFIG.properties.schedulerMode, "true");
     properties.deleteProperty(CONFIG.properties.schedulerPauseReason);
+    properties.deleteProperty(CONFIG.properties.schedulerPauseKind);
+    properties.deleteProperty(CONFIG.properties.schedulerResumeAt);
+    properties.deleteProperty(CONFIG.properties.recentHardBounces);
     updateMailboxDashboard(loadContext(), new Date());
     result.schedulerPaused = false;
     result.schedulerResumed = true;
     result.batchLimit = CONFIG.defaultProductionBatchLimit;
-    result.hardBouncePauseThreshold = CONFIG.maxNewHardBouncesBeforePause;
+    result.hardBouncePauseThreshold = CONFIG.maxHardBouncesInWindowBeforePause;
     result.senderErrorPauseThreshold = CONFIG.maxSenderAliasFailuresBeforePause;
     Logger.log(JSON.stringify(result));
     return result;
@@ -2789,6 +2904,8 @@ var TenderOutreach = (function () {
     gmailBounceSearchQuery: gmailBounceSearchQuery,
     extractBounceDiagnostic: extractBounceDiagnostic,
     isSenderAliasFailure: isSenderAliasFailure,
+    recordRecentHardBounces: recordRecentHardBounces,
+    updateSchedulerCircuit: updateSchedulerCircuit,
     normalizeBase64WebSafe: normalizeBase64WebSafe,
     isOptOutText: isOptOutText,
     extractDmarcRowsFromXml: extractDmarcRowsFromXml,
