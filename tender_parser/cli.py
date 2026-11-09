@@ -63,6 +63,7 @@ from tender_parser.sources.rostender import RostenderSource
 from tender_parser.sources.roseltorg import RoseltorgSource
 from tender_parser.sources.rts import RtsPublicSource, SourceFetchError
 from tender_parser.sources.rts_cabinet import RtsCabinetBrowserSource
+from tender_parser.sources.rts_sections import RtsSectionsSource
 from tender_parser.sources.tender_pro import TenderProSource
 from tender_parser.sources.tektorg import TektorgSource
 from tender_parser.sources.torgi82 import Torgi82Source
@@ -105,6 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
             "rts-add-page",
             "rts-watch",
             "rts-refresh",
+            "rts-sections-refresh",
+            "report-refresh",
             "supplier-index",
             "supplier-search",
             "supplier-import",
@@ -222,6 +225,7 @@ def build_source_for_profile(
                         eis_xml_source(),
                         EisZakupkiSource(),
                         RostenderSource(),
+                        RtsSectionsSource(project_dir),
                     ],
                     parallel=True,
                     max_workers=4,
@@ -248,6 +252,7 @@ def build_source_for_profile(
                     EisZakupkiSource(),
                     RostenderSource(),
                     RtsPublicSource(),
+                    RtsSectionsSource(project_dir),
                 ],
                 parallel=True,
                 max_workers=4,
@@ -673,6 +678,16 @@ def run(argv: Sequence[str] | None = None, source: TenderSource | None = None) -
         return 2
     if args.command == "rts-refresh":
         return _rts_refresh_command(data_dir, _all_keywords(), current_time, source)
+    if args.command == "rts-sections-refresh":
+        result = RtsSectionsSource(base_dir, now=current_time).fetch_with_report([])
+        from dataclasses import asdict
+        print(json.dumps({'sources': [asdict(s) for s in result.health]}, ensure_ascii=False, indent=2))
+        return 0 if all(s.status in {'ok', 'empty'} for s in result.health) else 2
+    if args.command == "report-refresh":
+        from tender_parser.report_refresh import refresh_saved_report
+        result = refresh_saved_report(base_dir,now=current_time)
+        print(json.dumps(result,ensure_ascii=False,indent=2))
+        return 2 if result['google_status']=='error' or result['telegram_status']=='error' else 0
     if source is not None:
         active_source = source
     elif args.profile == "rts-accumulated":

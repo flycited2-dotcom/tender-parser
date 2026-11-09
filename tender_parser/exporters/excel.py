@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping
@@ -21,6 +22,7 @@ from tender_parser.customers import CUSTOMER_HEADERS
 from tender_parser.direct_links import documents_destination, platform_display_name
 from tender_parser.regions import detect_city, detect_region, region_priority_rank
 from tender_parser.run_report import SourceHealth
+from tender_parser.exporters.excel_layout import fit_wrapped_row, fit_wrapped_sheet
 
 
 HEADERS = [
@@ -145,6 +147,17 @@ def _safe(value: object) -> object:
     return value
 
 
+def _excel_customer_value(value: object) -> object:
+    """Convert Russian Google Sheets hyperlinks to valid OOXML formulas."""
+    value = _safe(value)
+    if not isinstance(value, str):
+        return value
+    match = re.fullmatch(r'(=HYPERLINK\(".*")([;,])(".*"\))', value, flags=re.IGNORECASE)
+    if match:
+        return f"{match.group(1)},{match.group(3)}"
+    return value
+
+
 def _safe_price(price: float | None) -> float | None:
     if price is None or not isfinite(price):
         return None
@@ -172,30 +185,13 @@ TOP = Alignment(vertical="top")
 _GRID_SIDE = Side(style="thin", color="FFD8DDE3")
 GRID_BORDER = Border(left=_GRID_SIDE, right=_GRID_SIDE, top=_GRID_SIDE, bottom=_GRID_SIDE)
 
-# Колонки с переносом текста: по ним считается высота строки (ширина уменьшена на поля).
 WRAP_COLUMNS = {
-    "название": 53,
-    "причина_включения": 43,
-    "причина_исключения": 33,
-    "delivery_region_evidence": 28,
+    "приоритет", "название", "регион", "город", "торговая площадка",
+    "заказчик", "категория", "уверенность", "мой_выбор", "комментарий",
+    "прямая ссылка", "документы", "официальный источник", "ссылка на площадку",
+    "закон", "способ определения", "источник", "статус", "причина_включения",
+    "причина_исключения", "detail_status", "document_matches", "delivery_region_evidence",
 }
-ROW_LINE_HEIGHT = 13.5
-MAX_ROW_LINES = 5
-
-
-def _row_lines(tender: TenderRecord) -> int:
-    values = {
-        "название": tender.title,
-        "причина_включения": tender.include_reason,
-        "причина_исключения": tender.exclude_reason,
-        "delivery_region_evidence": tender.delivery_region_evidence,
-    }
-    lines = 1
-    for header, width in WRAP_COLUMNS.items():
-        text = values.get(header) or ""
-        if text:
-            lines = max(lines, ceil(len(text) / width))
-    return min(lines, MAX_ROW_LINES)
 
 
 def _format_dt(value: datetime | None) -> str:
@@ -254,18 +250,39 @@ def _platform_sheet_names(tenders: list[TenderRecord]) -> dict[str, str]:
     return result
 
 
-def sort_for_review(tenders: list[TenderRecord]) -> list[TenderRecord]:
+def _deadline_sort_key(
+    deadline: datetime | None,
+    now: datetime,
+) -> tuple[int, float]:
+    """Put live deadlines first and expired cards in a separate tail.
+
+    Live cards are ordered from the nearest deadline to the farthest one.
+    Cards without a deadline follow them because their urgency is unknown.
+    Expired cards are last, with the most recently expired card first.
+    """
+    if deadline is None:
+        return 1, 0
+    if deadline >= now:
+        return 0, deadline.timestamp()
+    return 2, -deadline.timestamp()
+
+
+def sort_for_review(
+    tenders: list[TenderRecord],
+    *,
+    now: datetime | None = None,
+) -> list[TenderRecord]:
+    current = now or datetime.now()
     return sorted(
         tenders,
         key=lambda tender: (
+            *_deadline_sort_key(tender.deadline, current),
             PRIORITY_ORDER.get(tender.review_priority, 4),
             region_priority_rank(
                 tender.delivery_region_evidence,
                 tender.region,
                 tender.title,
             ),
-            tender.deadline is None,
-            tender.deadline or datetime.max,
             tender.price is None,
             -(tender.price or 0),
             -(tender.discovered_at.timestamp() if tender.discovered_at else 0),
@@ -401,7 +418,7 @@ def _append_rows(
     sheet.add_data_validation(choice_validation)
     choice_column = get_column_letter(HEADERS.index("мой_выбор") + 1)
 
-    for tender in tenders:
+    for row, tender in enumerate(tenders, start=2):
         days = _days_left(tender.deadline, now)
         choice, comment = _selection_for(tender, selections)
         documents = documents_destination(tender)
@@ -447,7 +464,6 @@ def _append_rows(
                 ]
             ]
         )
-        row = sheet.max_row
         row_fill_color = PRIORITY_FILLS.get(tender.review_priority or "")
         row_fill = PatternFill("solid", start_color=row_fill_color) if row_fill_color else None
         for index in range(1, len(HEADERS) + 1):
@@ -456,7 +472,6 @@ def _append_rows(
             cell.border = GRID_BORDER
             if row_fill is not None:
                 cell.fill = row_fill
-        sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * _row_lines(tender) + 3
 
         priority_cell = sheet.cell(row=row, column=1)
         priority_cell.font = Font(bold=True, size=10)
@@ -500,13 +515,15 @@ def _append_rows(
         sheet.cell(
             row=row, column=HEADERS.index("уверенность определения") + 1
         ).number_format = "0%"
-        for header in ("причина_включения", "причина_исключения", "delivery_region_evidence"):
+        for header in WRAP_COLUMNS:
             sheet.cell(row=row, column=HEADERS.index(header) + 1).alignment = WRAP_TOP
+        fit_wrapped_row(sheet, row, columns=len(HEADERS))
 
     last_row = max(sheet.max_row, 2)
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}{last_row}"
     sheet.freeze_panes = "E2"
     choice_validation.add(f"{choice_column}2:{choice_column}{last_row}")
+    fit_wrapped_row(sheet, 1, minimum=30)
 
 
 def _append_customer_rows(sheet: Worksheet, rows: list[list[object]]) -> None:
@@ -520,11 +537,10 @@ def _append_customer_rows(sheet: Worksheet, rows: list[list[object]]) -> None:
     widths = [24, 48, 18, 22, 15, 42, 42, 30, 20, 32, 30, 32, 30, 18, 20, 36]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
-    for values in rows:
+    for row, values in enumerate(rows, start=2):
         padded = list(values[: len(CUSTOMER_HEADERS)])
         padded.extend([""] * (len(CUSTOMER_HEADERS) - len(padded)))
-        sheet.append([_safe(value) for value in padded])
-        row = sheet.max_row
+        sheet.append([_excel_customer_value(value) for value in padded])
         for column in range(1, len(CUSTOMER_HEADERS) + 1):
             cell = sheet.cell(row=row, column=column)
             cell.alignment = WRAP_TOP
@@ -535,7 +551,8 @@ def _append_customer_rows(sheet: Worksheet, rows: list[list[object]]) -> None:
             if value.startswith(("http://", "https://")):
                 cell.hyperlink = value
                 cell.font = LINK_FONT
-        sheet.row_dimensions[row].height = 32
+        fit_wrapped_row(sheet, row, minimum=32, columns=len(CUSTOMER_HEADERS))
+    fit_wrapped_row(sheet, 1, minimum=30)
 
 
 def _count_by(tenders: list[TenderRecord], key) -> list[tuple[str, int]]:
@@ -672,7 +689,7 @@ def _build_dashboard(
 
     closing_soon = [
         tender
-        for tender in sort_for_review(actionable)
+        for tender in sort_for_review(actionable, now=now)
         if (days := _days_left(tender.deadline, now)) is not None and 0 <= days <= 3
     ][:10]
     if closing_soon:
@@ -701,7 +718,7 @@ def _build_dashboard(
             days_cell = sheet.cell(row=row, column=5, value=_days_left(tender.deadline, now))
             days_cell.fill = PatternFill("solid", start_color=DEADLINE_URGENT_FILL)
             _border_row(sheet, row, 5)
-            sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * max(1, min(ceil(len(tender.title) / 53), 4)) + 3
+            fit_wrapped_row(sheet, row)
 
     if excluded:
         row += 2
@@ -723,7 +740,7 @@ def _build_dashboard(
     for index, header in enumerate(top_headers, start=1):
         sheet.cell(row=row, column=index, value=header)
     _style_header(sheet, len(top_headers), row=row)
-    for tender in sort_for_review(hot)[:10]:
+    for tender in sort_for_review(hot, now=now)[:10]:
         row += 1
         title_cell = sheet.cell(row=row, column=1, value=_safe(tender.title))
         title_cell.alignment = WRAP_TOP
@@ -738,7 +755,7 @@ def _build_dashboard(
         days = _days_left(tender.deadline, now)
         sheet.cell(row=row, column=5, value=days if days is not None else "")
         _border_row(sheet, row, 5)
-        sheet.row_dimensions[row].height = ROW_LINE_HEIGHT * max(1, min(ceil(len(tender.title) / 53), 4)) + 3
+        fit_wrapped_row(sheet, row)
 
     if source_health:
         row += 2
@@ -759,6 +776,7 @@ def _build_dashboard(
             detail_cell = sheet.cell(row=row, column=5, value=_safe(item.detail))
             detail_cell.alignment = WRAP_TOP
             _border_row(sheet, row, 5)
+    fit_wrapped_sheet(sheet)
 
 
 def export_excel(
@@ -809,27 +827,53 @@ def export_excel(
     ]
     if picked:
         _append_rows(
-            workbook.create_sheet("Мой отбор"), sort_for_review(picked), current, manual_selections, new_keys
+            workbook.create_sheet("Мой отбор"),
+            sort_for_review(picked, now=current),
+            current,
+            manual_selections,
+            new_keys,
         )
 
     if new_tenders is not None:
         _append_rows(
-            workbook.create_sheet("Новые"), sort_for_review(new_tenders), current, manual_selections, new_keys
+            workbook.create_sheet("Новые"),
+            sort_for_review(new_tenders, now=current),
+            current,
+            manual_selections,
+            new_keys,
         )
-    _append_rows(workbook.create_sheet("Горячие"), sort_for_review(hot), current, manual_selections, new_keys)
     _append_rows(
-        workbook.create_sheet("На проверку"), sort_for_review(review), current, manual_selections, new_keys
+        workbook.create_sheet("Горячие"),
+        sort_for_review(hot, now=current),
+        current,
+        manual_selections,
+        new_keys,
     )
     _append_rows(
-        workbook.create_sheet("Широкий хвост"), sort_for_review(wide), current, manual_selections, new_keys
+        workbook.create_sheet("На проверку"),
+        sort_for_review(review, now=current),
+        current,
+        manual_selections,
+        new_keys,
     )
     _append_rows(
-        workbook.create_sheet("Отсеянные"), sort_for_review(excluded), current, manual_selections, new_keys
+        workbook.create_sheet("Широкий хвост"),
+        sort_for_review(wide, now=current),
+        current,
+        manual_selections,
+        new_keys,
+    )
+    _append_rows(
+        workbook.create_sheet("Отсеянные"),
+        sort_for_review(excluded, now=current),
+        current,
+        manual_selections,
+        new_keys,
     )
     if regional_tenders is not None:
         _append_rows(
             workbook.create_sheet("Все региональные"),
-            sort_for_review(regional_tenders),
+            sort_for_review(regional_tenders, now=current),
             current,
             manual_selections,
             new_keys,
@@ -843,7 +887,7 @@ def export_excel(
         platform_sheet = workbook.create_sheet(sheet_name)
         _append_rows(
             platform_sheet,
-            sort_for_review(platform_tenders),
+            sort_for_review(platform_tenders, now=current),
             current,
             manual_selections,
             new_keys,

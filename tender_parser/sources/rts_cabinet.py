@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Literal
 from typing import Protocol
 from urllib.parse import urljoin
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -138,7 +139,7 @@ def parse_cabinet_page(html: str, source_url: str) -> list[TenderRecord]:
 def _parse_jqgrid_rows(soup: BeautifulSoup, source_url: str) -> list[TenderRecord]:
     tenders: list[TenderRecord] = []
     for row in soup.select("tr.jqgrow"):
-        number_cell = _jq_cell(row, "Number")
+        number_cell = _jq_cell(row, "Number") or _jq_cell(row, "NotificationNumber")
         title_cell = _jq_cell(row, "TradeName") or _jq_cell(row, "Name")
         title = _clean(_cell_text(title_cell)) if title_cell else ""
         if not title:
@@ -146,22 +147,36 @@ def _parse_jqgrid_rows(soup: BeautifulSoup, source_url: str) -> list[TenderRecor
         link = title_cell.find("a", href=True) if title_cell else None
         if link is None and number_cell is not None:
             link = number_cell.find("a", href=True)
+        if link is None:
+            continue
+        official_number = _clean(_cell_text(_jq_cell(row, "OosNumber")))
+        if not official_number:
+            official_number = _clean(_cell_text(_jq_cell(row, "NotificationNumber")))
+            match = re.search(r"\b\d{19}\b", official_number)
+            official_number = match.group() if match else ""
+        if not re.fullmatch(r"\d{11}|\d{19}", official_number):
+            official_number = ""
+        eis_link = next((a for a in row.find_all("a", href=True)
+                         if urlparse(urljoin(source_url, str(a["href"]))).hostname == "zakupki.gov.ru"), None)
         tenders.append(
             TenderRecord(
                 title=title,
                 url=urljoin(source_url, str(link["href"])) if link else source_url,
                 source="rts-cabinet",
-                tender_number=_clean(_cell_text(number_cell)) or _clean(_cell_text(_jq_cell(row, "TradeId"))),
+                tender_number=_clean(number_cell.find("a").get_text(" ", strip=True) if number_cell is not None and number_cell.find("a") else _cell_text(number_cell)) or _clean(_cell_text(_jq_cell(row, "TradeId"))),
                 customer=_clean(_cell_text(_jq_cell(row, "OrganizerName"))),
                 region=_clean(_cell_text(_jq_cell(row, "Region"))),
-                price=_parse_price(_cell_text(_jq_cell(row, "StartPrice"))),
-                deadline=_parse_date(_cell_text(_jq_cell(row, "ApplicationEndDate"))),
-                published_at=_parse_date(_cell_text(_jq_cell(row, "PublicationDate"))),
+                price=_parse_price(_cell_text(_jq_cell(row, "StartPrice") or _jq_cell(row, "StartPriceString"))),
+                deadline=_parse_date(_cell_text(_jq_cell(row, "ApplicationEndDate") or _jq_cell(row, "ApplicationEndDateString"))),
+                published_at=_parse_date(_cell_text(_jq_cell(row, "PublicationDate") or _jq_cell(row, "PublicationDateString"))),
                 status=_clean(_cell_text(_jq_cell(row, "LotStateString"))),
                 discovered_at=datetime.now(),
                 raw_text=_clean(row.get_text(" ", strip=True)),
                 detail_status="enriched",
                 source_confidence=0.9,
+                official_number=official_number or None,
+                official_url=urljoin(source_url, str(eis_link["href"])) if eis_link else None,
+                platform_url=urljoin(source_url, str(link["href"])),
             )
         )
     return tenders

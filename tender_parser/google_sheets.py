@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,23 @@ from tender_parser.run_report import SourceFetchResult, canonical_source_name
 
 
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
+
+
+def _request_error_detail(exc: Exception) -> str:
+    """Keep HTTP diagnostics without logging request URLs, headers or bodies."""
+    detail = type(exc).__name__
+    response = getattr(exc, 'response', None)
+    if response is not None:
+        detail += f' HTTP {response.status_code}'
+        try:
+            status = response.json().get('error', {}).get('status', '')
+            if re.fullmatch(r'[A-Z_]{1,60}', str(status)):
+                detail += f' {status}'
+        except (ValueError, AttributeError, TypeError):
+            pass
+    return detail
+
+
 VALUE_RANGE_CHUNK_ROWS = 200
 VALUE_BATCH_MAX_BYTES = 1_500_000
 LEGACY_DATA_HEADERS = [
@@ -108,6 +126,9 @@ SOURCE_LABELS = {
     "rts-zakupki-simferopol": "РТС — Симферополь",
     "rts-yalta-zmo": "РТС — Ялта ЗМО",
     "rts-market": "РТС — общий рынок",
+    "rts-market-modern": "РТС-маркет — новая витрина",
+    "rts-223": "РТС — кабинет 223-ФЗ",
+    "rts-44": "РТС — кабинет 44-ФЗ",
     "EtpGpbApiSource": "ЭТП ГПБ",
     "RoseltorgSource": "Росэлторг",
     "ZakazRfSource": "ZakazRF",
@@ -164,6 +185,9 @@ SOURCE_URLS = {
     "rts-zakupki-simferopol": "https://zakupki-simferopol.rts-tender.ru/market/",
     "rts-yalta-zmo": "https://yalta-zmo.rts-tender.ru/market/",
     "rts-market": "https://www.rts-tender.ru/market/",
+    "rts-market-modern": "https://market.rts-tender.ru/search/sell",
+    "rts-223": "https://223.rts-tender.ru/supplier/auction/Trade/Search.aspx",
+    "rts-44": "https://app.rts-tender.ru/supplier/auction/Trade/Search.aspx",
 }
 STATUS_LABELS = {
     "ok": "Работает",
@@ -492,7 +516,7 @@ class GoogleSheetsRegistry:
                 },
             )
         except (OSError, ValueError, requests.RequestException) as exc:
-            return self._error(exc.__class__.__name__)
+            return self._error(_request_error_detail(exc))
 
         return GoogleSheetsSyncResult(
             status="synced",
@@ -577,7 +601,7 @@ class GoogleSheetsRegistry:
         except (OSError, ValueError, requests.RequestException) as exc:
             return CustomerRegistrySyncResult(
                 status="error",
-                detail=exc.__class__.__name__,
+                detail=_request_error_detail(exc),
                 spreadsheet_url=self.config.spreadsheet_url,
             )
         report = self.last_customer_report
@@ -1324,7 +1348,16 @@ def _safe_customer_row(row: list[object]) -> list[object]:
             continue
         stripped = value.lstrip()
         if stripped.upper().startswith("=HYPERLINK("):
-            result.append(value)
+            # Excel stores invariant comma separators. Russian Google Sheets
+            # expects semicolons when formulas are sent as USER_ENTERED.
+            result.append(
+                re.sub(
+                    r'^(=HYPERLINK\(".*")([;,])(".*"\))$',
+                    lambda match: f"{match.group(1)};{match.group(3)}",
+                    value,
+                    flags=re.IGNORECASE,
+                )
+            )
         elif stripped.startswith(("=", "+", "-", "@")):
             result.append("'" + value)
         else:

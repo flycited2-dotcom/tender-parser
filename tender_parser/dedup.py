@@ -22,6 +22,9 @@ SOURCE_PRIORITY = {
     "b2b-center": 65,
     "torgi82": 60,
     "rts-market": 50,
+    "rts-market-modern": 95,
+    "rts-223": 95,
+    "rts-44": 95,
     "rostender": 10,
 }
 

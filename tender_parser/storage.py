@@ -377,6 +377,14 @@ class TenderStorage:
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def fetch_latest_batch(self) -> list[TenderRecord]:
+        """Rows from the last stored batch, not the entire historical archive."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM tenders WHERE last_seen_at = (SELECT MAX(last_seen_at) FROM tenders)"
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
     def fetch_pending_notifications(self, limit: int = 50) -> list[TenderRecord]:
         with closing(self._connect()) as conn:
             rows = conn.execute(

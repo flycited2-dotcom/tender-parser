@@ -116,6 +116,24 @@ def test_export_excel_adds_regional_and_customer_sheets(tmp_path: Path) -> None:
     assert load_customer_rows(tmp_path)[0][1] == "ГБУ РК Тест"
 
 
+def test_customer_google_hyperlinks_use_valid_excel_separator(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    row = ["org", "Организация", "", "", "", "", "", "", "", ""]
+    row += [
+        '=HYPERLINK("https://example.test/";"Официальный сайт")',
+        '=HYPERLINK("https://example.test/contacts";"Источник контактов")',
+        "", "", "", "",
+    ]
+
+    export_excel([], [], [], [], output, now=NOW, customer_rows=[row])
+
+    workbook = load_workbook(output, data_only=False)
+    sheet = workbook["Потенциальные заказчики"]
+    assert sheet["K2"].value == '=HYPERLINK("https://example.test/","Официальный сайт")'
+    assert sheet["L2"].value == '=HYPERLINK("https://example.test/contacts","Источник контактов")'
+    assert ";" not in sheet["K2"].value
+
+
 def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> None:
     output = tmp_path / "tenders.xlsx"
     export_excel([make_tender("matched")], [], [], [], output, now=NOW)
@@ -136,6 +154,43 @@ def test_export_excel_data_sheet_is_filterable_and_styled(tmp_path: Path) -> Non
     assert sheet["C2"].value == 6
     assert sheet["C2"].fill.start_color.rgb == "FFFEECCA"
     assert len(sheet.data_validations.dataValidation) == 1
+
+
+def test_report_wraps_customer_and_manual_comment_without_five_line_cap(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    tender = replace(make_tender("matched"),
+                     title="Оборудование " * 45,
+                     customer="Наименование бюджетного учреждения " * 8)
+    comment = "\n".join(f"Строка {i}" for i in range(9))
+    export_excel([tender], [], [], [], output, now=NOW,
+                 manual_selections={(tender.source, tender.tender_number): ("✅ Беру", comment)},
+                 regional_tenders=[tender])
+    book = load_workbook(output)
+    for name in ("Горячие", "Все региональные", "ЭТП — test", "Мой отбор"):
+        sheet = book[name]
+        headers = [c.value for c in sheet[1]]
+        for header in ("название", "заказчик", "комментарий", "категория"):
+            assert sheet.cell(2, headers.index(header) + 1).alignment.wrap_text
+        assert sheet.row_dimensions[2].height > 100
+        assert sheet.row_dimensions[1].height >= 30
+        assert sheet.cell(2, headers.index("комментарий") + 1).value == comment
+        assert sheet["D2"].hyperlink.target == tender.url
+    book.close()
+
+
+def test_report_customer_tab_expands_multiline_contact_rows(tmp_path: Path) -> None:
+    output = tmp_path / "tenders.xlsx"
+    from tender_parser.customers import CUSTOMER_HEADERS
+    row = [""] * len(CUSTOMER_HEADERS)
+    row[0] = "org"
+    row[1] = "Бюджетное учреждение " * 30
+    row[7] = "\n".join(f"office{i}@example.test" for i in range(8))
+    export_excel([], [], [], [], output, now=NOW, customer_rows=[row])
+    book = load_workbook(output)
+    sheet = book["Потенциальные заказчики"]
+    assert sheet["B2"].alignment.wrap_text
+    assert sheet.row_dimensions[2].height >= 125
+    book.close()
 
 
 def test_dashboard_links_to_prefiltered_platform_sheets(tmp_path: Path) -> None:
@@ -457,12 +512,12 @@ def test_sort_for_review_orders_by_priority_deadline_price_and_discovery() -> No
         price=1_000_000.0,
     )
 
-    result = sort_for_review([wide, hot_late, hot_soon])
+    result = sort_for_review([wide, hot_late, hot_soon], now=NOW)
 
     assert [item.tender_number for item in result] == ["1", "2", "3"]
 
 
-def test_sort_for_review_prioritizes_crimea_before_new_target_regions() -> None:
+def test_sort_for_review_prioritizes_deadline_before_region() -> None:
     crimea = replace(
         make_tender("matched"),
         tender_number="crimea",
@@ -482,12 +537,53 @@ def test_sort_for_review_prioritizes_crimea_before_new_target_regions() -> None:
         deadline=datetime(2026, 5, 20),
     )
 
-    result = sort_for_review([kherson, zaporizhzhia, crimea])
+    result = sort_for_review([kherson, zaporizhzhia, crimea], now=NOW)
 
     assert [item.tender_number for item in result] == [
-        "crimea",
         "kherson",
         "zaporizhzhia",
+        "crimea",
+    ]
+
+
+def test_sort_for_review_keeps_expired_cards_after_live_and_unknown_deadlines() -> None:
+    live_soon = replace(
+        make_tender("review"),
+        tender_number="live-soon",
+        deadline=datetime(2026, 5, 20, 9, 0),
+    )
+    live_later = replace(
+        make_tender("matched"),
+        tender_number="live-later",
+        deadline=datetime(2026, 5, 22, 9, 0),
+    )
+    unknown = replace(
+        make_tender("matched"),
+        tender_number="unknown",
+        deadline=None,
+    )
+    expired_recently = replace(
+        make_tender("excluded"),
+        tender_number="expired-recently",
+        deadline=datetime(2026, 5, 19, 10, 0),
+    )
+    expired_long_ago = replace(
+        make_tender("matched"),
+        tender_number="expired-long-ago",
+        deadline=datetime(2026, 5, 10, 10, 0),
+    )
+
+    result = sort_for_review(
+        [expired_long_ago, unknown, live_later, expired_recently, live_soon],
+        now=NOW,
+    )
+
+    assert [item.tender_number for item in result] == [
+        "live-soon",
+        "live-later",
+        "unknown",
+        "expired-recently",
+        "expired-long-ago",
     ]
 
 

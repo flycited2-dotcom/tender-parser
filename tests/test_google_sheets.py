@@ -382,6 +382,14 @@ def test_generated_customer_hyperlink_remains_formula() -> None:
     assert _safe_customer_row([formula]) == [formula]
 
 
+def test_excel_customer_hyperlink_is_localized_for_google_sheets() -> None:
+    formula = '=HYPERLINK("https://example.test/","Открыть")'
+
+    assert _safe_customer_row([formula]) == [
+        '=HYPERLINK("https://example.test/";"Открыть")'
+    ]
+
+
 def test_legacy_google_row_is_mapped_by_headers_without_moving_manual_fields() -> None:
     # The input order is deliberately shuffled to prove migration is driven by
     # names, not the old 20-column positions.
@@ -424,3 +432,13 @@ def test_unresolved_rostender_row_does_not_claim_source_id_as_official() -> None
         '"94216089")'
     )
     assert "rostender.info" in row[21]
+
+
+def test_http_error_diagnostics_do_not_expose_response_secrets():
+    import requests
+    from tender_parser.google_sheets import _request_error_detail
+    response = requests.Response()
+    response.status_code = 400
+    response._content = b'{"error":{"status":"INVALID_ARGUMENT","message":"private-token"}}'
+    exc = requests.HTTPError('https://private-url?token=secret', response=response)
+    assert _request_error_detail(exc) == 'HTTPError HTTP 400 INVALID_ARGUMENT'

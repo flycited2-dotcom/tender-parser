@@ -12,6 +12,9 @@ from tender_parser.rts_accumulator import RtsAccumulator
 from tender_parser.sources.eat_browser import parse_eat_listing_page
 from tender_parser.sources.rts_cabinet import detect_cabinet_state, parse_cabinet_page
 from tender_parser.sources.rts_poisk import parse_poisk_page
+from tender_parser.sources.rts_market_modern import parse_modern_market_page
+from urllib.parse import urlparse
+from dataclasses import replace
 
 
 RECONNECT_DELAY_SECONDS = 5.0
@@ -43,6 +46,9 @@ def collect_from_page(html: str, url: str, accumulator: RtsAccumulator) -> tuple
         if not tenders:
             return None
         return accumulator.add_many(tenders)
+    if urlparse(url).hostname == "market.rts-tender.ru":
+        tenders = parse_modern_market_page(html, url)
+        return accumulator.add_many(tenders) if tenders else None
     if "/poisk" in url:
         tenders = parse_poisk_page(html, url)
         if not tenders:
@@ -53,6 +59,10 @@ def collect_from_page(html: str, url: str, accumulator: RtsAccumulator) -> tuple
     tenders = parse_cabinet_page(html, url)
     if not tenders:
         return None
+    host = urlparse(url).hostname
+    source = {"223.rts-tender.ru": "rts-223", "app.rts-tender.ru": "rts-44"}.get(host)
+    if source:
+        tenders = [replace(t, source=source) for t in tenders]
     return accumulator.add_many(tenders)
 
 

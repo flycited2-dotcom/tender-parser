@@ -220,6 +220,7 @@ def test_build_fast_profile_includes_eis_after_native_tls_fix() -> None:
         "EisRegionalXmlSource",
         "EisZakupkiSource",
         "RostenderSource",
+        "RtsSectionsSource",
     ]
     assert source.sources[0].parallel is True
     assert source.sources[0].max_workers == 4
