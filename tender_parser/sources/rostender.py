@@ -88,7 +88,8 @@ class RostenderSource:
             for page in range(1, self.max_pages_per_query + 1):
                 url = build_search_url(query, page)
                 try:
-                    response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS)
+                    response = get_with_retry(self.session, url, timeout=HTTP_TIMEOUT_SECONDS,
+                                              max_response_bytes=8 * 1024 * 1024)
                 except requests.RequestException as exc:
                     errors.append(f"{query}: {exc}")
                     break

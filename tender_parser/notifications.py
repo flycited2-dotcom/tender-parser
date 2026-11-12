@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
+from time import sleep
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -119,24 +121,49 @@ class TelegramNotifier:
         markup = self._report_markup()
         if markup:
             data["reply_markup"] = json.dumps(markup, ensure_ascii=False)
+        pending_dir = path.parent / '.telegram_pending'
+        identity = hashlib.sha256((str(path.resolve()) + self.config.chat_id).encode()).hexdigest()
+        pending = pending_dir / f'{identity}.json'
         try:
-            with path.open("rb") as handle:
-                response = self.session.post(  # type: ignore[attr-defined]
-                    self._endpoint("sendDocument"),
-                    data=data,
-                    files={
-                        "document": (
-                            path.name,
-                            handle,
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-                    },
-                    timeout=max(self.config.timeout_seconds, 30),
-                )
+            for attempt in range(3):
+                try:
+                    response = self._upload_document(path, data)
+                    break
+                except requests.ConnectTimeout:
+                    if attempt == 2:
+                        raise
+                    sleep(2 * (attempt + 1))
             response.raise_for_status()
+            try:
+                pending.unlink(missing_ok=True)
+            except OSError:
+                pass  # Upload succeeded; cleanup must not turn it into a retry.
         except (OSError, requests.RequestException) as exc:
+            # Only a connect timeout proves the upload never started. Read/
+            # connection timeouts may have delivered the file: don't duplicate it.
+            if isinstance(exc, requests.ConnectTimeout):
+                try:
+                    pending_dir.mkdir(parents=True, exist_ok=True)
+                    temp = pending.with_suffix('.tmp')
+                    stat = path.stat()
+                    temp.write_text(json.dumps({'path': str(path.resolve()), 'caption': caption,
+                        'chat_id': self.config.chat_id, 'size': stat.st_size,
+                        'mtime_ns': stat.st_mtime_ns}, ensure_ascii=False), encoding='utf8')
+                    temp.replace(pending)
+                except OSError:
+                    return NotificationResult(status='error', detail='ConnectTimeout; queue write failed')
             return NotificationResult(status="error", detail=exc.__class__.__name__)
         return NotificationResult(status="sent", sent_count=1, detail="Файл отправлен")
+
+    def _upload_document(self, path: Path, data: dict) -> object:
+        with path.open("rb") as handle:
+            return self.session.post(  # type: ignore[attr-defined]
+                self._endpoint("sendDocument"),
+                data=data,
+                files={"document": (path.name, handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                timeout=max(self.config.timeout_seconds, 180),
+            )
 
     def _endpoint(self, method: str) -> str:
         return f"https://api.telegram.org/bot{self.config.bot_token}/{method}"

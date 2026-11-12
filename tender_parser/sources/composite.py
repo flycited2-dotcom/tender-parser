@@ -150,3 +150,10 @@ class CompositeSource:
                 ],
                 [detail],
             )
+        except Exception as exc:
+            # A broken adapter must not discard successful independent sources.
+            # Do not log exception strings: HTTP URLs may contain credentials.
+            source_name = str(getattr(source, 'source_name', source.__class__.__name__))
+            detail = f'{type(exc).__name__}; source failed; other sources retained'
+            return _SourceResult([], [SourceHealth(source_name, 'error', 0,
+                round(monotonic() - started_at, 3), detail)], [detail])

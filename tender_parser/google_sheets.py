@@ -715,7 +715,9 @@ class GoogleSheetsRegistry:
             title = str(properties.get("title", ""))
             sheet_id = properties.get("sheetId")
             row_count = properties.get("gridProperties", {}).get("rowCount")
-            needed = len(values_by_sheet.get(title, [])) + 1
+            # Keep a valid first-unused row for the subsequent :clear request.
+            # Header + N data rows alone leaves A(N+2):P outside the grid.
+            needed = len(values_by_sheet.get(title, [])) + 2
             if (
                 title not in values_by_sheet
                 or sheet_id is None

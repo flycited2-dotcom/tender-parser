@@ -45,13 +45,19 @@ class SearchResponse:
     def raise_for_status(self) -> None:
         return None
 
+    def iter_content(self, chunk_size):
+        yield self.text.encode('utf-8')
+
+    def close(self):
+        pass
+
 
 class SearchSession:
     def __init__(self) -> None:
         self.headers: dict[str, str] = {}
         self.requested_urls: list[str] = []
 
-    def get(self, url: str, timeout: int) -> SearchResponse:
+    def get(self, url: str, timeout: int, stream=False) -> SearchResponse:
         self.requested_urls.append(url)
         return SearchResponse(url)
 

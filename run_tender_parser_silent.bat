@@ -11,6 +11,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 call ".venv\Scripts\activate.bat"
+python -m tender_parser.delivery_retry --base-dir . >> "logs\daily.log" 2>&1
 if "%TENDER_PARSER_PROFILE%"=="" set "TENDER_PARSER_PROFILE=fast"
 echo [%date% %time%] Start >> "logs\daily.log"
 echo [%date% %time%] Profile %TENDER_PARSER_PROFILE% >> "logs\daily.log"

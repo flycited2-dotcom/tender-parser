@@ -162,7 +162,7 @@ def test_customer_sheet_capacity_grows_beyond_old_thousand_row_limit() -> None:
     assert request == {
         "sheetId": 7,
         "dimension": "ROWS",
-        "length": 501,
+        "length": 502,
     }
 
 
